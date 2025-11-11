@@ -1,13 +1,25 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 
 // --- TYPE DEFINITIONS ---
 interface ImageFile {
   id: string;
+  type: 'image';
   file: File;
   previewUrl: string;
   caption?: string;
 }
+
+interface VideoFile {
+    id: string;
+    type: 'video';
+    file: File;
+    previewUrl: string;
+}
+
+type MediaFile = ImageFile | VideoFile;
+
 
 // --- HELPER FUNCTIONS ---
 const fileToGenerativePart = async (file: File) => {
@@ -45,6 +57,11 @@ const InfoIcon: React.FC<{ className?: string }> = ({ className }) => (
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
 );
+const FilmIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+    </svg>
+);
 
 
 // --- UI HELPER COMPONENTS ---
@@ -66,7 +83,7 @@ const ToggleSwitch: React.FC<{ enabled: boolean; onChange: (enabled: boolean) =>
 
 // --- MAIN APPLICATION COMPONENT ---
 export default function App() {
-  const [images, setImages] = useState<ImageFile[]>([]);
+  const [media, setMedia] = useState<MediaFile[]>([]);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [interval, setIntervalValue] = useState<number>(5);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -76,32 +93,87 @@ export default function App() {
   const [showClock, setShowClock] = useState<boolean>(true);
   const [smartCaptionsEnabled, setSmartCaptionsEnabled] = useState<boolean>(false);
   const [captionStatus, setCaptionStatus] = useState<'idle' | 'generating' | 'done' | 'error'>('idle');
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
 
-  const imageInputRef = useRef<HTMLInputElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  
+  const MAX_IMAGES = 30;
+  const MAX_VIDEOS = 1;
+  const MAX_VIDEO_DURATION = 30; // in seconds
 
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const { imageCount, videoCount } = useMemo(() => {
+    return media.reduce((acc, item) => {
+      if (item.type === 'image') acc.imageCount++;
+      if (item.type === 'video') acc.videoCount++;
+      return acc;
+    }, { imageCount: 0, videoCount: 0 });
+  }, [media]);
+
+  const handleMediaUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
-    const newImages = files.map((file: File) => ({
-      id: `${file.name}-${Date.now()}`,
-      file: file,
-      previewUrl: URL.createObjectURL(file),
-    }));
-    
-    setImages(prev => {
-        const combined = [...prev, ...newImages];
-        if(combined.length > 20) {
-            alert("You can only upload a maximum of 20 images.");
-            return prev.slice(0, 20);
+    if (!files.length) return;
+
+    let updatedMedia = [...media];
+
+    const processFiles = async () => {
+      for (const file of files) {
+        // Fix: Add a type guard to ensure 'file' is a File object.
+        if (!(file instanceof File)) continue;
+        const currentImagesCount = updatedMedia.filter(m => m.type === 'image').length;
+        const currentVideosCount = updatedMedia.filter(m => m.type === 'video').length;
+
+        if (file.type.startsWith('image/')) {
+          if (currentImagesCount < MAX_IMAGES) {
+            updatedMedia.push({
+              id: `${file.name}-${Date.now()}`,
+              type: 'image',
+              file: file,
+              previewUrl: URL.createObjectURL(file),
+            });
+          } else {
+            alert(`Maximum of ${MAX_IMAGES} images reached. Some images were not uploaded.`);
+            break; 
+          }
+        } else if (file.type.startsWith('video/')) {
+          if (currentVideosCount < MAX_VIDEOS) {
+            const duration = await new Promise<number>((resolve) => {
+              const videoEl = document.createElement('video');
+              videoEl.preload = 'metadata';
+              videoEl.onloadedmetadata = () => {
+                window.URL.revokeObjectURL(videoEl.src);
+                resolve(videoEl.duration);
+              };
+              videoEl.src = URL.createObjectURL(file);
+            });
+
+            if (duration > MAX_VIDEO_DURATION) {
+              alert(`Video "${file.name}" exceeds the ${MAX_VIDEO_DURATION}s limit and was not uploaded.`);
+              continue;
+            }
+            
+            updatedMedia.push({
+              id: `${file.name}-${Date.now()}`,
+              type: 'video',
+              file: file,
+              previewUrl: URL.createObjectURL(file),
+            });
+
+          } else {
+            alert(`Maximum of ${MAX_VIDEOS} video reached. Some videos were not uploaded.`);
+          }
         }
-        return combined;
-    });
+      }
+      setMedia(updatedMedia);
+    };
+
+    processFiles();
   };
   
-  const removeImage = (id: string) => {
-    setImages(prev => prev.filter(image => {
-        if (image.id === id) {
-            URL.revokeObjectURL(image.previewUrl);
+  const removeMedia = (id: string) => {
+    setMedia(prev => prev.filter(item => {
+        if (item.id === id) {
+            URL.revokeObjectURL(item.previewUrl);
             return false;
         }
         return true;
@@ -118,17 +190,16 @@ export default function App() {
   const generateCaptions = useCallback(async () => {
     if (!smartCaptionsEnabled || captionStatus === 'generating') return;
 
-    const imagesToCaption = images.filter(img => !img.caption);
+    const imagesToCaption = media.filter((item): item is ImageFile => item.type === 'image' && !item.caption);
     if (imagesToCaption.length === 0) {
-        if(images.length > 0) setCaptionStatus('done');
+        if (media.length > 0) setCaptionStatus('done');
         return;
     }
 
     setCaptionStatus('generating');
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      // Use a mutable copy for updates within the loop
-      const updatedImages = [...images];
+      const updatedMedia = [...media];
 
       for (const imageFile of imagesToCaption) {
         const imagePart = await fileToGenerativePart(imageFile.file);
@@ -138,30 +209,61 @@ export default function App() {
         });
         const caption = response.text;
         
-        const index = updatedImages.findIndex(img => img.id === imageFile.id);
-        if (index !== -1) {
-            updatedImages[index] = { ...updatedImages[index], caption: caption.trim() };
+        const index = updatedMedia.findIndex(item => item.id === imageFile.id);
+        if (index !== -1 && updatedMedia[index].type === 'image') {
+            (updatedMedia[index] as ImageFile).caption = caption.trim();
         }
       }
-      setImages(updatedImages);
+      setMedia(updatedMedia);
       setCaptionStatus('done');
     } catch (error) {
       console.error("Error generating captions:", error);
       setCaptionStatus('error');
     }
-  }, [images, smartCaptionsEnabled, captionStatus]);
+  }, [media, smartCaptionsEnabled, captionStatus]);
 
   useEffect(() => {
     if (smartCaptionsEnabled && captionStatus !== 'done') {
       generateCaptions();
     }
-    if (images.length === 0) {
+    if (media.length === 0) {
         setCaptionStatus('idle');
     }
-  }, [smartCaptionsEnabled, images, generateCaptions, captionStatus]);
+  }, [smartCaptionsEnabled, media, generateCaptions, captionStatus]);
 
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, id: string) => {
+    setDraggedItemId(id);
+    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
 
-  const isReadyToPlay = images.length > 0 && audioFile;
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault(); 
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetId: string) => {
+    e.preventDefault();
+    const sourceId = e.dataTransfer.getData('text/plain');
+    if (sourceId && sourceId !== targetId) {
+        setMedia(prevMedia => {
+            const sourceIndex = prevMedia.findIndex(item => item.id === sourceId);
+            const targetIndex = prevMedia.findIndex(item => item.id === targetId);
+            if (sourceIndex === -1 || targetIndex === -1) return prevMedia;
+
+            const newMedia = [...prevMedia];
+            const [draggedItem] = newMedia.splice(sourceIndex, 1);
+            newMedia.splice(targetIndex, 0, draggedItem);
+            return newMedia;
+        });
+    }
+    setDraggedItemId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItemId(null);
+  };
+
+  const isReadyToPlay = media.length > 0 && audioFile;
   const isWorking = captionStatus === 'generating';
 
   return (
@@ -180,26 +282,44 @@ export default function App() {
         </header>
 
         <main className="space-y-12">
-          {/* Step 1: Image Upload */}
+          {/* Step 1: Media Upload */}
           <section className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 shadow-lg">
-            <h2 className="text-2xl font-semibold mb-4 border-b border-gray-600 pb-2">1. Upload Your Images (up to 20)</h2>
+            <h2 className="text-2xl font-semibold mb-4 border-b border-gray-600 pb-2">1. Upload Your Media (up to {MAX_IMAGES} images & {MAX_VIDEOS} video)</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-4">
-              {images.map(image => (
-                <div key={image.id} className="relative group aspect-square">
-                  <img src={image.previewUrl} alt={image.file.name} className="w-full h-full object-cover rounded-md shadow-md"/>
-                  <button onClick={() => removeImage(image.id)} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {media.map(item => (
+                <div 
+                    key={item.id} 
+                    className={`relative group aspect-square cursor-move transition-opacity duration-300 ${draggedItemId === item.id ? 'opacity-30' : 'opacity-100'}`}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, item.id)}
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, item.id)}
+                    onDragEnd={handleDragEnd}
+                >
+                  {item.type === 'image' ? (
+                      <img src={item.previewUrl} alt={item.file.name} className="w-full h-full object-cover rounded-md shadow-md pointer-events-none"/>
+                  ) : (
+                      <video src={item.previewUrl} className="w-full h-full object-cover rounded-md shadow-md pointer-events-none" />
+                  )}
+                  {item.type === 'video' && (
+                    <div className="absolute inset-0 bg-black/30 flex items-center justify-center rounded-md pointer-events-none">
+                      <FilmIcon className="w-8 h-8 text-white opacity-75" />
+                    </div>
+                  )}
+                  <button onClick={() => removeMedia(item.id)} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 cursor-pointer">
                     <XIcon className="w-4 h-4" />
                   </button>
                 </div>
               ))}
-              {images.length < 20 && (
-                <button onClick={() => imageInputRef.current?.click()} className="flex items-center justify-center aspect-square border-2 border-dashed border-gray-500 rounded-md hover:bg-gray-700 hover:border-purple-500 transition-colors">
+              {(imageCount < MAX_IMAGES || videoCount < MAX_VIDEOS) && (
+                <button onClick={() => mediaInputRef.current?.click()} className="flex items-center justify-center aspect-square border-2 border-dashed border-gray-500 rounded-md hover:bg-gray-700 hover:border-purple-500 transition-colors">
                   <UploadIcon className="w-8 h-8 text-gray-400" />
                 </button>
               )}
             </div>
-            <input type="file" ref={imageInputRef} onChange={handleImageUpload} accept="image/*" multiple className="hidden"/>
-            <p className="text-sm text-gray-400">{images.length} / 20 images uploaded.</p>
+            <input type="file" ref={mediaInputRef} onChange={handleMediaUpload} accept="image/*,video/*" multiple className="hidden"/>
+            <p className="text-sm text-gray-400">{imageCount} / {MAX_IMAGES} images | {videoCount} / {MAX_VIDEOS} video uploaded.</p>
+            <p className="text-sm text-gray-500 mt-2">Tip: Drag and drop your media to change the order.</p>
           </section>
 
           {/* Step 2: Audio Upload */}
@@ -274,7 +394,7 @@ export default function App() {
                   Publish
                 </button>
             </div>
-            {!isReadyToPlay && <p className="mt-4 text-yellow-400">Please upload at least one image and one audio file to proceed.</p>}
+            {!isReadyToPlay && <p className="mt-4 text-yellow-400">Please upload at least one image/video and one audio file to proceed.</p>}
             {isWorking && <p className="mt-4 text-purple-400">Generating smart captions, please wait...</p>}
           </section>
         </main>
@@ -282,7 +402,7 @@ export default function App() {
 
       {isPlaying && isReadyToPlay && (
         <SlideshowPlayer 
-          images={images}
+          media={media}
           audioFile={audioFile}
           interval={interval}
           onClose={() => setIsPlaying(false)}
@@ -308,16 +428,16 @@ export default function App() {
                 </p>
                 <h4 className="text-xl font-semibold text-purple-300 mb-3">How to Use:</h4>
                 <ol className="list-decimal list-inside space-y-2 text-gray-300">
-                    <li><strong>Upload Images:</strong> Click the upload area to select up to 20 of your favorite photos. You can remove any image by hovering over it and clicking the 'X' button.</li>
+                    <li><strong>Upload Media:</strong> Click the upload area to select up to {MAX_IMAGES} images and {MAX_VIDEOS} video (max 30s). You can remove any item by hovering over it and clicking the 'X' button. You can also drag-and-drop media to reorder it.</li>
                     <li><strong>Add Music:</strong> Click 'Select Song' to choose an audio file from your device. This will be the soundtrack for your slideshow.</li>
                     <li><strong>Configure:</strong> Adjust the settings to your liking.
                         <ul className="list-disc list-inside ml-6 mt-2 text-gray-400">
-                            <li><strong>Slide Speed:</strong> How long each photo is displayed.</li>
+                            <li><strong>Slide Speed:</strong> How long each photo is displayed. Videos play for their full duration.</li>
                             <li><strong>Slide Style:</strong> The transition animation between photos.</li>
                             <li><strong>Display Options:</strong> Toggle the date/clock or enable AI-powered 'Smart Captions' for your images.</li>
                         </ul>
                     </li>
-                    <li><strong>Preview & Publish:</strong> Once you've uploaded at least one image and a song, you can preview the slideshow, play it full screen, or use the 'Publish' button to simulate sending it to a smart TV screensaver.</li>
+                    <li><strong>Preview & Publish:</strong> Once you've uploaded media and a song, you can preview the slideshow, play it full screen, or use the 'Publish' button to simulate sending it to a smart TV screensaver.</li>
                 </ol>
                 <div className="text-right mt-8">
                     <button onClick={() => setShowInfoModal(false)} className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-6 rounded-md transition-colors">
@@ -349,7 +469,7 @@ export default function App() {
 
 // --- SLIDESHOW PLAYER COMPONENT ---
 interface SlideshowPlayerProps {
-    images: ImageFile[];
+    media: MediaFile[];
     audioFile: File;
     interval: number;
     onClose: () => void;
@@ -358,9 +478,10 @@ interface SlideshowPlayerProps {
     smartCaptionsEnabled: boolean;
 }
 
-const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, interval, onClose, slideStyle, showClock, smartCaptionsEnabled }) => {
+const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ media, audioFile, interval, onClose, slideStyle, showClock, smartCaptionsEnabled }) => {
     const [currentIndex, setCurrentIndex] = useState(0);
     const audioRef = useRef<HTMLAudioElement>(null);
+    const videoRef = useRef<HTMLVideoElement>(null);
     const fadeOutIntervalRef = useRef<number | null>(null);
 
     const audioUrl = useMemo(() => URL.createObjectURL(audioFile), [audioFile]);
@@ -371,6 +492,10 @@ const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, in
             clearInterval(fadeOutIntervalRef.current);
         }
     }, [audioUrl]);
+    
+    const advanceSlide = useCallback(() => {
+        setCurrentIndex(prev => (prev + 1) % media.length);
+    }, [media.length]);
 
     useEffect(() => {
         document.body.style.overflow = 'hidden';
@@ -388,40 +513,53 @@ const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, in
         };
     }, [onClose, cleanup]);
     
-    // Timer to advance the slide
+    // Timer to advance the slide (for images only)
     useEffect(() => {
-        if (images.length < 2) return; // No need for a timer if there's only one image
-        const slideTimer = setInterval(() => {
-            setCurrentIndex(prev => (prev + 1) % images.length);
-        }, interval * 1000);
+        if (media.length < 2) return;
+        
+        const currentItem = media[currentIndex];
+        let slideTimer: number | undefined;
 
-        return () => clearInterval(slideTimer);
-    }, [images.length, interval]);
+        if (currentItem.type === 'image') {
+            slideTimer = window.setInterval(advanceSlide, interval * 1000);
+        }
+
+        return () => {
+            if (slideTimer) clearInterval(slideTimer);
+        }
+    }, [media, currentIndex, interval, advanceSlide]);
+    
+    // Autoplay video when its slide is active
+    useEffect(() => {
+        const currentItem = media[currentIndex];
+        if (currentItem.type === 'video' && videoRef.current) {
+            videoRef.current.currentTime = 0;
+            videoRef.current.play().catch(error => console.warn("Video playback failed:", error));
+        }
+    }, [currentIndex, media]);
+
 
     // Audio control for fade-out and looping
     useEffect(() => {
         const audioEl = audioRef.current;
         if (!audioEl) return;
 
-        // Clear any ongoing fadeout when the slide changes
         if (fadeOutIntervalRef.current) {
             clearInterval(fadeOutIntervalRef.current);
             fadeOutIntervalRef.current = null;
         }
 
-        // When slideshow loops to the first image, reset audio
         if (currentIndex === 0) {
             audioEl.volume = 1.0;
             audioEl.currentTime = 0;
             audioEl.play().catch(error => console.warn("Audio playback failed:", error));
         }
 
-        // When the last image is displayed, start fading out the audio
-        if (currentIndex === images.length - 1 && images.length > 1) {
+        if (currentIndex === media.length - 1 && media.length > 1) {
             const fadeDurationMs = interval * 1000;
             if (fadeDurationMs <= 0) return;
 
-            const tickIntervalMs = 50; // How often to update the volume
+            const tickIntervalMs = 50;
             const totalTicks = fadeDurationMs / tickIntervalMs;
             const volumeDecrement = audioEl.volume / totalTicks;
 
@@ -435,7 +573,7 @@ const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, in
                 }
             }, tickIntervalMs);
         }
-    }, [currentIndex, images.length, interval]);
+    }, [currentIndex, media.length, interval]);
     
     const getAnimationClass = (style: string) => {
         switch (style) {
@@ -468,20 +606,29 @@ const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, in
         <div className="fixed inset-0 bg-black z-50 flex items-center justify-center animate-fade-in" onContextMenu={(e) => e.preventDefault()}>
             <div className="w-full h-full relative overflow-hidden">
                 {showClock && <ClockDisplay />}
-                {images.map((image, index) => (
-                    <div key={image.id} className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${index === currentIndex ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}>
-                         {/* Only render the image for the active slide. This ensures the animation class is freshly applied on mount. */}
+                {media.map((item, index) => (
+                    <div key={item.id} className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${index === currentIndex ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}>
                          {index === currentIndex && (
-                             <img 
-                                src={image.previewUrl} 
-                                alt={`Slideshow image ${index + 1}`} 
-                                className={`w-full h-full object-contain ${getAnimationClass(slideStyle)}`} 
-                              />
+                             item.type === 'image' ? (
+                                <img 
+                                    src={item.previewUrl} 
+                                    alt={`Slideshow item ${index + 1}`} 
+                                    className={`w-full h-full object-contain ${getAnimationClass(slideStyle)}`} 
+                                />
+                             ) : (
+                                <video
+                                    ref={videoRef}
+                                    src={item.previewUrl}
+                                    onEnded={advanceSlide}
+                                    muted
+                                    className="w-full h-full object-contain"
+                                />
+                             )
                          )}
-                        {smartCaptionsEnabled && image.caption && index === currentIndex && (
+                        {smartCaptionsEnabled && item.type === 'image' && item.caption && index === currentIndex && (
                             <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/70 to-transparent z-20 animate-fade-in">
                                 <p className="text-center text-white text-xl sm:text-2xl drop-shadow-lg">
-                                    {image.caption}
+                                    {item.caption}
                                 </p>
                             </div>
                         )}
