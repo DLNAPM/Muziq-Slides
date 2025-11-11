@@ -356,41 +356,44 @@ const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, in
         return () => clearInterval(slideTimer);
     }, [images.length, interval]);
 
-    // Audio fade-out logic
+    // Audio control for fade-out and looping
     useEffect(() => {
         const audioEl = audioRef.current;
         if (!audioEl) return;
-        
-        const slideshowDuration = images.length * interval;
-        const fadeStartTime = slideshowDuration - 10;
-        
-        const checkFade = () => {
-            const timeInSlideshow = (audioEl.currentTime % slideshowDuration);
-            if(timeInSlideshow >= fadeStartTime && fadeOutIntervalRef.current === null) {
-                let volume = audioEl.volume;
-                fadeOutIntervalRef.current = window.setInterval(() => {
-                    volume -= 0.05;
-                    if (volume <= 0) {
-                        volume = 0;
-                        if(fadeOutIntervalRef.current) clearInterval(fadeOutIntervalRef.current);
+
+        // Clear any ongoing fadeout when the slide changes
+        if (fadeOutIntervalRef.current) {
+            clearInterval(fadeOutIntervalRef.current);
+            fadeOutIntervalRef.current = null;
+        }
+
+        // When slideshow loops to the first image, reset audio
+        if (currentIndex === 0) {
+            audioEl.volume = 1.0;
+            audioEl.currentTime = 0;
+            audioEl.play().catch(error => console.warn("Audio playback failed:", error));
+        }
+
+        // When the last image is displayed, start fading out the audio
+        if (currentIndex === images.length - 1 && images.length > 1) {
+            const fadeDurationMs = interval * 1000;
+            if (fadeDurationMs <= 0) return;
+
+            const tickIntervalMs = 50; // How often to update the volume
+            const totalTicks = fadeDurationMs / tickIntervalMs;
+            const volumeDecrement = audioEl.volume / totalTicks;
+
+            fadeOutIntervalRef.current = window.setInterval(() => {
+                if (audioEl) {
+                    audioEl.volume = Math.max(0, audioEl.volume - volumeDecrement);
+                    if (audioEl.volume <= 0) {
+                        if (fadeOutIntervalRef.current) clearInterval(fadeOutIntervalRef.current);
                         fadeOutIntervalRef.current = null;
                     }
-                    audioEl.volume = Math.max(0, volume);
-                }, 100); // fade over 2 seconds
-            } else if (timeInSlideshow < fadeStartTime && audioEl.volume < 1.0 && fadeOutIntervalRef.current === null) {
-                audioEl.volume = 1.0;
-            }
-        };
-        
-        audioEl.addEventListener('timeupdate', checkFade);
-
-        return () => {
-            audioEl.removeEventListener('timeupdate', checkFade);
-            if(fadeOutIntervalRef.current) {
-                clearInterval(fadeOutIntervalRef.current);
-            }
+                }
+            }, tickIntervalMs);
         }
-    }, [audioRef, images.length, interval]);
+    }, [currentIndex, images.length, interval]);
     
     const getAnimationClass = (style: string) => {
         switch (style) {
@@ -449,7 +452,7 @@ const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, in
                 <span className="sr-only">Close Slideshow</span>
             </button>
 
-            <audio ref={audioRef} src={audioUrl} autoPlay loop onCanPlay={(e) => e.currentTarget.volume = 1.0}></audio>
+            <audio ref={audioRef} src={audioUrl} autoPlay onCanPlay={(e) => e.currentTarget.volume = 1.0}></audio>
         </div>
     );
 };
