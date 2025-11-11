@@ -157,12 +157,6 @@ export default function App() {
   const isReadyToPlay = images.length > 0 && audioFile;
   const isWorking = captionStatus === 'generating';
 
-  useEffect(() => {
-    return () => {
-      images.forEach(image => URL.revokeObjectURL(image.previewUrl));
-    };
-  }, [images]);
-
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans p-4 sm:p-6 lg:p-8">
       <div className="max-w-6xl mx-auto">
