@@ -370,7 +370,7 @@ export default function App() {
         const imagePart = await fileToGenerativePart(imageFile.file);
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: [{ parts: [imagePart, { text: "Describe this image in a short, one-sentence caption for a photo slideshow." }] }],
+            contents: { parts: [imagePart, { text: "Describe this image in a short, one-sentence caption for a photo slideshow." }] },
         });
         const caption = response.text;
         
