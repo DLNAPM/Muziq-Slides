@@ -255,10 +255,14 @@ export default function App() {
           
           {/* Step 4: Preview & Publish */}
           <section className="text-center py-6">
-            <div className="flex justify-center items-center gap-4">
+            <div className="flex justify-center items-center flex-wrap gap-4">
                 <button onClick={() => setIsPlaying(true)} disabled={!isReadyToPlay || isWorking} className="flex items-center space-x-2 text-lg font-bold bg-green-600 hover:bg-green-500 text-white py-3 px-8 rounded-lg transition-all disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 shadow-lg">
                   <PlayIcon className="w-6 h-6"/>
                   <span>Preview Slideshow</span>
+                </button>
+                <button onClick={() => setIsPlaying(true)} disabled={!isReadyToPlay || isWorking} className="flex items-center space-x-2 text-lg font-bold bg-purple-600 hover:bg-purple-500 text-white py-3 px-8 rounded-lg transition-all disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 shadow-lg">
+                  <PlayIcon className="w-6 h-6"/>
+                  <span>Play Slideshow</span>
                 </button>
                 <button onClick={() => setShowPublishedModal(true)} disabled={!isReadyToPlay || isWorking} className="text-lg font-bold bg-blue-600 hover:bg-blue-500 text-white py-3 px-8 rounded-lg transition-all disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 shadow-lg">
                   Publish
