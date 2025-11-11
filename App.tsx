@@ -40,6 +40,12 @@ const XIcon: React.FC<{ className?: string }> = ({ className }) => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
   </svg>
 );
+const InfoIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+);
+
 
 // --- UI HELPER COMPONENTS ---
 const ToggleSwitch: React.FC<{ enabled: boolean; onChange: (enabled: boolean) => void; label: string; }> = ({ enabled, onChange, label }) => (
@@ -65,6 +71,7 @@ export default function App() {
   const [interval, setIntervalValue] = useState<number>(5);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [showPublishedModal, setShowPublishedModal] = useState<boolean>(false);
+  const [showInfoModal, setShowInfoModal] = useState<boolean>(false);
   const [slideStyle, setSlideStyle] = useState<string>('kenburns');
   const [showClock, setShowClock] = useState<boolean>(true);
   const [smartCaptionsEnabled, setSmartCaptionsEnabled] = useState<boolean>(false);
@@ -161,9 +168,14 @@ export default function App() {
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans p-4 sm:p-6 lg:p-8">
       <div className="max-w-6xl mx-auto">
         <header className="text-center mb-10">
-          <h1 className="text-4xl sm:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-600">
-            Muziq Slides
-          </h1>
+          <div className="flex justify-center items-center gap-4">
+            <h1 className="text-4xl sm:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-600">
+              Muziq Slides
+            </h1>
+            <button onClick={() => setShowInfoModal(true)} className="text-gray-400 hover:text-white transition-colors" aria-label="About this app">
+                <InfoIcon className="w-8 h-8" />
+            </button>
+          </div>
           <p className="mt-2 text-lg text-gray-400">Create your personal photo and music screensaver.</p>
         </header>
 
@@ -278,6 +290,42 @@ export default function App() {
           showClock={showClock}
           smartCaptionsEnabled={smartCaptionsEnabled}
         />
+      )}
+      
+      {showInfoModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 animate-fade-in">
+            <div className="bg-gray-800 p-8 rounded-lg max-w-2xl text-left border border-purple-500 shadow-2xl relative w-full m-4">
+                <button 
+                    onClick={() => setShowInfoModal(false)} 
+                    className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"
+                    aria-label="Close"
+                >
+                    <XIcon className="w-6 h-6" />
+                </button>
+                <h3 className="text-2xl font-bold text-purple-400 mb-4">About Muziq Slides</h3>
+                <p className="text-gray-300 mb-6">
+                    Muziq Slides helps you create beautiful, personalized photo slideshows with your favorite music. It's perfect for reliving memories, creating a custom screensaver, or sharing a visual story with friends and family.
+                </p>
+                <h4 className="text-xl font-semibold text-purple-300 mb-3">How to Use:</h4>
+                <ol className="list-decimal list-inside space-y-2 text-gray-300">
+                    <li><strong>Upload Images:</strong> Click the upload area to select up to 20 of your favorite photos. You can remove any image by hovering over it and clicking the 'X' button.</li>
+                    <li><strong>Add Music:</strong> Click 'Select Song' to choose an audio file from your device. This will be the soundtrack for your slideshow.</li>
+                    <li><strong>Configure:</strong> Adjust the settings to your liking.
+                        <ul className="list-disc list-inside ml-6 mt-2 text-gray-400">
+                            <li><strong>Slide Speed:</strong> How long each photo is displayed.</li>
+                            <li><strong>Slide Style:</strong> The transition animation between photos.</li>
+                            <li><strong>Display Options:</strong> Toggle the date/clock or enable AI-powered 'Smart Captions' for your images.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Preview & Publish:</strong> Once you've uploaded at least one image and a song, you can preview the slideshow, play it full screen, or use the 'Publish' button to simulate sending it to a smart TV screensaver.</li>
+                </ol>
+                <div className="text-right mt-8">
+                    <button onClick={() => setShowInfoModal(false)} className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-6 rounded-md transition-colors">
+                        Got it!
+                    </button>
+                </div>
+            </div>
+        </div>
       )}
 
       {showPublishedModal && (
