@@ -20,6 +20,35 @@ interface VideoFile {
 
 type MediaFile = ImageFile | VideoFile;
 
+interface SlideshowSettings {
+    interval: number;
+    slideStyle: string;
+    showClock: boolean;
+    smartCaptionsEnabled: boolean;
+}
+
+interface SerializedMediaFile {
+    id: string;
+    type: 'image' | 'video';
+    name: string;
+    dataUrl: string;
+    caption?: string;
+}
+
+interface SerializedAudioFile {
+    name: string;
+    dataUrl: string;
+}
+
+interface SavedSlideshow {
+    id: string;
+    name: string;
+    media: SerializedMediaFile[];
+    audio: SerializedAudioFile | null;
+    settings: SlideshowSettings;
+    timestamp: number;
+}
+
 
 // --- HELPER FUNCTIONS ---
 const fileToGenerativePart = async (file: File) => {
@@ -32,6 +61,32 @@ const fileToGenerativePart = async (file: File) => {
         inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
     };
 };
+
+const fileToDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+};
+
+const dataUrlToFile = (dataUrl: string, filename: string): File => {
+    const arr = dataUrl.split(',');
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    if (!mimeMatch) {
+        throw new Error("Could not determine mime type from data URL");
+    }
+    const mime = mimeMatch[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
+};
+
 
 // --- ICON COMPONENTS ---
 const UploadIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -60,6 +115,16 @@ const InfoIcon: React.FC<{ className?: string }> = ({ className }) => (
 const FilmIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+    </svg>
+);
+const TrashIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+);
+const SaveIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
     </svg>
 );
 
@@ -95,12 +160,47 @@ export default function App() {
   const [captionStatus, setCaptionStatus] = useState<'idle' | 'generating' | 'done' | 'error'>('idle');
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
 
+  const [savedSlideshows, setSavedSlideshows] = useState<SavedSlideshow[]>([]);
+  const [activeSlideshowId, setActiveSlideshowId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   
   const MAX_IMAGES = 30;
   const MAX_VIDEOS = 1;
   const MAX_VIDEO_DURATION = 30; // in seconds
+  const MAX_SAVED_SLIDESHOWS = 5;
+
+  const activeSlideshowName = useMemo(() => {
+    if (!activeSlideshowId) return "New Slideshow";
+    return savedSlideshows.find(s => s.id === activeSlideshowId)?.name || "New Slideshow";
+  }, [activeSlideshowId, savedSlideshows]);
+
+  // --- LOCAL STORAGE EFFECTS ---
+  useEffect(() => {
+    try {
+        const storedSlideshows = localStorage.getItem('muziqSlides_saved');
+        if (storedSlideshows) {
+            setSavedSlideshows(JSON.parse(storedSlideshows));
+        }
+    } catch (error) {
+        console.error("Failed to load slideshows from localStorage", error);
+    } finally {
+        setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+        if (!isLoading) {
+            localStorage.setItem('muziqSlides_saved', JSON.stringify(savedSlideshows));
+        }
+    } catch (error) {
+        console.error("Failed to save slideshows to localStorage", error);
+    }
+  }, [savedSlideshows, isLoading]);
+
 
   const { imageCount, videoCount } = useMemo(() => {
     return media.reduce((acc, item) => {
@@ -118,7 +218,6 @@ export default function App() {
 
     const processFiles = async () => {
       for (const file of files) {
-        // Fix: Add a type guard to ensure 'file' is a File object.
         if (!(file instanceof File)) continue;
         const currentImagesCount = updatedMedia.filter(m => m.type === 'image').length;
         const currentVideosCount = updatedMedia.filter(m => m.type === 'video').length;
@@ -263,8 +362,120 @@ export default function App() {
     setDraggedItemId(null);
   };
 
+  const handleNewSlideshow = useCallback(() => {
+    setMedia([]);
+    setAudioFile(null);
+    setIntervalValue(5);
+    setSlideStyle('kenburns');
+    setShowClock(true);
+    setSmartCaptionsEnabled(false);
+    setCaptionStatus('idle');
+    setActiveSlideshowId(null);
+  }, []);
+
+  const handleSaveSlideshow = useCallback(async () => {
+    let slideshowName = activeSlideshowName;
+    if (!activeSlideshowId) {
+        slideshowName = window.prompt("Enter a name for your slideshow:", "My Slideshow");
+        if (!slideshowName) return; // User cancelled
+    }
+    
+    setIsLoading(true);
+    try {
+        const serializedMedia: SerializedMediaFile[] = await Promise.all(
+            media.map(async (m) => ({
+                id: m.id,
+                type: m.type,
+                name: m.file.name,
+                dataUrl: await fileToDataUrl(m.file),
+                caption: m.type === 'image' ? m.caption : undefined,
+            }))
+        );
+
+        const serializedAudio = audioFile ? {
+            name: audioFile.name,
+            dataUrl: await fileToDataUrl(audioFile),
+        } : null;
+        
+        const currentSettings: SlideshowSettings = { interval, slideStyle, showClock, smartCaptionsEnabled };
+
+        if (activeSlideshowId) { // Update existing
+            setSavedSlideshows(prev => prev.map(s => s.id === activeSlideshowId ? { ...s, name: slideshowName, media: serializedMedia, audio: serializedAudio, settings: currentSettings, timestamp: Date.now() } : s));
+        } else { // Create new
+            if (savedSlideshows.length >= MAX_SAVED_SLIDESHOWS) {
+                alert(`You can only save up to ${MAX_SAVED_SLIDESHOWS} slideshows.`);
+                return;
+            }
+            const newId = `slideshow-${Date.now()}`;
+            const newSlideshow: SavedSlideshow = {
+                id: newId,
+                name: slideshowName,
+                media: serializedMedia,
+                audio: serializedAudio,
+                settings: currentSettings,
+                timestamp: Date.now(),
+            };
+            setSavedSlideshows(prev => [...prev, newSlideshow]);
+            setActiveSlideshowId(newId);
+        }
+        alert(`Slideshow "${slideshowName}" saved successfully!`);
+    } catch(error) {
+        console.error("Error saving slideshow:", error);
+        alert("There was an error saving your slideshow.");
+    } finally {
+        setIsLoading(false);
+    }
+  }, [activeSlideshowId, activeSlideshowName, media, audioFile, interval, slideStyle, showClock, smartCaptionsEnabled, savedSlideshows.length]);
+
+  const handleLoadSlideshow = useCallback(async (id: string) => {
+    const slideshowToLoad = savedSlideshows.find(s => s.id === id);
+    if (!slideshowToLoad) return;
+    
+    setIsLoading(true);
+    try {
+        handleNewSlideshow();
+
+        const loadedMedia: MediaFile[] = slideshowToLoad.media.map(m => {
+            const file = dataUrlToFile(m.dataUrl, m.name);
+            return {
+                ...m,
+                file,
+                previewUrl: URL.createObjectURL(file),
+            };
+        });
+        
+        const loadedAudio = slideshowToLoad.audio ? dataUrlToFile(slideshowToLoad.audio.dataUrl, slideshowToLoad.audio.name) : null;
+        
+        setMedia(loadedMedia);
+        setAudioFile(loadedAudio);
+        setIntervalValue(slideshowToLoad.settings.interval);
+        setSlideStyle(slideshowToLoad.settings.slideStyle);
+        setShowClock(slideshowToLoad.settings.showClock);
+        setSmartCaptionsEnabled(slideshowToLoad.settings.smartCaptionsEnabled);
+        setActiveSlideshowId(id);
+    } catch (error) {
+        console.error("Error loading slideshow:", error);
+        alert("There was an error loading the slideshow.");
+    } finally {
+        setIsLoading(false);
+    }
+  }, [savedSlideshows, handleNewSlideshow]);
+
+  const handleDeleteSlideshow = useCallback((id: string) => {
+    const slideshowToDelete = savedSlideshows.find(s => s.id === id);
+    if (!slideshowToDelete) return;
+
+    if (window.confirm(`Are you sure you want to delete "${slideshowToDelete.name}"?`)) {
+        setSavedSlideshows(prev => prev.filter(s => s.id !== id));
+        if (activeSlideshowId === id) {
+            handleNewSlideshow();
+        }
+    }
+  }, [savedSlideshows, activeSlideshowId, handleNewSlideshow]);
+
+
   const isReadyToPlay = media.length > 0 && audioFile;
-  const isWorking = captionStatus === 'generating';
+  const isWorking = captionStatus === 'generating' || isLoading;
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans p-4 sm:p-6 lg:p-8">
@@ -282,9 +493,44 @@ export default function App() {
         </header>
 
         <main className="space-y-12">
-          {/* Step 1: Media Upload */}
+          {/* Step 1: My Slideshows */}
           <section className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 shadow-lg">
-            <h2 className="text-2xl font-semibold mb-4 border-b border-gray-600 pb-2">1. Upload Your Media (up to {MAX_IMAGES} images & {MAX_VIDEOS} video)</h2>
+            <h2 className="text-2xl font-semibold mb-4 border-b border-gray-600 pb-2">1. My Slideshows</h2>
+            {isLoading && <p className="text-center text-purple-400">Loading...</p>}
+            {!isLoading && savedSlideshows.length === 0 && (
+                <div className="text-center py-4">
+                    <p className="text-gray-400 mb-4">You have no saved slideshows. Start by creating one below!</p>
+                </div>
+            )}
+            {!isLoading && savedSlideshows.length > 0 && (
+                <div className="space-y-3 mb-4">
+                    {savedSlideshows.sort((a,b) => b.timestamp - a.timestamp).map(s => (
+                        <div key={s.id} className="bg-gray-700/50 p-3 rounded-md flex items-center justify-between gap-4">
+                            <div>
+                                <p className="font-semibold text-white">{s.name}</p>
+                                <p className="text-xs text-gray-400">Saved: {new Date(s.timestamp).toLocaleString()}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => handleLoadSlideshow(s.id)} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-3 rounded-md transition-colors text-sm">Load</button>
+                                <button onClick={() => handleDeleteSlideshow(s.id)} className="bg-red-600 hover:bg-red-500 text-white font-bold p-2 rounded-md transition-colors"><TrashIcon className="w-5 h-5"/></button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+             <button onClick={handleNewSlideshow} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-colors">
+                + Start a New Slideshow
+            </button>
+          </section>
+
+          <h2 className="text-3xl font-bold text-center text-purple-300 border-t border-b border-gray-700 py-2">
+              Editing: <span className="text-white">{activeSlideshowName}</span>
+          </h2>
+
+
+          {/* Step 2: Media Upload */}
+          <section className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 shadow-lg">
+            <h2 className="text-2xl font-semibold mb-4 border-b border-gray-600 pb-2">2. Upload Your Media (up to {MAX_IMAGES} images & {MAX_VIDEOS} video)</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-4">
               {media.map(item => (
                 <div 
@@ -322,9 +568,9 @@ export default function App() {
             <p className="text-sm text-gray-500 mt-2">Tip: Drag and drop your media to change the order.</p>
           </section>
 
-          {/* Step 2: Audio Upload */}
+          {/* Step 3: Audio Upload */}
           <section className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 shadow-lg">
-            <h2 className="text-2xl font-semibold mb-4 border-b border-gray-600 pb-2">2. Add Your Music</h2>
+            <h2 className="text-2xl font-semibold mb-4 border-b border-gray-600 pb-2">3. Add Your Music</h2>
             <div className="flex items-center space-x-4">
               <button onClick={() => audioInputRef.current?.click()} className="flex-shrink-0 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-colors flex items-center space-x-2">
                 <MusicIcon className="w-5 h-5"/>
@@ -335,9 +581,9 @@ export default function App() {
             <input type="file" ref={audioInputRef} onChange={handleAudioUpload} accept="audio/*" className="hidden"/>
           </section>
 
-          {/* Step 3: Settings */}
+          {/* Step 4: Settings */}
           <section className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 shadow-lg">
-            <h2 className="text-2xl font-semibold mb-4 border-b border-gray-600 pb-2">3. Configure Slideshow</h2>
+            <h2 className="text-2xl font-semibold mb-4 border-b border-gray-600 pb-2">4. Configure Slideshow</h2>
             <div className="space-y-6">
                 <div>
                     <label className="block mb-2 font-medium text-gray-300">Slide Speed (seconds)</label>
@@ -379,23 +625,23 @@ export default function App() {
             </div>
           </section>
           
-          {/* Step 4: Preview & Publish */}
+          {/* Step 5: Finalize */}
           <section className="text-center py-6">
             <div className="flex justify-center items-center flex-wrap gap-4">
+                <button onClick={handleSaveSlideshow} disabled={!isReadyToPlay || isWorking} className="flex items-center space-x-2 text-lg font-bold bg-indigo-600 hover:bg-indigo-500 text-white py-3 px-8 rounded-lg transition-all disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 shadow-lg">
+                    <SaveIcon className="w-6 h-6" />
+                    <span>Save</span>
+                </button>
                 <button onClick={() => setIsPlaying(true)} disabled={!isReadyToPlay || isWorking} className="flex items-center space-x-2 text-lg font-bold bg-green-600 hover:bg-green-500 text-white py-3 px-8 rounded-lg transition-all disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 shadow-lg">
                   <PlayIcon className="w-6 h-6"/>
-                  <span>Preview Slideshow</span>
-                </button>
-                <button onClick={() => setIsPlaying(true)} disabled={!isReadyToPlay || isWorking} className="flex items-center space-x-2 text-lg font-bold bg-purple-600 hover:bg-purple-500 text-white py-3 px-8 rounded-lg transition-all disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 shadow-lg">
-                  <PlayIcon className="w-6 h-6"/>
-                  <span>Play Slideshow</span>
+                  <span>Preview</span>
                 </button>
                 <button onClick={() => setShowPublishedModal(true)} disabled={!isReadyToPlay || isWorking} className="text-lg font-bold bg-blue-600 hover:bg-blue-500 text-white py-3 px-8 rounded-lg transition-all disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 shadow-lg">
                   Publish
                 </button>
             </div>
             {!isReadyToPlay && <p className="mt-4 text-yellow-400">Please upload at least one image/video and one audio file to proceed.</p>}
-            {isWorking && <p className="mt-4 text-purple-400">Generating smart captions, please wait...</p>}
+            {isWorking && <p className="mt-4 text-purple-400">Working, please wait...</p>}
           </section>
         </main>
       </div>
@@ -428,6 +674,7 @@ export default function App() {
                 </p>
                 <h4 className="text-xl font-semibold text-purple-300 mb-3">How to Use:</h4>
                 <ol className="list-decimal list-inside space-y-2 text-gray-300">
+                    <li><strong>Manage Slideshows:</strong> Use the "My Slideshows" area to save, load, delete, or start new projects. You can save up to 5 slideshows.</li>
                     <li><strong>Upload Media:</strong> Click the upload area to select up to {MAX_IMAGES} images and {MAX_VIDEOS} video (max 30s). You can remove any item by hovering over it and clicking the 'X' button. You can also drag-and-drop media to reorder it.</li>
                     <li><strong>Add Music:</strong> Click 'Select Song' to choose an audio file from your device. This will be the soundtrack for your slideshow.</li>
                     <li><strong>Configure:</strong> Adjust the settings to your liking.
@@ -437,7 +684,7 @@ export default function App() {
                             <li><strong>Display Options:</strong> Toggle the date/clock or enable AI-powered 'Smart Captions' for your images.</li>
                         </ul>
                     </li>
-                    <li><strong>Preview & Publish:</strong> Once you've uploaded media and a song, you can preview the slideshow, play it full screen, or use the 'Publish' button to simulate sending it to a smart TV screensaver.</li>
+                    <li><strong>Finalize:</strong> Once you've uploaded media and a song, you can save your progress, preview the slideshow, or use the 'Publish' button to simulate sending it to a smart TV screensaver.</li>
                 </ol>
                 <div className="text-right mt-8">
                     <button onClick={() => setShowInfoModal(false)} className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-6 rounded-md transition-colors">
