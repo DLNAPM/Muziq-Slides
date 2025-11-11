@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 
 // --- TYPE DEFINITIONS ---
@@ -318,11 +318,10 @@ interface SlideshowPlayerProps {
 
 const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, interval, onClose, slideStyle, showClock, smartCaptionsEnabled }) => {
     const [currentIndex, setCurrentIndex] = useState(0);
-    const [imageLoaded, setImageLoaded] = useState(false);
     const audioRef = useRef<HTMLAudioElement>(null);
     const fadeOutIntervalRef = useRef<number | null>(null);
 
-    const audioUrl = URL.createObjectURL(audioFile);
+    const audioUrl = useMemo(() => URL.createObjectURL(audioFile), [audioFile]);
 
     const cleanup = useCallback(() => {
         URL.revokeObjectURL(audioUrl);
@@ -357,12 +356,6 @@ const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, in
         return () => clearInterval(slideTimer);
     }, [images.length, interval]);
 
-    // Reset animation state when the image changes
-    useEffect(() => {
-        setImageLoaded(false);
-    }, [currentIndex]);
-
-
     // Audio fade-out logic
     useEffect(() => {
         const audioEl = audioRef.current;
@@ -371,7 +364,6 @@ const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, in
         const slideshowDuration = images.length * interval;
         const fadeStartTime = slideshowDuration - 10;
         
-        // This effect should only run based on audio element and timing, not current index
         const checkFade = () => {
             const timeInSlideshow = (audioEl.currentTime % slideshowDuration);
             if(timeInSlideshow >= fadeStartTime && fadeOutIntervalRef.current === null) {
@@ -382,7 +374,6 @@ const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, in
                         volume = 0;
                         if(fadeOutIntervalRef.current) clearInterval(fadeOutIntervalRef.current);
                         fadeOutIntervalRef.current = null;
-                        // Don't reset volume here, let the `timeupdate` handle it
                     }
                     audioEl.volume = Math.max(0, volume);
                 }, 100); // fade over 2 seconds
@@ -434,12 +425,14 @@ const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, in
                 {showClock && <ClockDisplay />}
                 {images.map((image, index) => (
                     <div key={image.id} className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${index === currentIndex ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}>
-                         <img 
-                            src={image.previewUrl} 
-                            onLoad={() => index === currentIndex && setImageLoaded(true)}
-                            alt={`Slideshow image ${index + 1}`} 
-                            className={`w-full h-full object-contain ${imageLoaded && index === currentIndex ? getAnimationClass(slideStyle) : 'opacity-0'}`} 
-                          />
+                         {/* Only render the image for the active slide. This ensures the animation class is freshly applied on mount. */}
+                         {index === currentIndex && (
+                             <img 
+                                src={image.previewUrl} 
+                                alt={`Slideshow image ${index + 1}`} 
+                                className={`w-full h-full object-contain ${getAnimationClass(slideStyle)}`} 
+                              />
+                         )}
                         {smartCaptionsEnabled && image.caption && index === currentIndex && (
                             <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/70 to-transparent z-20 animate-fade-in">
                                 <p className="text-center text-white text-xl sm:text-2xl drop-shadow-lg">
