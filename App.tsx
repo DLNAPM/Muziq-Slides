@@ -159,6 +159,7 @@ export default function App() {
   const [smartCaptionsEnabled, setSmartCaptionsEnabled] = useState<boolean>(false);
   const [captionStatus, setCaptionStatus] = useState<'idle' | 'generating' | 'done' | 'error'>('idle');
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [adjustmentNotification, setAdjustmentNotification] = useState<string | null>(null);
 
   const [savedSlideshows, setSavedSlideshows] = useState<SavedSlideshow[]>([]);
   const [activeSlideshowId, setActiveSlideshowId] = useState<string | null>(null);
@@ -166,6 +167,7 @@ export default function App() {
 
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const isAutoAdjusting = useRef(false);
   
   const MAX_IMAGES = 30;
   const MAX_VIDEOS = 1;
@@ -209,6 +211,70 @@ export default function App() {
       return acc;
     }, { imageCount: 0, videoCount: 0 });
   }, [media]);
+
+    // --- SLIDE SPEED AUTO-ADJUSTMENT ---
+    useEffect(() => {
+        if (isAutoAdjusting.current) {
+            isAutoAdjusting.current = false;
+            return;
+        }
+
+        if (!audioFile || imageCount === 0) {
+            if (adjustmentNotification) setAdjustmentNotification(null);
+            return;
+        }
+
+        const calculateAndAdjust = async () => {
+            const audioDuration = await new Promise<number>(resolve => {
+                const audioEl = document.createElement('audio');
+                audioEl.preload = 'metadata';
+                audioEl.onloadedmetadata = () => {
+                    window.URL.revokeObjectURL(audioEl.src);
+                    resolve(audioEl.duration);
+                };
+                audioEl.src = URL.createObjectURL(audioFile);
+            });
+
+            const videoFiles = media.filter((m): m is VideoFile => m.type === 'video');
+            const videoDurations = await Promise.all(
+                videoFiles.map(v => new Promise<number>(resolve => {
+                    const videoEl = document.createElement('video');
+                    videoEl.preload = 'metadata';
+                    videoEl.onloadedmetadata = () => {
+                        window.URL.revokeObjectURL(videoEl.src);
+                        resolve(videoEl.duration);
+                    };
+                    videoEl.src = URL.createObjectURL(v.file);
+                }))
+            );
+            const totalVideoDuration = videoDurations.reduce((sum, duration) => sum + duration, 0);
+
+            const currentTotalSlideshowDuration = (imageCount * interval) + totalVideoDuration;
+
+            if (audioDuration < currentTotalSlideshowDuration) {
+                const availableTimeForImages = audioDuration - totalVideoDuration;
+                if (availableTimeForImages > 0) {
+                    const newInterval = Math.max(1, Math.floor(availableTimeForImages / imageCount));
+                    if (newInterval !== interval) {
+                        isAutoAdjusting.current = true;
+                        setIntervalValue(newInterval);
+                        setAdjustmentNotification(`Slide speed automatically adjusted to ${newInterval}s to match song length.`);
+                    }
+                } else { // Song is shorter than just the video content
+                    if (interval !== 1) {
+                         isAutoAdjusting.current = true;
+                         setIntervalValue(1);
+                         setAdjustmentNotification(`Song is shorter than video content. Slide speed set to minimum (1s).`);
+                    }
+                }
+            } else {
+                if (adjustmentNotification) setAdjustmentNotification(null);
+            }
+        };
+
+        calculateAndAdjust();
+
+    }, [audioFile, media, interval, imageCount, adjustmentNotification]);
 
   const handleMediaUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -304,7 +370,7 @@ export default function App() {
         const imagePart = await fileToGenerativePart(imageFile.file);
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: { parts: [imagePart, { text: "Describe this image in a short, one-sentence caption for a photo slideshow." }] },
+            contents: [{ parts: [imagePart, { text: "Describe this image in a short, one-sentence caption for a photo slideshow." }] }],
         });
         const caption = response.text;
         
@@ -587,6 +653,12 @@ export default function App() {
             <div className="space-y-6">
                 <div>
                     <label className="block mb-2 font-medium text-gray-300">Slide Speed (seconds)</label>
+                    {adjustmentNotification && (
+                        <div className="bg-indigo-900/50 text-indigo-200 text-sm p-3 rounded-md mb-3 flex items-center gap-2">
+                            <InfoIcon className="w-5 h-5 flex-shrink-0" />
+                            <span>{adjustmentNotification}</span>
+                        </div>
+                    )}
                     <div className="flex flex-wrap gap-2">
                     {[1, 5, 10, 15, 20].map(val => (
                         <button key={val} onClick={() => setIntervalValue(val)} className={`px-4 py-2 rounded-md font-semibold transition-colors ${interval === val ? 'bg-purple-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>
