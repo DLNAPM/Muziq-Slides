@@ -49,6 +49,8 @@ interface SavedSlideshow {
     timestamp: number;
 }
 
+// --- GEMINI API SETUP ---
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // --- HELPER FUNCTIONS ---
 const fileToGenerativePart = async (file: File) => {
@@ -363,7 +365,6 @@ export default function App() {
 
     setCaptionStatus('generating');
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const updatedMedia = [...media];
 
       for (const imageFile of imagesToCaption) {
