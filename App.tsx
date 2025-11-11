@@ -129,11 +129,21 @@ const SaveIcon: React.FC<{ className?: string }> = ({ className }) => (
 
 
 // --- UI HELPER COMPONENTS ---
-const ToggleSwitch: React.FC<{ enabled: boolean; onChange: (enabled: boolean) => void; label: string; }> = ({ enabled, onChange, label }) => (
-    <div className="flex items-center">
-        <label className="mr-3 font-medium text-gray-300 cursor-pointer" onClick={() => onChange(!enabled)}>{label}</label>
+const Tooltip: React.FC<{ message: string; children: React.ReactNode }> = ({ message, children }) => (
+    <div className="relative flex items-center group">
+        {children}
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-xs px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg shadow-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none border border-gray-600 z-10">
+            {message}
+        </div>
+    </div>
+);
+
+const ToggleSwitch: React.FC<{ enabled: boolean; onChange: (enabled: boolean) => void; label: string; disabled?: boolean; }> = ({ enabled, onChange, label, disabled = false }) => (
+    <div className={`flex items-center ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
+        <label className={`mr-3 font-medium text-gray-300 ${!disabled && 'cursor-pointer'}`} onClick={() => !disabled && onChange(!enabled)}>{label}</label>
         <button
-            onClick={() => onChange(!enabled)}
+            onClick={() => !disabled && onChange(!enabled)}
+            disabled={disabled}
             className={`${enabled ? 'bg-purple-600' : 'bg-gray-600'} relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-purple-500`}
             aria-checked={enabled}
         >
@@ -159,6 +169,7 @@ export default function App() {
   const [captionStatus, setCaptionStatus] = useState<'idle' | 'generating' | 'done' | 'error'>('idle');
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [adjustmentNotification, setAdjustmentNotification] = useState<string | null>(null);
+  const [isApiKeyAvailable, setIsApiKeyAvailable] = useState<boolean>(false);
 
   const [savedSlideshows, setSavedSlideshows] = useState<SavedSlideshow[]>([]);
   const [activeSlideshowId, setActiveSlideshowId] = useState<string | null>(null);
@@ -177,6 +188,11 @@ export default function App() {
     if (!activeSlideshowId) return "New Slideshow";
     return savedSlideshows.find(s => s.id === activeSlideshowId)?.name || "New Slideshow";
   }, [activeSlideshowId, savedSlideshows]);
+
+  // Check for API Key
+  useEffect(() => {
+    setIsApiKeyAvailable(!!process.env.API_KEY);
+  }, []);
 
   // --- LOCAL STORAGE EFFECTS ---
   useEffect(() => {
@@ -352,7 +368,7 @@ export default function App() {
   };
 
   const generateCaptions = useCallback(async () => {
-    if (!smartCaptionsEnabled || captionStatus === 'generating') return;
+    if (!smartCaptionsEnabled || captionStatus === 'generating' || !isApiKeyAvailable) return;
 
     const imagesToCaption = media.filter((item): item is ImageFile => item.type === 'image' && !item.caption);
     if (imagesToCaption.length === 0) {
@@ -384,7 +400,7 @@ export default function App() {
       console.error("Error generating captions:", error);
       setCaptionStatus('error');
     }
-  }, [media, smartCaptionsEnabled, captionStatus]);
+  }, [media, smartCaptionsEnabled, captionStatus, isApiKeyAvailable]);
 
   useEffect(() => {
     if (smartCaptionsEnabled && captionStatus !== 'done') {
@@ -687,9 +703,29 @@ export default function App() {
                     <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
                         <ToggleSwitch enabled={showClock} onChange={setShowClock} label="Date and Clock" />
                         <div className="flex items-center gap-3">
-                            <ToggleSwitch enabled={smartCaptionsEnabled} onChange={setSmartCaptionsEnabled} label="Smart Captions" />
-                            {captionStatus === 'generating' && <div className="w-5 h-5 border-2 border-dashed rounded-full animate-spin border-purple-400"></div>}
-                            {captionStatus === 'error' && <p className="text-sm text-red-400">Error.</p>}
+                            {isApiKeyAvailable ? (
+                                <div className="flex items-center gap-3">
+                                    <ToggleSwitch
+                                        enabled={smartCaptionsEnabled}
+                                        onChange={setSmartCaptionsEnabled}
+                                        label="Smart Captions"
+                                    />
+                                    {captionStatus === 'generating' && <div className="w-5 h-5 border-2 border-dashed rounded-full animate-spin border-purple-400"></div>}
+                                    {captionStatus === 'error' && <p className="text-sm text-red-400">Error.</p>}
+                                </div>
+                            ) : (
+                                <Tooltip message="The Google AI API key is not configured. This feature is unavailable.">
+                                    <div className="flex items-center gap-3">
+                                        <ToggleSwitch
+                                            enabled={false}
+                                            onChange={() => {}}
+                                            label="Smart Captions"
+                                            disabled={true}
+                                        />
+                                        <InfoIcon className="w-5 h-5 text-yellow-400" />
+                                    </div>
+                                </Tooltip>
+                            )}
                         </div>
                     </div>
                 </div>
