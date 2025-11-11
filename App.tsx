@@ -347,14 +347,21 @@ const SlideshowPlayer: React.FC<SlideshowPlayerProps> = ({ images, audioFile, in
         };
     }, [onClose, cleanup]);
     
+    // Timer to advance the slide
     useEffect(() => {
-        setImageLoaded(false); // Reset loaded state for new image
+        if (images.length < 2) return; // No need for a timer if there's only one image
         const slideTimer = setInterval(() => {
             setCurrentIndex(prev => (prev + 1) % images.length);
         }, interval * 1000);
 
         return () => clearInterval(slideTimer);
-    }, [images.length, interval, currentIndex]);
+    }, [images.length, interval]);
+
+    // Reset animation state when the image changes
+    useEffect(() => {
+        setImageLoaded(false);
+    }, [currentIndex]);
+
 
     // Audio fade-out logic
     useEffect(() => {
