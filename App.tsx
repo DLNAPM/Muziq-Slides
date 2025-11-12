@@ -1,45 +1,31 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
-// --- FIREBASE V9+ MODULAR IMPORTS ---
-// This is the modern, recommended way to use Firebase.
-// Fix: Switched to named imports for Firebase v9+ modular SDK
-import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut, User } from 'firebase/auth';
-import { 
-    getFirestore, 
-    Timestamp, 
-    serverTimestamp, 
-    setDoc, 
-    doc, 
-    addDoc, 
-    collection, 
-    deleteDoc, 
-    query, 
-    where, 
-    orderBy, 
-    onSnapshot 
-} from 'firebase/firestore';
+// Fix: Use namespace imports for Firebase to avoid module resolution issues.
+import * as firebaseApp from 'firebase/app';
+import * as firebaseAuth from 'firebase/auth';
+import * as firestore from 'firebase/firestore';
+import * as firebaseStorage from 'firebase/storage';
 
 
 // --- FIREBASE CONFIGURATION ---
-// IMPORTANT: Replace these placeholder values with your actual Firebase project configuration.
-// You can find this in your Firebase project settings under "General".
 const firebaseConfig = {
   apiKey: "AIzaSyDT9WDzU6HMO7_-qk9Kl4jc9JigiN9_JiI",
   authDomain: "muziq-slides.firebaseapp.com",
   projectId: "muziq-slides",
-  storageBucket: "muziq-slides.firebasestorage.app",
+  storageBucket: "muziq-slides.appspot.com",
   messagingSenderId: "577247718021",
   appId: "1:577247718021:web:4ee585b9aad338501797ec",
   measurementId: "G-SKRCL4J4GD"
 };
 
 
-// --- FIREBASE V9+ INITIALIZATION ---
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// --- FIREBASE INITIALIZATION (v9+ Syntax) ---
+// Fix: Use prefixed functions from namespace imports.
+const app = firebaseApp.initializeApp(firebaseConfig);
+const auth = firebaseAuth.getAuth(app);
+const db = firestore.getFirestore(app);
+const storage = firebaseStorage.getStorage(app);
 
 
 // --- TYPE DEFINITIONS ---
@@ -71,16 +57,17 @@ interface SerializedMediaFile {
     id: string;
     type: 'image' | 'video';
     name: string;
-    dataUrl: string;
+    url: string; 
+    storagePath: string;
     caption?: string;
 }
 
 interface SerializedAudioFile {
     name: string;
-    dataUrl: string;
+    url: string;
+    storagePath: string;
 }
 
-// Updated to match Firestore data structure with V9 Timestamp
 interface SavedSlideshow {
     id: string; 
     userId: string;
@@ -88,8 +75,8 @@ interface SavedSlideshow {
     media: SerializedMediaFile[];
     audio: SerializedAudioFile | null;
     settings: SlideshowSettings;
-    // Fix: Use Timestamp type from firestore
-    timestamp?: Timestamp;
+    // Fix: Use prefixed type from namespace import.
+    timestamp?: firestore.Timestamp;
 }
 
 // --- HELPER FUNCTIONS ---
@@ -104,29 +91,10 @@ const fileToGenerativePart = async (file: File) => {
     };
 };
 
-const fileToDataUrl = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-    });
-};
-
-const dataUrlToFile = (dataUrl: string, filename: string): File => {
-    const arr = dataUrl.split(',');
-    const mimeMatch = arr[0].match(/:(.*?);/);
-    if (!mimeMatch) {
-        throw new Error("Could not determine mime type from data URL");
-    }
-    const mime = mimeMatch[1];
-    const bstr = atob(arr[1]);
-    let n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    while (n--) {
-        u8arr[n] = bstr.charCodeAt(n);
-    }
-    return new File([u8arr], filename, { type: mime });
+const urlToFile = async (url: string, filename: string): Promise<File> => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new File([blob], filename, { type: blob.type });
 };
 
 
@@ -230,8 +198,8 @@ const LoginScreen: React.FC<{ onLogin: () => void, error: string | null }> = ({ 
 
 // --- MAIN APPLICATION COMPONENT ---
 export default function App() {
-  // Fix: Use User type from firebase/auth
-  const [user, setUser] = useState<User | null>(null);
+  // Fix: Use prefixed type from namespace import.
+  const [user, setUser] = useState<firebaseAuth.User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -252,6 +220,7 @@ export default function App() {
   const [savedSlideshows, setSavedSlideshows] = useState<SavedSlideshow[]>([]);
   const [activeSlideshowId, setActiveSlideshowId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSaving, setIsSaving] = useState(false);
 
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -330,22 +299,37 @@ export default function App() {
     }
 
     let slideshowName = activeSlideshowName;
-    if (!activeSlideshowId) {
+    let slideshowId = activeSlideshowId;
+    
+    if (!slideshowId) {
         slideshowName = window.prompt("Enter a name for your slideshow:", "My Slideshow");
         if (!slideshowName) return; // User cancelled
+        // Fix: Use prefixed functions from namespace imports.
+        const newDocRef = firestore.doc(firestore.collection(db, "slideshows"));
+        slideshowId = newDocRef.id;
     }
     
-    setIsLoading(true);
+    setIsSaving(true);
     try {
+        const uploadFile = async (file: File, path: string): Promise<{ url: string, storagePath: string }> => {
+            // Fix: Use prefixed functions from namespace imports.
+            const storageRef = firebaseStorage.ref(storage, path);
+            await firebaseStorage.uploadBytes(storageRef, file);
+            const url = await firebaseStorage.getDownloadURL(storageRef);
+            return { url, storagePath: path };
+        };
+
         const serializedMedia: SerializedMediaFile[] = await Promise.all(
             media.map(async (m) => {
+                const path = `users/${user.uid}/slideshows/${slideshowId}/${m.file.name}`;
+                const { url, storagePath } = await uploadFile(m.file, path);
                 const serializedItem: SerializedMediaFile = {
                     id: m.id,
                     type: m.type,
                     name: m.file.name,
-                    dataUrl: await fileToDataUrl(m.file),
+                    url,
+                    storagePath,
                 };
-                // Firestore rejects 'undefined' values. Only add the caption property if it exists.
                 if (m.type === 'image' && m.caption) {
                     serializedItem.caption = m.caption;
                 }
@@ -353,10 +337,12 @@ export default function App() {
             })
         );
 
-        const serializedAudio = audioFile ? {
-            name: audioFile.name,
-            dataUrl: await fileToDataUrl(audioFile),
-        } : null;
+        let serializedAudio: SerializedAudioFile | null = null;
+        if (audioFile) {
+            const path = `users/${user.uid}/slideshows/${slideshowId}/${audioFile.name}`;
+            const { url, storagePath } = await uploadFile(audioFile, path);
+            serializedAudio = { name: audioFile.name, url, storagePath };
+        }
         
         const currentSettings: SlideshowSettings = { interval, slideStyle, showClock, smartCaptionsEnabled };
 
@@ -366,24 +352,23 @@ export default function App() {
             media: serializedMedia,
             audio: serializedAudio,
             settings: currentSettings,
-            // Fix: Use serverTimestamp from firestore
-            timestamp: serverTimestamp(),
+            // Fix: Use prefixed functions from namespace imports.
+            timestamp: firestore.serverTimestamp(),
         };
 
-        if (activeSlideshowId) { // Update existing
-            // Fix: Use setDoc and doc from firestore
-            await setDoc(doc(db, "slideshows", activeSlideshowId), dataToSave, { merge: true });
-        } else { // Create new
-            // Fix: Use addDoc and collection from firestore
-            const docRef = await addDoc(collection(db, "slideshows"), dataToSave);
-            setActiveSlideshowId(docRef.id);
+        // Fix: Use prefixed functions from namespace imports.
+        await firestore.setDoc(firestore.doc(db, "slideshows", slideshowId), dataToSave, { merge: true });
+
+        if (!activeSlideshowId) {
+             setActiveSlideshowId(slideshowId);
         }
+
         alert(`Slideshow "${slideshowName}" saved successfully!`);
     } catch(error) {
         console.error("Error saving slideshow:", error);
-        alert("There was an error saving your slideshow.");
+        alert(`There was an error saving your slideshow. ${error instanceof Error ? error.message : ''}`);
     } finally {
-        setIsLoading(false);
+        setIsSaving(false);
     }
   }, [user, activeSlideshowId, activeSlideshowName, media, audioFile, interval, slideStyle, showClock, smartCaptionsEnabled]);
 
@@ -395,16 +380,30 @@ export default function App() {
     try {
         handleNewSlideshow();
 
-        const loadedMedia: MediaFile[] = slideshowToLoad.media.map(m => {
-            const file = dataUrlToFile(m.dataUrl, m.name);
-            return {
-                ...m,
-                file,
-                previewUrl: URL.createObjectURL(file),
-            };
-        });
+        const loadedMedia: MediaFile[] = await Promise.all(
+            slideshowToLoad.media.map(async (m) => {
+                const file = await urlToFile(m.url, m.name);
+                const previewUrl = URL.createObjectURL(file);
+                if (m.type === 'image') {
+                    return {
+                        id: m.id,
+                        type: 'image',
+                        file,
+                        previewUrl,
+                        caption: m.caption,
+                    };
+                } else {
+                     return {
+                        id: m.id,
+                        type: 'video',
+                        file,
+                        previewUrl,
+                    };
+                }
+            })
+        );
         
-        const loadedAudio = slideshowToLoad.audio ? dataUrlToFile(slideshowToLoad.audio.dataUrl, slideshowToLoad.audio.name) : null;
+        const loadedAudio = slideshowToLoad.audio ? await urlToFile(slideshowToLoad.audio.url, slideshowToLoad.audio.name) : null;
         
         setMedia(loadedMedia);
         setAudioFile(loadedAudio);
@@ -426,15 +425,30 @@ export default function App() {
     if (!slideshowToDelete) return;
 
     if (window.confirm(`Are you sure you want to delete "${slideshowToDelete.name}"?`)) {
+        setIsLoading(true);
         try {
-            // Fix: Use deleteDoc and doc from firestore
-            await deleteDoc(doc(db, "slideshows", id));
+            const filePaths = slideshowToDelete.media.map(m => m.storagePath);
+            if (slideshowToDelete.audio) {
+                filePaths.push(slideshowToDelete.audio.storagePath);
+            }
+
+            await Promise.all(filePaths.map(path => {
+                // Fix: Use prefixed functions from namespace imports.
+                const fileRef = firebaseStorage.ref(storage, path);
+                return firebaseStorage.deleteObject(fileRef);
+            }));
+
+            // Fix: Use prefixed functions from namespace imports.
+            await firestore.deleteDoc(firestore.doc(db, "slideshows", id));
+            
             if (activeSlideshowId === id) {
                 handleNewSlideshow();
             }
         } catch (error) {
             console.error("Error deleting slideshow:", error);
             alert("Failed to delete slideshow.");
+        } finally {
+            setIsLoading(false);
         }
     }
   }, [savedSlideshows, activeSlideshowId, handleNewSlideshow]);
@@ -443,8 +457,8 @@ export default function App() {
   // --- EFFECTS ---
   // Authentication Effect
   useEffect(() => {
-    // Fix: Use onAuthStateChanged from firebase/auth
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    // Fix: Use prefixed functions from namespace imports.
+    const unsubscribe = firebaseAuth.onAuthStateChanged(auth, (currentUser) => {
         setUser(currentUser);
         setAuthLoading(false);
     });
@@ -453,20 +467,23 @@ export default function App() {
 
   // Check for Gemini API Key
   useEffect(() => {
-    const apiKey = process.env.API_KEY;
-    setIsApiKeyAvailable(!!apiKey);
+    try {
+      const apiKey = process.env.API_KEY;
+      setIsApiKeyAvailable(!!apiKey);
+    } catch (e) {
+      setIsApiKeyAvailable(false);
+    }
   }, []);
 
   // Firebase Data Sync Effect
   useEffect(() => {
     if (user) {
         setIsLoading(true);
-        // Fix: Use collection, query, where, orderBy from firestore
-        const slideshowsCollection = collection(db, 'slideshows');
-        const q = query(slideshowsCollection, where('userId', '==', user.uid), orderBy('timestamp', 'desc'));
+        // Fix: Use prefixed functions from namespace imports.
+        const slideshowsCollectionRef = firestore.collection(db, 'slideshows');
+        const q = firestore.query(slideshowsCollectionRef, firestore.where('userId', '==', user.uid), firestore.orderBy('timestamp', 'desc'));
         
-        // Fix: Use onSnapshot from firestore
-        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+        const unsubscribe = firestore.onSnapshot(q, (querySnapshot) => {
             const slideshowsData = querySnapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data(),
@@ -480,9 +497,8 @@ export default function App() {
 
         return () => unsubscribe();
     } else {
-        // Clear data when user logs out
         setSavedSlideshows([]);
-        handleNewSlideshow(); // Reset editor state
+        handleNewSlideshow(); 
         setIsLoading(false);
     }
   }, [user, handleNewSlideshow]);
@@ -545,7 +561,7 @@ export default function App() {
                     setIntervalValue(newInterval);
                     setAdjustmentNotification(`Slide speed automatically adjusted to ${newInterval}s to match song length.`);
                 }
-            } else { // Song is shorter than just the video content
+            } else { 
                 if (interval !== 1) {
                      isAutoAdjusting.current = true;
                      setIntervalValue(1);
@@ -673,9 +689,9 @@ export default function App() {
   const handleSignIn = async () => {
     setAuthError(null);
     try {
-        // Fix: Use GoogleAuthProvider and signInWithPopup from firebase/auth
-        const provider = new GoogleAuthProvider();
-        await signInWithPopup(auth, provider);
+        // Fix: Use prefixed functions from namespace imports.
+        const provider = new firebaseAuth.GoogleAuthProvider();
+        await firebaseAuth.signInWithPopup(auth, provider);
     } catch (error: any) {
         console.error("Authentication error:", error);
         setAuthError(error.message || "Failed to sign in.");
@@ -684,8 +700,8 @@ export default function App() {
 
   const handleSignOut = async () => {
     try {
-        // Fix: Use signOut from firebase/auth
-        await signOut(auth);
+        // Fix: Use prefixed functions from namespace imports.
+        await firebaseAuth.signOut(auth);
     } catch (error) {
         console.error("Sign out error:", error);
     }
@@ -693,7 +709,7 @@ export default function App() {
 
 
   const isReadyToPlay = media.length > 0 && audioFile;
-  const isWorking = captionStatus === 'generating' || isLoading || authLoading;
+  const isWorking = captionStatus === 'generating' || isLoading || authLoading || isSaving;
 
   if (authLoading) {
     return (
@@ -732,7 +748,7 @@ export default function App() {
           {/* Step 1: My Slideshows */}
           <section className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 shadow-lg">
             <h2 className="text-2xl font-semibold mb-4 border-b border-gray-600 pb-2">1. My Slideshows</h2>
-            {isLoading && <p className="text-center text-purple-400">Loading your slideshows...</p>}
+            {isLoading && !isSaving && <p className="text-center text-purple-400">Loading your slideshows...</p>}
             {!isLoading && savedSlideshows.length === 0 && (
                 <div className="text-center py-4">
                     <p className="text-gray-400 mb-4">You have no saved slideshows. Start by creating one below!</p>
@@ -892,7 +908,7 @@ export default function App() {
             <div className="flex justify-center items-center flex-wrap gap-4">
                 <button onClick={handleSaveSlideshow} disabled={!isReadyToPlay || isWorking} className="flex items-center space-x-2 text-lg font-bold bg-indigo-600 hover:bg-indigo-500 text-white py-3 px-8 rounded-lg transition-all disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 shadow-lg">
                     <SaveIcon className="w-6 h-6" />
-                    <span>Save</span>
+                    <span>{isSaving ? "Saving..." : (activeSlideshowId ? "Update" : "Save")}</span>
                 </button>
                 <button onClick={() => setIsPlaying(true)} disabled={!isReadyToPlay || isWorking} className="flex items-center space-x-2 text-lg font-bold bg-green-600 hover:bg-green-500 text-white py-3 px-8 rounded-lg transition-all disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 shadow-lg">
                   <PlayIcon className="w-6 h-6"/>
