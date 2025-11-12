@@ -1,13 +1,25 @@
 
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
-// FIX: The original imports from 'firebase/app' and 'firebase/auth' were causing errors.
-// Changed to import from the scoped packages '@firebase/app' and '@firebase/auth'
-// to fix module resolution issues in the build environment.
-import { initializeApp } from '@firebase/app';
-import { getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from '@firebase/auth';
-import { getFirestore, collection, addDoc, setDoc, doc, onSnapshot, query, where, orderBy, deleteDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+// --- FIREBASE V9+ MODULAR IMPORTS ---
+// This is the modern, recommended way to use Firebase.
+// Fix: Switched to named imports for Firebase v9+ modular SDK
+import { initializeApp } from 'firebase/app';
+import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut, User } from 'firebase/auth';
+import { 
+    getFirestore, 
+    Timestamp, 
+    serverTimestamp, 
+    setDoc, 
+    doc, 
+    addDoc, 
+    collection, 
+    deleteDoc, 
+    query, 
+    where, 
+    orderBy, 
+    onSnapshot 
+} from 'firebase/firestore';
 
 
 // --- FIREBASE CONFIGURATION ---
@@ -24,7 +36,7 @@ const firebaseConfig = {
 };
 
 
-// Initialize Firebase
+// --- FIREBASE V9+ INITIALIZATION ---
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -68,15 +80,16 @@ interface SerializedAudioFile {
     dataUrl: string;
 }
 
-// Updated to match Firestore data structure
+// Updated to match Firestore data structure with V9 Timestamp
 interface SavedSlideshow {
-    id: string; // This is the Firestore document ID
+    id: string; 
     userId: string;
     name: string;
     media: SerializedMediaFile[];
     audio: SerializedAudioFile | null;
     settings: SlideshowSettings;
-    timestamp: Timestamp;
+    // Fix: Use Timestamp type from firestore
+    timestamp?: Timestamp;
 }
 
 // --- HELPER FUNCTIONS ---
@@ -217,6 +230,7 @@ const LoginScreen: React.FC<{ onLogin: () => void, error: string | null }> = ({ 
 
 // --- MAIN APPLICATION COMPONENT ---
 export default function App() {
+  // Fix: Use User type from firebase/auth
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -252,8 +266,184 @@ export default function App() {
     return savedSlideshows.find(s => s.id === activeSlideshowId)?.name || "New Slideshow";
   }, [activeSlideshowId, savedSlideshows]);
   
+  const { imageCount, videoCount } = useMemo(() => {
+    return media.reduce((acc, item) => {
+      if (item.type === 'image') acc.imageCount++;
+      if (item.type === 'video') acc.videoCount++;
+      return acc;
+    }, { imageCount: 0, videoCount: 0 });
+  }, [media]);
+
+  // --- CALLBACKS ---
+  const handleNewSlideshow = useCallback(() => {
+    setMedia([]);
+    setAudioFile(null);
+    setIntervalValue(5);
+    setSlideStyle('kenburns');
+    setShowClock(true);
+    setSmartCaptionsEnabled(false);
+    setCaptionStatus('idle');
+    setActiveSlideshowId(null);
+  }, []);
+
+  const generateCaptions = useCallback(async () => {
+    if (!smartCaptionsEnabled || captionStatus === 'generating' || !isApiKeyAvailable) return;
+
+    const imagesToCaption = media.filter((item): item is ImageFile => item.type === 'image' && !item.caption);
+    if (imagesToCaption.length === 0) {
+        if (media.length > 0) setCaptionStatus('done');
+        return;
+    }
+
+    setCaptionStatus('generating');
+    try {
+      const apiKey = process.env.API_KEY;
+      if (!apiKey) throw new Error("API Key not found");
+      const ai = new GoogleGenAI({ apiKey });
+      const updatedMedia = [...media];
+
+      for (const imageFile of imagesToCaption) {
+        const imagePart = await fileToGenerativePart(imageFile.file);
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [imagePart, { text: "Describe this image in a short, one-sentence caption for a photo slideshow." }] },
+        });
+        const caption = response.text;
+        
+        const index = updatedMedia.findIndex(item => item.id === imageFile.id);
+        if (index !== -1 && updatedMedia[index].type === 'image') {
+            (updatedMedia[index] as ImageFile).caption = caption.trim();
+        }
+      }
+      setMedia(updatedMedia);
+      setCaptionStatus('done');
+    } catch (error) {
+      console.error("Error generating captions:", error);
+      setCaptionStatus('error');
+    }
+  }, [media, smartCaptionsEnabled, captionStatus, isApiKeyAvailable]);
+  
+  const handleSaveSlideshow = useCallback(async () => {
+    if (!user) {
+        alert("You must be signed in to save a slideshow.");
+        return;
+    }
+
+    let slideshowName = activeSlideshowName;
+    if (!activeSlideshowId) {
+        slideshowName = window.prompt("Enter a name for your slideshow:", "My Slideshow");
+        if (!slideshowName) return; // User cancelled
+    }
+    
+    setIsLoading(true);
+    try {
+        const serializedMedia: SerializedMediaFile[] = await Promise.all(
+            media.map(async (m) => {
+                const serializedItem: SerializedMediaFile = {
+                    id: m.id,
+                    type: m.type,
+                    name: m.file.name,
+                    dataUrl: await fileToDataUrl(m.file),
+                };
+                // Firestore rejects 'undefined' values. Only add the caption property if it exists.
+                if (m.type === 'image' && m.caption) {
+                    serializedItem.caption = m.caption;
+                }
+                return serializedItem;
+            })
+        );
+
+        const serializedAudio = audioFile ? {
+            name: audioFile.name,
+            dataUrl: await fileToDataUrl(audioFile),
+        } : null;
+        
+        const currentSettings: SlideshowSettings = { interval, slideStyle, showClock, smartCaptionsEnabled };
+
+        const dataToSave = {
+            userId: user.uid,
+            name: slideshowName,
+            media: serializedMedia,
+            audio: serializedAudio,
+            settings: currentSettings,
+            // Fix: Use serverTimestamp from firestore
+            timestamp: serverTimestamp(),
+        };
+
+        if (activeSlideshowId) { // Update existing
+            // Fix: Use setDoc and doc from firestore
+            await setDoc(doc(db, "slideshows", activeSlideshowId), dataToSave, { merge: true });
+        } else { // Create new
+            // Fix: Use addDoc and collection from firestore
+            const docRef = await addDoc(collection(db, "slideshows"), dataToSave);
+            setActiveSlideshowId(docRef.id);
+        }
+        alert(`Slideshow "${slideshowName}" saved successfully!`);
+    } catch(error) {
+        console.error("Error saving slideshow:", error);
+        alert("There was an error saving your slideshow.");
+    } finally {
+        setIsLoading(false);
+    }
+  }, [user, activeSlideshowId, activeSlideshowName, media, audioFile, interval, slideStyle, showClock, smartCaptionsEnabled]);
+
+  const handleLoadSlideshow = useCallback(async (id: string) => {
+    const slideshowToLoad = savedSlideshows.find(s => s.id === id);
+    if (!slideshowToLoad) return;
+    
+    setIsLoading(true);
+    try {
+        handleNewSlideshow();
+
+        const loadedMedia: MediaFile[] = slideshowToLoad.media.map(m => {
+            const file = dataUrlToFile(m.dataUrl, m.name);
+            return {
+                ...m,
+                file,
+                previewUrl: URL.createObjectURL(file),
+            };
+        });
+        
+        const loadedAudio = slideshowToLoad.audio ? dataUrlToFile(slideshowToLoad.audio.dataUrl, slideshowToLoad.audio.name) : null;
+        
+        setMedia(loadedMedia);
+        setAudioFile(loadedAudio);
+        setIntervalValue(slideshowToLoad.settings.interval);
+        setSlideStyle(slideshowToLoad.settings.slideStyle);
+        setShowClock(slideshowToLoad.settings.showClock);
+        setSmartCaptionsEnabled(slideshowToLoad.settings.smartCaptionsEnabled);
+        setActiveSlideshowId(id);
+    } catch (error) {
+        console.error("Error loading slideshow:", error);
+        alert("There was an error loading the slideshow.");
+    } finally {
+        setIsLoading(false);
+    }
+  }, [savedSlideshows, handleNewSlideshow]);
+
+  const handleDeleteSlideshow = useCallback(async (id: string) => {
+    const slideshowToDelete = savedSlideshows.find(s => s.id === id);
+    if (!slideshowToDelete) return;
+
+    if (window.confirm(`Are you sure you want to delete "${slideshowToDelete.name}"?`)) {
+        try {
+            // Fix: Use deleteDoc and doc from firestore
+            await deleteDoc(doc(db, "slideshows", id));
+            if (activeSlideshowId === id) {
+                handleNewSlideshow();
+            }
+        } catch (error) {
+            console.error("Error deleting slideshow:", error);
+            alert("Failed to delete slideshow.");
+        }
+    }
+  }, [savedSlideshows, activeSlideshowId, handleNewSlideshow]);
+  
+
+  // --- EFFECTS ---
   // Authentication Effect
   useEffect(() => {
+    // Fix: Use onAuthStateChanged from firebase/auth
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         setUser(currentUser);
         setAuthLoading(false);
@@ -267,18 +457,19 @@ export default function App() {
     setIsApiKeyAvailable(!!apiKey);
   }, []);
 
-  // --- FIREBASE DATA SYNC ---
+  // Firebase Data Sync Effect
   useEffect(() => {
     if (user) {
         setIsLoading(true);
-        const q = query(collection(db, 'slideshows'), where('userId', '==', user.uid), orderBy('timestamp', 'desc'));
+        // Fix: Use collection, query, where, orderBy from firestore
+        const slideshowsCollection = collection(db, 'slideshows');
+        const q = query(slideshowsCollection, where('userId', '==', user.uid), orderBy('timestamp', 'desc'));
         
+        // Fix: Use onSnapshot from firestore
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
             const slideshowsData = querySnapshot.docs.map(doc => ({
-                ...doc.data(),
                 id: doc.id,
-                // Ensure timestamp is a Timestamp object, handle potential server vs client differences
-                timestamp: doc.data().timestamp || serverTimestamp(),
+                ...doc.data(),
             })) as SavedSlideshow[];
             setSavedSlideshows(slideshowsData);
             setIsLoading(false);
@@ -294,81 +485,83 @@ export default function App() {
         handleNewSlideshow(); // Reset editor state
         setIsLoading(false);
     }
-  }, [user]);
+  }, [user, handleNewSlideshow]);
 
+  // Caption Generation Effect
+  useEffect(() => {
+    if (smartCaptionsEnabled && captionStatus !== 'done') {
+      generateCaptions();
+    }
+    if (media.length === 0) {
+        setCaptionStatus('idle');
+    }
+  }, [smartCaptionsEnabled, media, generateCaptions, captionStatus]);
 
-  const { imageCount, videoCount } = useMemo(() => {
-    return media.reduce((acc, item) => {
-      if (item.type === 'image') acc.imageCount++;
-      if (item.type === 'video') acc.videoCount++;
-      return acc;
-    }, { imageCount: 0, videoCount: 0 });
-  }, [media]);
+  // Slide Speed Auto-Adjustment Effect
+  useEffect(() => {
+    if (isAutoAdjusting.current) {
+        isAutoAdjusting.current = false;
+        return;
+    }
 
-    // --- SLIDE SPEED AUTO-ADJUSTMENT ---
-    useEffect(() => {
-        if (isAutoAdjusting.current) {
-            isAutoAdjusting.current = false;
-            return;
-        }
+    if (!audioFile || imageCount === 0) {
+        if (adjustmentNotification) setAdjustmentNotification(null);
+        return;
+    }
 
-        if (!audioFile || imageCount === 0) {
-            if (adjustmentNotification) setAdjustmentNotification(null);
-            return;
-        }
+    const calculateAndAdjust = async () => {
+        const audioDuration = await new Promise<number>(resolve => {
+            const audioEl = document.createElement('audio');
+            audioEl.preload = 'metadata';
+            audioEl.onloadedmetadata = () => {
+                window.URL.revokeObjectURL(audioEl.src);
+                resolve(audioEl.duration);
+            };
+            audioEl.src = URL.createObjectURL(audioFile);
+        });
 
-        const calculateAndAdjust = async () => {
-            const audioDuration = await new Promise<number>(resolve => {
-                const audioEl = document.createElement('audio');
-                audioEl.preload = 'metadata';
-                audioEl.onloadedmetadata = () => {
-                    window.URL.revokeObjectURL(audioEl.src);
-                    resolve(audioEl.duration);
+        const videoFiles = media.filter((m): m is VideoFile => m.type === 'video');
+        const videoDurations = await Promise.all(
+            videoFiles.map(v => new Promise<number>(resolve => {
+                const videoEl = document.createElement('video');
+                videoEl.preload = 'metadata';
+                videoEl.onloadedmetadata = () => {
+                    window.URL.revokeObjectURL(videoEl.src);
+                    resolve(videoEl.duration);
                 };
-                audioEl.src = URL.createObjectURL(audioFile);
-            });
+                videoEl.src = URL.createObjectURL(v.file);
+            }))
+        );
+        const totalVideoDuration = videoDurations.reduce((sum, duration) => sum + duration, 0);
 
-            const videoFiles = media.filter((m): m is VideoFile => m.type === 'video');
-            const videoDurations = await Promise.all(
-                videoFiles.map(v => new Promise<number>(resolve => {
-                    const videoEl = document.createElement('video');
-                    videoEl.preload = 'metadata';
-                    videoEl.onloadedmetadata = () => {
-                        window.URL.revokeObjectURL(videoEl.src);
-                        resolve(videoEl.duration);
-                    };
-                    videoEl.src = URL.createObjectURL(v.file);
-                }))
-            );
-            const totalVideoDuration = videoDurations.reduce((sum, duration) => sum + duration, 0);
+        const currentTotalSlideshowDuration = (imageCount * interval) + totalVideoDuration;
 
-            const currentTotalSlideshowDuration = (imageCount * interval) + totalVideoDuration;
-
-            if (audioDuration < currentTotalSlideshowDuration) {
-                const availableTimeForImages = audioDuration - totalVideoDuration;
-                if (availableTimeForImages > 0) {
-                    const newInterval = Math.max(1, Math.floor(availableTimeForImages / imageCount));
-                    if (newInterval !== interval) {
-                        isAutoAdjusting.current = true;
-                        setIntervalValue(newInterval);
-                        setAdjustmentNotification(`Slide speed automatically adjusted to ${newInterval}s to match song length.`);
-                    }
-                } else { // Song is shorter than just the video content
-                    if (interval !== 1) {
-                         isAutoAdjusting.current = true;
-                         setIntervalValue(1);
-                         setAdjustmentNotification(`Song is shorter than video content. Slide speed set to minimum (1s).`);
-                    }
+        if (audioDuration < currentTotalSlideshowDuration) {
+            const availableTimeForImages = audioDuration - totalVideoDuration;
+            if (availableTimeForImages > 0) {
+                const newInterval = Math.max(1, Math.floor(availableTimeForImages / imageCount));
+                if (newInterval !== interval) {
+                    isAutoAdjusting.current = true;
+                    setIntervalValue(newInterval);
+                    setAdjustmentNotification(`Slide speed automatically adjusted to ${newInterval}s to match song length.`);
                 }
-            } else {
-                if (adjustmentNotification) setAdjustmentNotification(null);
+            } else { // Song is shorter than just the video content
+                if (interval !== 1) {
+                     isAutoAdjusting.current = true;
+                     setIntervalValue(1);
+                     setAdjustmentNotification(`Song is shorter than video content. Slide speed set to minimum (1s).`);
+                }
             }
-        };
+        } else {
+            if (adjustmentNotification) setAdjustmentNotification(null);
+        }
+    };
 
-        calculateAndAdjust();
+    calculateAndAdjust();
 
-    }, [audioFile, media, interval, imageCount, adjustmentNotification]);
+  }, [audioFile, media, interval, imageCount, adjustmentNotification]);
 
+  // --- EVENT HANDLERS ---
   const handleMediaUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
@@ -445,52 +638,6 @@ export default function App() {
     }
   };
 
-  const generateCaptions = useCallback(async () => {
-    if (!smartCaptionsEnabled || captionStatus === 'generating' || !isApiKeyAvailable) return;
-
-    const imagesToCaption = media.filter((item): item is ImageFile => item.type === 'image' && !item.caption);
-    if (imagesToCaption.length === 0) {
-        if (media.length > 0) setCaptionStatus('done');
-        return;
-    }
-
-    setCaptionStatus('generating');
-    try {
-      const apiKey = process.env.API_KEY;
-      if (!apiKey) throw new Error("API Key not found");
-      const ai = new GoogleGenAI({ apiKey });
-      const updatedMedia = [...media];
-
-      for (const imageFile of imagesToCaption) {
-        const imagePart = await fileToGenerativePart(imageFile.file);
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: { parts: [imagePart, { text: "Describe this image in a short, one-sentence caption for a photo slideshow." }] },
-        });
-        const caption = response.text;
-        
-        const index = updatedMedia.findIndex(item => item.id === imageFile.id);
-        if (index !== -1 && updatedMedia[index].type === 'image') {
-            (updatedMedia[index] as ImageFile).caption = caption.trim();
-        }
-      }
-      setMedia(updatedMedia);
-      setCaptionStatus('done');
-    } catch (error) {
-      console.error("Error generating captions:", error);
-      setCaptionStatus('error');
-    }
-  }, [media, smartCaptionsEnabled, captionStatus, isApiKeyAvailable]);
-
-  useEffect(() => {
-    if (smartCaptionsEnabled && captionStatus !== 'done') {
-      generateCaptions();
-    }
-    if (media.length === 0) {
-        setCaptionStatus('idle');
-    }
-  }, [smartCaptionsEnabled, media, generateCaptions, captionStatus]);
-
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, id: string) => {
     setDraggedItemId(id);
     e.dataTransfer.setData('text/plain', id);
@@ -523,132 +670,10 @@ export default function App() {
     setDraggedItemId(null);
   };
 
-  const handleNewSlideshow = useCallback(() => {
-    setMedia([]);
-    setAudioFile(null);
-    setIntervalValue(5);
-    setSlideStyle('kenburns');
-    setShowClock(true);
-    setSmartCaptionsEnabled(false);
-    setCaptionStatus('idle');
-    setActiveSlideshowId(null);
-  }, []);
-
-  const handleSaveSlideshow = useCallback(async () => {
-    if (!user) {
-        alert("You must be signed in to save a slideshow.");
-        return;
-    }
-
-    let slideshowName = activeSlideshowName;
-    if (!activeSlideshowId) {
-        slideshowName = window.prompt("Enter a name for your slideshow:", "My Slideshow");
-        if (!slideshowName) return; // User cancelled
-    }
-    
-    setIsLoading(true);
-    try {
-        const serializedMedia: SerializedMediaFile[] = await Promise.all(
-            media.map(async (m) => {
-                const serializedItem: SerializedMediaFile = {
-                    id: m.id,
-                    type: m.type,
-                    name: m.file.name,
-                    dataUrl: await fileToDataUrl(m.file),
-                };
-                // Firestore rejects 'undefined' values. Only add the caption property if it exists.
-                if (m.type === 'image' && m.caption) {
-                    serializedItem.caption = m.caption;
-                }
-                return serializedItem;
-            })
-        );
-
-        const serializedAudio = audioFile ? {
-            name: audioFile.name,
-            dataUrl: await fileToDataUrl(audioFile),
-        } : null;
-        
-        const currentSettings: SlideshowSettings = { interval, slideStyle, showClock, smartCaptionsEnabled };
-
-        const dataToSave = {
-            userId: user.uid,
-            name: slideshowName,
-            media: serializedMedia,
-            audio: serializedAudio,
-            settings: currentSettings,
-            timestamp: serverTimestamp(),
-        };
-
-        if (activeSlideshowId) { // Update existing
-            await setDoc(doc(db, "slideshows", activeSlideshowId), dataToSave, { merge: true });
-        } else { // Create new
-            const docRef = await addDoc(collection(db, "slideshows"), dataToSave);
-            setActiveSlideshowId(docRef.id);
-        }
-        alert(`Slideshow "${slideshowName}" saved successfully!`);
-    } catch(error) {
-        console.error("Error saving slideshow:", error);
-        alert("There was an error saving your slideshow.");
-    } finally {
-        setIsLoading(false);
-    }
-  }, [user, activeSlideshowId, activeSlideshowName, media, audioFile, interval, slideStyle, showClock, smartCaptionsEnabled]);
-
-  const handleLoadSlideshow = useCallback(async (id: string) => {
-    const slideshowToLoad = savedSlideshows.find(s => s.id === id);
-    if (!slideshowToLoad) return;
-    
-    setIsLoading(true);
-    try {
-        handleNewSlideshow();
-
-        const loadedMedia: MediaFile[] = slideshowToLoad.media.map(m => {
-            const file = dataUrlToFile(m.dataUrl, m.name);
-            return {
-                ...m,
-                file,
-                previewUrl: URL.createObjectURL(file),
-            };
-        });
-        
-        const loadedAudio = slideshowToLoad.audio ? dataUrlToFile(slideshowToLoad.audio.dataUrl, slideshowToLoad.audio.name) : null;
-        
-        setMedia(loadedMedia);
-        setAudioFile(loadedAudio);
-        setIntervalValue(slideshowToLoad.settings.interval);
-        setSlideStyle(slideshowToLoad.settings.slideStyle);
-        setShowClock(slideshowToLoad.settings.showClock);
-        setSmartCaptionsEnabled(slideshowToLoad.settings.smartCaptionsEnabled);
-        setActiveSlideshowId(id);
-    } catch (error) {
-        console.error("Error loading slideshow:", error);
-        alert("There was an error loading the slideshow.");
-    } finally {
-        setIsLoading(false);
-    }
-  }, [savedSlideshows, handleNewSlideshow]);
-
-  const handleDeleteSlideshow = useCallback(async (id: string) => {
-    const slideshowToDelete = savedSlideshows.find(s => s.id === id);
-    if (!slideshowToDelete) return;
-
-    if (window.confirm(`Are you sure you want to delete "${slideshowToDelete.name}"?`)) {
-        try {
-            await deleteDoc(doc(db, "slideshows", id));
-            if (activeSlideshowId === id) {
-                handleNewSlideshow();
-            }
-        } catch (error) {
-            console.error("Error deleting slideshow:", error);
-            alert("Failed to delete slideshow.");
-        }
-    }
-  }, [savedSlideshows, activeSlideshowId, handleNewSlideshow]);
-
   const handleSignIn = async () => {
     setAuthError(null);
     try {
+        // Fix: Use GoogleAuthProvider and signInWithPopup from firebase/auth
         const provider = new GoogleAuthProvider();
         await signInWithPopup(auth, provider);
     } catch (error: any) {
@@ -659,6 +684,7 @@ export default function App() {
 
   const handleSignOut = async () => {
     try {
+        // Fix: Use signOut from firebase/auth
         await signOut(auth);
     } catch (error) {
         console.error("Sign out error:", error);
