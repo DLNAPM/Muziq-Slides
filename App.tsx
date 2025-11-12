@@ -191,7 +191,9 @@ export default function App() {
 
   // Check for API Key
   useEffect(() => {
-    setIsApiKeyAvailable(!!process.env.API_KEY);
+    // FIX: Replaced `import.meta.env.VITE_API_KEY` with `process.env.API_KEY` to follow Gemini API guidelines and resolve TypeScript error.
+    const apiKey = process.env.API_KEY;
+    setIsApiKeyAvailable(!!apiKey);
   }, []);
 
   // --- LOCAL STORAGE EFFECTS ---
@@ -378,7 +380,10 @@ export default function App() {
 
     setCaptionStatus('generating');
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      // FIX: Replaced `import.meta.env.VITE_API_KEY` with `process.env.API_KEY` to follow Gemini API guidelines and resolve TypeScript error.
+      const apiKey = process.env.API_KEY;
+      if (!apiKey) throw new Error("API Key not found");
+      const ai = new GoogleGenAI({ apiKey });
       const updatedMedia = [...media];
 
       for (const imageFile of imagesToCaption) {
