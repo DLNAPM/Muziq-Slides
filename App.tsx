@@ -1,6 +1,28 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
+import { initializeApp } from 'firebase/app';
+import { getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
+import { getFirestore, collection, addDoc, setDoc, doc, onSnapshot, query, where, orderBy, deleteDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+
+
+// --- FIREBASE CONFIGURATION ---
+// IMPORTANT: Replace these placeholder values with your actual Firebase project configuration.
+// You can find this in your Firebase project settings under "General".
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_AUTH_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_STORAGE_BUCKET",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
 
 // --- TYPE DEFINITIONS ---
 interface ImageFile {
@@ -12,7 +34,7 @@ interface ImageFile {
 }
 
 interface VideoFile {
-    id: string;
+    id:string;
     type: 'video';
     file: File;
     previewUrl: string;
@@ -40,13 +62,15 @@ interface SerializedAudioFile {
     dataUrl: string;
 }
 
+// Updated to match Firestore data structure
 interface SavedSlideshow {
-    id: string;
+    id: string; // This is the Firestore document ID
+    userId: string;
     name: string;
     media: SerializedMediaFile[];
     audio: SerializedAudioFile | null;
     settings: SlideshowSettings;
-    timestamp: number;
+    timestamp: Timestamp;
 }
 
 // --- HELPER FUNCTIONS ---
@@ -126,6 +150,9 @@ const SaveIcon: React.FC<{ className?: string }> = ({ className }) => (
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
     </svg>
 );
+const GoogleIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path><path fill="none" d="M0 0h48v48H0z"></path></svg>
+);
 
 
 // --- UI HELPER COMPONENTS ---
@@ -155,8 +182,39 @@ const ToggleSwitch: React.FC<{ enabled: boolean; onChange: (enabled: boolean) =>
 );
 
 
+// --- LOGIN SCREEN COMPONENT ---
+const LoginScreen: React.FC<{ onLogin: () => void, error: string | null }> = ({ onLogin, error }) => {
+    return (
+        <div className="min-h-screen bg-gray-900 text-gray-200 flex flex-col items-center justify-center p-4">
+            <div className="text-center mb-10">
+                <h1 className="text-5xl sm:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-600">
+                    Muziq Slides
+                </h1>
+                <p className="mt-4 text-xl text-gray-400">Your personal photo and music screensaver in the cloud.</p>
+            </div>
+            <div className="bg-gray-800/50 p-8 rounded-lg border border-gray-700 shadow-lg text-center">
+                <h2 className="text-2xl font-semibold mb-6">Sign In to Continue</h2>
+                <button 
+                    onClick={onLogin} 
+                    className="w-full flex items-center justify-center gap-3 bg-white text-gray-700 font-semibold py-3 px-6 rounded-lg hover:bg-gray-200 transition-colors shadow-md"
+                >
+                    <GoogleIcon className="w-6 h-6" />
+                    Sign in with Google
+                </button>
+                {error && <p className="text-red-400 mt-4">{error}</p>}
+                <p className="text-xs text-gray-500 mt-6">By signing in, you agree to our imaginary Terms of Service.</p>
+            </div>
+        </div>
+    );
+};
+
+
 // --- MAIN APPLICATION COMPONENT ---
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+
   const [media, setMedia] = useState<MediaFile[]>([]);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const [interval, setIntervalValue] = useState<number>(5);
@@ -182,43 +240,55 @@ export default function App() {
   const MAX_IMAGES = 30;
   const MAX_VIDEOS = 1;
   const MAX_VIDEO_DURATION = 30; // in seconds
-  const MAX_SAVED_SLIDESHOWS = 5;
 
   const activeSlideshowName = useMemo(() => {
     if (!activeSlideshowId) return "New Slideshow";
     return savedSlideshows.find(s => s.id === activeSlideshowId)?.name || "New Slideshow";
   }, [activeSlideshowId, savedSlideshows]);
-
-  // Check for API Key
+  
+  // Authentication Effect
   useEffect(() => {
-    // FIX: Replaced `import.meta.env.VITE_API_KEY` with `process.env.API_KEY` to follow Gemini API guidelines and resolve TypeScript error.
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+        setUser(currentUser);
+        setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Check for Gemini API Key
+  useEffect(() => {
     const apiKey = process.env.API_KEY;
     setIsApiKeyAvailable(!!apiKey);
   }, []);
 
-  // --- LOCAL STORAGE EFFECTS ---
+  // --- FIREBASE DATA SYNC ---
   useEffect(() => {
-    try {
-        const storedSlideshows = localStorage.getItem('muziqSlides_saved');
-        if (storedSlideshows) {
-            setSavedSlideshows(JSON.parse(storedSlideshows));
-        }
-    } catch (error) {
-        console.error("Failed to load slideshows from localStorage", error);
-    } finally {
+    if (user) {
+        setIsLoading(true);
+        const q = query(collection(db, 'slideshows'), where('userId', '==', user.uid), orderBy('timestamp', 'desc'));
+        
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const slideshowsData = querySnapshot.docs.map(doc => ({
+                ...doc.data(),
+                id: doc.id,
+                // Ensure timestamp is a Timestamp object, handle potential server vs client differences
+                timestamp: doc.data().timestamp || serverTimestamp(),
+            })) as SavedSlideshow[];
+            setSavedSlideshows(slideshowsData);
+            setIsLoading(false);
+        }, (error) => {
+            console.error("Error fetching slideshows:", error);
+            setIsLoading(false);
+        });
+
+        return () => unsubscribe();
+    } else {
+        // Clear data when user logs out
+        setSavedSlideshows([]);
+        handleNewSlideshow(); // Reset editor state
         setIsLoading(false);
     }
-  }, []);
-
-  useEffect(() => {
-    try {
-        if (!isLoading) {
-            localStorage.setItem('muziqSlides_saved', JSON.stringify(savedSlideshows));
-        }
-    } catch (error) {
-        console.error("Failed to save slideshows to localStorage", error);
-    }
-  }, [savedSlideshows, isLoading]);
+  }, [user]);
 
 
   const { imageCount, videoCount } = useMemo(() => {
@@ -380,7 +450,6 @@ export default function App() {
 
     setCaptionStatus('generating');
     try {
-      // FIX: Replaced `import.meta.env.VITE_API_KEY` with `process.env.API_KEY` to follow Gemini API guidelines and resolve TypeScript error.
       const apiKey = process.env.API_KEY;
       if (!apiKey) throw new Error("API Key not found");
       const ai = new GoogleGenAI({ apiKey });
@@ -460,6 +529,11 @@ export default function App() {
   }, []);
 
   const handleSaveSlideshow = useCallback(async () => {
+    if (!user) {
+        alert("You must be signed in to save a slideshow.");
+        return;
+    }
+
     let slideshowName = activeSlideshowName;
     if (!activeSlideshowId) {
         slideshowName = window.prompt("Enter a name for your slideshow:", "My Slideshow");
@@ -485,24 +559,20 @@ export default function App() {
         
         const currentSettings: SlideshowSettings = { interval, slideStyle, showClock, smartCaptionsEnabled };
 
+        const dataToSave = {
+            userId: user.uid,
+            name: slideshowName,
+            media: serializedMedia,
+            audio: serializedAudio,
+            settings: currentSettings,
+            timestamp: serverTimestamp(),
+        };
+
         if (activeSlideshowId) { // Update existing
-            setSavedSlideshows(prev => prev.map(s => s.id === activeSlideshowId ? { ...s, name: slideshowName, media: serializedMedia, audio: serializedAudio, settings: currentSettings, timestamp: Date.now() } : s));
+            await setDoc(doc(db, "slideshows", activeSlideshowId), dataToSave, { merge: true });
         } else { // Create new
-            if (savedSlideshows.length >= MAX_SAVED_SLIDESHOWS) {
-                alert(`You can only save up to ${MAX_SAVED_SLIDESHOWS} slideshows.`);
-                return;
-            }
-            const newId = `slideshow-${Date.now()}`;
-            const newSlideshow: SavedSlideshow = {
-                id: newId,
-                name: slideshowName,
-                media: serializedMedia,
-                audio: serializedAudio,
-                settings: currentSettings,
-                timestamp: Date.now(),
-            };
-            setSavedSlideshows(prev => [...prev, newSlideshow]);
-            setActiveSlideshowId(newId);
+            const docRef = await addDoc(collection(db, "slideshows"), dataToSave);
+            setActiveSlideshowId(docRef.id);
         }
         alert(`Slideshow "${slideshowName}" saved successfully!`);
     } catch(error) {
@@ -511,7 +581,7 @@ export default function App() {
     } finally {
         setIsLoading(false);
     }
-  }, [activeSlideshowId, activeSlideshowName, media, audioFile, interval, slideStyle, showClock, smartCaptionsEnabled, savedSlideshows.length]);
+  }, [user, activeSlideshowId, activeSlideshowName, media, audioFile, interval, slideStyle, showClock, smartCaptionsEnabled]);
 
   const handleLoadSlideshow = useCallback(async (id: string) => {
     const slideshowToLoad = savedSlideshows.find(s => s.id === id);
@@ -547,54 +617,96 @@ export default function App() {
     }
   }, [savedSlideshows, handleNewSlideshow]);
 
-  const handleDeleteSlideshow = useCallback((id: string) => {
+  const handleDeleteSlideshow = useCallback(async (id: string) => {
     const slideshowToDelete = savedSlideshows.find(s => s.id === id);
     if (!slideshowToDelete) return;
 
     if (window.confirm(`Are you sure you want to delete "${slideshowToDelete.name}"?`)) {
-        setSavedSlideshows(prev => prev.filter(s => s.id !== id));
-        if (activeSlideshowId === id) {
-            handleNewSlideshow();
+        try {
+            await deleteDoc(doc(db, "slideshows", id));
+            if (activeSlideshowId === id) {
+                handleNewSlideshow();
+            }
+        } catch (error) {
+            console.error("Error deleting slideshow:", error);
+            alert("Failed to delete slideshow.");
         }
     }
   }, [savedSlideshows, activeSlideshowId, handleNewSlideshow]);
 
+  const handleSignIn = async () => {
+    setAuthError(null);
+    try {
+        const provider = new GoogleAuthProvider();
+        await signInWithPopup(auth, provider);
+    } catch (error: any) {
+        console.error("Authentication error:", error);
+        setAuthError(error.message || "Failed to sign in.");
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+        await signOut(auth);
+    } catch (error) {
+        console.error("Sign out error:", error);
+    }
+  };
+
 
   const isReadyToPlay = media.length > 0 && audioFile;
-  const isWorking = captionStatus === 'generating' || isLoading;
+  const isWorking = captionStatus === 'generating' || isLoading || authLoading;
+
+  if (authLoading) {
+    return (
+        <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+            <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-purple-500"></div>
+        </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginScreen onLogin={handleSignIn} error={authError} />;
+  }
+
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans p-4 sm:p-6 lg:p-8">
       <div className="max-w-6xl mx-auto">
-        <header className="text-center mb-10">
-          <div className="flex justify-center items-center gap-4">
-            <h1 className="text-4xl sm:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-600">
-              Muziq Slides
-            </h1>
-            <button onClick={() => setShowInfoModal(true)} className="text-gray-400 hover:text-white transition-colors" aria-label="About this app">
-                <InfoIcon className="w-8 h-8" />
-            </button>
-          </div>
-          <p className="mt-2 text-lg text-gray-400">Create your personal photo and music screensaver.</p>
+        <header className="flex justify-between items-center mb-10 flex-wrap gap-4">
+            <div className="flex items-center gap-4">
+                <h1 className="text-4xl sm:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-indigo-600">
+                Muziq Slides
+                </h1>
+                <button onClick={() => setShowInfoModal(true)} className="text-gray-400 hover:text-white transition-colors" aria-label="About this app">
+                    <InfoIcon className="w-8 h-8" />
+                </button>
+            </div>
+            <div className="flex items-center gap-4">
+                {user.photoURL && <img src={user.photoURL} alt={user.displayName || 'User'} className="w-10 h-10 rounded-full" />}
+                <button onClick={handleSignOut} className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md transition-colors">
+                    Sign Out
+                </button>
+            </div>
         </header>
 
         <main className="space-y-12">
           {/* Step 1: My Slideshows */}
           <section className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 shadow-lg">
             <h2 className="text-2xl font-semibold mb-4 border-b border-gray-600 pb-2">1. My Slideshows</h2>
-            {isLoading && <p className="text-center text-purple-400">Loading...</p>}
+            {isLoading && <p className="text-center text-purple-400">Loading your slideshows...</p>}
             {!isLoading && savedSlideshows.length === 0 && (
                 <div className="text-center py-4">
                     <p className="text-gray-400 mb-4">You have no saved slideshows. Start by creating one below!</p>
                 </div>
             )}
             {!isLoading && savedSlideshows.length > 0 && (
-                <div className="space-y-3 mb-4">
-                    {savedSlideshows.sort((a,b) => b.timestamp - a.timestamp).map(s => (
-                        <div key={s.id} className="bg-gray-700/50 p-3 rounded-md flex items-center justify-between gap-4">
+                <div className="space-y-3 mb-4 max-h-60 overflow-y-auto pr-2">
+                    {savedSlideshows.map(s => (
+                        <div key={s.id} className={`p-3 rounded-md flex items-center justify-between gap-4 transition-all ${activeSlideshowId === s.id ? 'bg-purple-900/50 ring-2 ring-purple-500' : 'bg-gray-700/50'}`}>
                             <div>
                                 <p className="font-semibold text-white">{s.name}</p>
-                                <p className="text-xs text-gray-400">Saved: {new Date(s.timestamp).toLocaleString()}</p>
+                                <p className="text-xs text-gray-400">Saved: {s.timestamp.toDate().toLocaleString()}</p>
                             </div>
                             <div className="flex items-center gap-2">
                                 <button onClick={() => handleLoadSlideshow(s.id)} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-3 rounded-md transition-colors text-sm">Load</button>
@@ -786,7 +898,8 @@ export default function App() {
                 </p>
                 <h4 className="text-xl font-semibold text-purple-300 mb-3">How to Use:</h4>
                 <ol className="list-decimal list-inside space-y-2 text-gray-300">
-                    <li><strong>Manage Slideshows:</strong> Use the "My Slideshows" area to save, load, delete, or start new projects. You can save up to 5 slideshows.</li>
+                    <li><strong>Sign In:</strong> Use your Google account to sign in. Your slideshows will be saved securely to your account.</li>
+                    <li><strong>Manage Slideshows:</strong> Use the "My Slideshows" area to save, load, delete, or start new projects.</li>
                     <li><strong>Upload Media:</strong> Click the upload area to select up to {MAX_IMAGES} images and {MAX_VIDEOS} video (max 30s). You can remove any item by hovering over it and clicking the 'X' button. You can also drag-and-drop media to reorder it.</li>
                     <li><strong>Add Music:</strong> Click 'Select Song' to choose an audio file from your device. This will be the soundtrack for your slideshow.</li>
                     <li><strong>Configure:</strong> Adjust the settings to your liking.
