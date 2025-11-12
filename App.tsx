@@ -10,12 +10,13 @@ import { getFirestore, collection, addDoc, setDoc, doc, onSnapshot, query, where
 // IMPORTANT: Replace these placeholder values with your actual Firebase project configuration.
 // You can find this in your Firebase project settings under "General".
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyDT9WDzU6HMO7_-qk9Kl4jc9JigiN9_JiI",
+  authDomain: "muziq-slides.firebaseapp.com",
+  projectId: "muziq-slides",
+  storageBucket: "muziq-slides.firebasestorage.app",
+  messagingSenderId: "577247718021",
+  appId: "1:577247718021:web:4ee585b9aad338501797ec",
+  measurementId: "G-SKRCL4J4GD"
 };
 
 // Initialize Firebase
