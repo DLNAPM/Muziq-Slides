@@ -1,8 +1,12 @@
 
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
+// FIX: The original imports from 'firebase/app' and 'firebase/auth' were causing errors.
+// Changed to import from the scoped packages '@firebase/app' and '@firebase/auth'
+// to fix module resolution issues in the build environment.
+import { initializeApp } from '@firebase/app';
+import { getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from '@firebase/auth';
 import { getFirestore, collection, addDoc, setDoc, doc, onSnapshot, query, where, orderBy, deleteDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 
 
@@ -18,6 +22,7 @@ const firebaseConfig = {
   appId: "1:577247718021:web:4ee585b9aad338501797ec",
   measurementId: "G-SKRCL4J4GD"
 };
+
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
@@ -544,13 +549,19 @@ export default function App() {
     setIsLoading(true);
     try {
         const serializedMedia: SerializedMediaFile[] = await Promise.all(
-            media.map(async (m) => ({
-                id: m.id,
-                type: m.type,
-                name: m.file.name,
-                dataUrl: await fileToDataUrl(m.file),
-                caption: m.type === 'image' ? m.caption : undefined,
-            }))
+            media.map(async (m) => {
+                const serializedItem: SerializedMediaFile = {
+                    id: m.id,
+                    type: m.type,
+                    name: m.file.name,
+                    dataUrl: await fileToDataUrl(m.file),
+                };
+                // Firestore rejects 'undefined' values. Only add the caption property if it exists.
+                if (m.type === 'image' && m.caption) {
+                    serializedItem.caption = m.caption;
+                }
+                return serializedItem;
+            })
         );
 
         const serializedAudio = audioFile ? {
@@ -707,7 +718,7 @@ export default function App() {
                         <div key={s.id} className={`p-3 rounded-md flex items-center justify-between gap-4 transition-all ${activeSlideshowId === s.id ? 'bg-purple-900/50 ring-2 ring-purple-500' : 'bg-gray-700/50'}`}>
                             <div>
                                 <p className="font-semibold text-white">{s.name}</p>
-                                <p className="text-xs text-gray-400">Saved: {s.timestamp.toDate().toLocaleString()}</p>
+                                <p className="text-xs text-gray-400">Saved: {s.timestamp?.toDate().toLocaleString()}</p>
                             </div>
                             <div className="flex items-center gap-2">
                                 <button onClick={() => handleLoadSlideshow(s.id)} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-3 rounded-md transition-colors text-sm">Load</button>
