@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 // Fix: Use modular imports for Firebase v9+ to resolve module resolution issues.
@@ -528,14 +529,15 @@ export default function App() {
 
   // Firebase Data Sync Effect
   useEffect(() => {
-    if (user) {
+    // Add a guard to ensure user and user.uid exist before querying.
+    // This prevents a race condition on login where the query might run
+    // with an incomplete user object, resulting in an empty data set.
+    if (user && user.uid) {
         setIsLoading(true);
-        // Fix: Use modular Firebase functions.
         const slideshowsCollectionRef = collection(db, 'slideshows');
         const q = query(slideshowsCollectionRef, where('userId', '==', user.uid), orderBy('timestamp', 'desc'));
         
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
-            // Fix: Use SavedSlideshow[] instead of undefined SavedSlideshows[].
             const slideshowsData = querySnapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data(),
@@ -1015,7 +1017,7 @@ export default function App() {
                             <li><strong>Display Options:</strong> Toggle the date/clock or enable AI-powered 'Smart Captions' for your images.</li>
                         </ul>
                     </li>
-                    <li><strong>Finalize:</strong> Once you've uploaded media and a song, you can save your progress, preview the slideshow, or use the 'Publish' button to simulate sending it to a smart TV screensaver.</li>
+                    <li><strong>Finalize:</strong> Once you'veuploaded media and a song, you can save your progress, preview the slideshow, or use the 'Publish' button to simulate sending it to a smart TV screensaver.</li>
                 </ol>
                 <div className="text-right mt-8">
                     <button onClick={() => setShowInfoModal(false)} className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-6 rounded-md transition-colors">
