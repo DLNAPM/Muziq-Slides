@@ -13,7 +13,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyDT9WDzU6HMO7_-qk9Kl4jc9JigiN9_JiI",
   authDomain: "muziq-slides.firebaseapp.com",
   projectId: "muziq-slides",
-  storageBucket: "muziq-slides.appspot.com",
+  storageBucket: "muziq-slides.firebasestorage.appm",
   messagingSenderId: "577247718021",
   appId: "1:577247718021:web:4ee585b9aad338501797ec",
   measurementId: "G-SKRCL4J4GD"
