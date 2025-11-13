@@ -1,11 +1,36 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
-// Fix: Use namespace imports for Firebase to avoid module resolution issues.
-import * as firebaseApp from 'firebase/app';
-import * as firebaseAuth from 'firebase/auth';
-import * as firestore from 'firebase/firestore';
-import * as firebaseStorage from 'firebase/storage';
+// Fix: Use modular imports for Firebase v9+ to resolve module resolution issues.
+import { initializeApp } from 'firebase/app';
+import {
+    getAuth,
+    onAuthStateChanged,
+    GoogleAuthProvider,
+    signInWithPopup,
+    signOut,
+    type User
+} from 'firebase/auth';
+import {
+    getFirestore,
+    collection,
+    doc,
+    setDoc,
+    serverTimestamp,
+    Timestamp,
+    query,
+    where,
+    orderBy,
+    onSnapshot,
+    deleteDoc,
+} from 'firebase/firestore';
+import {
+    getStorage,
+    ref,
+    uploadBytes,
+    getDownloadURL,
+    deleteObject
+} from 'firebase/storage';
 
 
 // --- FIREBASE CONFIGURATION ---
@@ -21,11 +46,11 @@ const firebaseConfig = {
 
 
 // --- FIREBASE INITIALIZATION (v9+ Syntax) ---
-// Fix: Use prefixed functions from namespace imports.
-const app = firebaseApp.initializeApp(firebaseConfig);
-const auth = firebaseAuth.getAuth(app);
-const db = firestore.getFirestore(app);
-const storage = firebaseStorage.getStorage(app);
+// Fix: Use modular Firebase functions.
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
 
 
 // --- TYPE DEFINITIONS ---
@@ -75,8 +100,8 @@ interface SavedSlideshow {
     media: SerializedMediaFile[];
     audio: SerializedAudioFile | null;
     settings: SlideshowSettings;
-    // Fix: Use prefixed type from namespace import.
-    timestamp?: firestore.Timestamp;
+    // Fix: Use imported Timestamp type from firestore.
+    timestamp?: Timestamp;
 }
 
 // --- HELPER FUNCTIONS ---
@@ -198,8 +223,8 @@ const LoginScreen: React.FC<{ onLogin: () => void, error: string | null }> = ({ 
 
 // --- MAIN APPLICATION COMPONENT ---
 export default function App() {
-  // Fix: Use prefixed type from namespace import.
-  const [user, setUser] = useState<firebaseAuth.User | null>(null);
+  // Fix: Use imported User type from firebase/auth.
+  const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -301,21 +326,25 @@ export default function App() {
     let slideshowName = activeSlideshowName;
     let slideshowId = activeSlideshowId;
     
-    if (!slideshowId) {
+    const isNewSlideshow = !slideshowId;
+
+    if (isNewSlideshow) {
         slideshowName = window.prompt("Enter a name for your slideshow:", "My Slideshow");
         if (!slideshowName) return; // User cancelled
-        // Fix: Use prefixed functions from namespace imports.
-        const newDocRef = firestore.doc(firestore.collection(db, "slideshows"));
+        // Fix: Use modular Firebase functions.
+        const newDocRef = doc(collection(db, "slideshows"));
         slideshowId = newDocRef.id;
     }
     
+    if (!slideshowId) return; // Should not happen, but a safeguard.
+
     setIsSaving(true);
     try {
         const uploadFile = async (file: File, path: string): Promise<{ url: string, storagePath: string }> => {
-            // Fix: Use prefixed functions from namespace imports.
-            const storageRef = firebaseStorage.ref(storage, path);
-            await firebaseStorage.uploadBytes(storageRef, file);
-            const url = await firebaseStorage.getDownloadURL(storageRef);
+            // Fix: Use modular Firebase functions.
+            const storageRef = ref(storage, path);
+            await uploadBytes(storageRef, file);
+            const url = await getDownloadURL(storageRef);
             return { url, storagePath: path };
         };
 
@@ -352,16 +381,34 @@ export default function App() {
             media: serializedMedia,
             audio: serializedAudio,
             settings: currentSettings,
-            // Fix: Use prefixed functions from namespace imports.
-            timestamp: firestore.serverTimestamp(),
+            // Fix: Use modular Firebase functions.
+            timestamp: serverTimestamp(),
         };
 
-        // Fix: Use prefixed functions from namespace imports.
-        await firestore.setDoc(firestore.doc(db, "slideshows", slideshowId), dataToSave, { merge: true });
-
-        if (!activeSlideshowId) {
-             setActiveSlideshowId(slideshowId);
+        // Optimistic UI Update
+        const clientTimestamp = Timestamp.now();
+        if (isNewSlideshow) {
+            const newSlideshowEntry: SavedSlideshow = {
+                id: slideshowId,
+                userId: user.uid,
+                name: slideshowName,
+                media: serializedMedia,
+                audio: serializedAudio,
+                settings: currentSettings,
+                timestamp: clientTimestamp,
+            };
+            setSavedSlideshows(prev => [newSlideshowEntry, ...prev]);
+            setActiveSlideshowId(slideshowId);
+        } else {
+            setSavedSlideshows(prev => prev.map(s => 
+                s.id === slideshowId 
+                ? { ...s, name: slideshowName, media: serializedMedia, audio: serializedAudio, settings: currentSettings, timestamp: clientTimestamp }
+                : s
+            ).sort((a, b) => (b.timestamp?.toMillis() ?? 0) - (a.timestamp?.toMillis() ?? 0)));
         }
+
+        // Fix: Use modular Firebase functions.
+        await setDoc(doc(db, "slideshows", slideshowId), dataToSave, { merge: true });
 
         alert(`Slideshow "${slideshowName}" saved successfully!`);
     } catch(error) {
@@ -433,13 +480,13 @@ export default function App() {
             }
 
             await Promise.all(filePaths.map(path => {
-                // Fix: Use prefixed functions from namespace imports.
-                const fileRef = firebaseStorage.ref(storage, path);
-                return firebaseStorage.deleteObject(fileRef);
+                // Fix: Use modular Firebase functions.
+                const fileRef = ref(storage, path);
+                return deleteObject(fileRef);
             }));
 
-            // Fix: Use prefixed functions from namespace imports.
-            await firestore.deleteDoc(firestore.doc(db, "slideshows", id));
+            // Fix: Use modular Firebase functions.
+            await deleteDoc(doc(db, "slideshows", id));
             
             if (activeSlideshowId === id) {
                 handleNewSlideshow();
@@ -457,8 +504,8 @@ export default function App() {
   // --- EFFECTS ---
   // Authentication Effect
   useEffect(() => {
-    // Fix: Use prefixed functions from namespace imports.
-    const unsubscribe = firebaseAuth.onAuthStateChanged(auth, (currentUser) => {
+    // Fix: Use modular Firebase functions.
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         setUser(currentUser);
         setAuthLoading(false);
     });
@@ -479,11 +526,12 @@ export default function App() {
   useEffect(() => {
     if (user) {
         setIsLoading(true);
-        // Fix: Use prefixed functions from namespace imports.
-        const slideshowsCollectionRef = firestore.collection(db, 'slideshows');
-        const q = firestore.query(slideshowsCollectionRef, firestore.where('userId', '==', user.uid), firestore.orderBy('timestamp', 'desc'));
+        // Fix: Use modular Firebase functions.
+        const slideshowsCollectionRef = collection(db, 'slideshows');
+        const q = query(slideshowsCollectionRef, where('userId', '==', user.uid), orderBy('timestamp', 'desc'));
         
-        const unsubscribe = firestore.onSnapshot(q, (querySnapshot) => {
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            // Fix: Use SavedSlideshow[] instead of undefined SavedSlideshows[].
             const slideshowsData = querySnapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data(),
@@ -689,9 +737,9 @@ export default function App() {
   const handleSignIn = async () => {
     setAuthError(null);
     try {
-        // Fix: Use prefixed functions from namespace imports.
-        const provider = new firebaseAuth.GoogleAuthProvider();
-        await firebaseAuth.signInWithPopup(auth, provider);
+        // Fix: Use modular Firebase functions.
+        const provider = new GoogleAuthProvider();
+        await signInWithPopup(auth, provider);
     } catch (error: any) {
         console.error("Authentication error:", error);
         setAuthError(error.message || "Failed to sign in.");
@@ -700,8 +748,8 @@ export default function App() {
 
   const handleSignOut = async () => {
     try {
-        // Fix: Use prefixed functions from namespace imports.
-        await firebaseAuth.signOut(auth);
+        // Fix: Use modular Firebase functions.
+        await signOut(auth);
     } catch (error) {
         console.error("Sign out error:", error);
     }
