@@ -529,9 +529,7 @@ export default function App() {
 
   // Firebase Data Sync Effect
   useEffect(() => {
-    // Add a guard to ensure user and user.uid exist before querying.
-    // This prevents a race condition on login where the query might run
-    // with an incomplete user object, resulting in an empty data set.
+    // If a user is logged in, set up a real-time listener for their slideshows.
     if (user && user.uid) {
         setIsLoading(true);
         const slideshowsCollectionRef = collection(db, 'slideshows');
@@ -549,13 +547,18 @@ export default function App() {
             setIsLoading(false);
         });
 
+        // Cleanup the listener when the user logs out or the component unmounts.
         return () => unsubscribe();
-    } else {
+    } else if (!authLoading) {
+        // This condition is crucial to prevent data from being cleared during the
+        // initial authentication check. It only runs when we know for sure that
+        // the user is logged out, not just in a temporary pre-auth state.
         setSavedSlideshows([]);
         handleNewSlideshow(); 
         setIsLoading(false);
     }
-  }, [user, handleNewSlideshow]);
+  }, [user, authLoading, handleNewSlideshow]);
+
 
   // Caption Generation Effect
   useEffect(() => {
