@@ -474,23 +474,27 @@ export default function App() {
     if (window.confirm(`Are you sure you want to delete "${slideshowToDelete.name}"?`)) {
         setIsLoading(true);
         try {
+            // Step 1: Perform all remote deletion operations.
             const filePaths = slideshowToDelete.media.map(m => m.storagePath);
             if (slideshowToDelete.audio) {
                 filePaths.push(slideshowToDelete.audio.storagePath);
             }
 
             await Promise.all(filePaths.map(path => {
-                // Fix: Use modular Firebase functions.
                 const fileRef = ref(storage, path);
                 return deleteObject(fileRef);
             }));
 
-            // Fix: Use modular Firebase functions.
             await deleteDoc(doc(db, "slideshows", id));
             
+            // Step 2: Manually update local state after successful remote deletion.
+            // This avoids race conditions with the onSnapshot listener.
+            // The listener will eventually fire, but our state will already be correct.
+            setSavedSlideshows(prev => prev.filter(s => s.id !== id));
             if (activeSlideshowId === id) {
                 handleNewSlideshow();
             }
+
         } catch (error) {
             console.error("Error deleting slideshow:", error);
             alert("Failed to delete slideshow.");
