@@ -2,10 +2,10 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
-// Fix: Changed firebase imports to use scoped packages (@firebase/...)
+// Fix: Changed firebase imports to use scoped packages (firebase/...)
 // to resolve "no exported member" errors, which typically occur when
 // using the modular v9 SDK with an environment that expects scoped packages.
-import { initializeApp } from '@firebase/app';
+import { initializeApp } from 'firebase/app';
 import {
     getAuth,
     onAuthStateChanged,
@@ -15,7 +15,7 @@ import {
     type User,
     setPersistence,
     browserLocalPersistence
-} from '@firebase/auth';
+} from 'firebase/auth';
 import {
     getFirestore,
     collection,
@@ -28,14 +28,14 @@ import {
     orderBy,
     onSnapshot,
     deleteDoc,
-} from '@firebase/firestore';
+} from '@irebase/firestore';
 import {
     getStorage,
     ref,
     uploadBytes,
     getDownloadURL,
     deleteObject
-} from '@firebase/storage';
+} from 'firebase/storage';
 
 
 // --- FIREBASE CONFIGURATION ---
