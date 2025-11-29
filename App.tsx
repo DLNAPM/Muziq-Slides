@@ -1,6 +1,4 @@
 
-
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 // Fix: Corrected Firebase imports to use the v9 modular SDK style (e.g., 'firebase/app')
@@ -125,6 +123,15 @@ const urlToFile = async (url: string, filename: string): Promise<File> => {
     return new File([blob], filename, { type: blob.type });
 };
 
+// --- CONSTANTS ---
+const SLIDE_STYLES = [
+    { id: 'ken-burns', name: 'Ken Burns' },
+    { id: 'fade-in', name: 'Fade In' },
+    { id: 'slide-from-right', name: 'Slide Right' },
+    { id: 'slide-from-bottom', name: 'Slide Up' },
+    { id: 'zoom-in', name: 'Zoom In' },
+    { id: 'zoom-out', name: 'Zoom Out' },
+];
 
 // --- ICON COMPONENTS ---
 const UploadIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -179,6 +186,13 @@ const QuestionMarkCircleIcon: React.FC<{ className?: string }> = ({ className })
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
 );
+const SettingsIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.096 2.572-1.065z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+);
+
 
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
@@ -194,9 +208,11 @@ const App: React.FC = () => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentSlide, setCurrentSlide] = useState(0);
     const [slideshowName, setSlideshowName] = useState('');
+    const [currentSlideshowId, setCurrentSlideshowId] = useState<string | null>(null);
     const [savedSlideshows, setSavedSlideshows] = useState<SavedSlideshow[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false); // For loading/deleting
     const [error, setError] = useState<string | null>(null);
     const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
 
@@ -204,16 +220,16 @@ const App: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
 
-    // --- AUTHENTICATION ---
+    // --- AUTHENTICATION & DATA FETCHING ---
     useEffect(() => {
         setIsLoading(true);
-        // Fix: Explicitly set auth persistence to local. This ensures the user
-        // remains logged in after closing and reopening the browser.
         setPersistence(auth, browserLocalPersistence)
             .then(() => {
                 const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
                     setUser(currentUser);
-                    setIsLoading(false);
+                    if (!currentUser) {
+                        setIsLoading(false);
+                    }
                 });
                 return unsubscribe;
             })
@@ -223,6 +239,28 @@ const App: React.FC = () => {
                 setIsLoading(false);
             });
     }, []);
+    
+    useEffect(() => {
+        if (user) {
+            setIsLoading(true);
+            const q = query(collection(db, "slideshows"), where("userId", "==", user.uid), orderBy("timestamp", "desc"));
+            const unsubscribe = onSnapshot(q, (querySnapshot) => {
+                const slideshows: SavedSlideshow[] = [];
+                querySnapshot.forEach((doc) => {
+                    slideshows.push({ id: doc.id, ...doc.data() } as SavedSlideshow);
+                });
+                setSavedSlideshows(slideshows);
+                setIsLoading(false);
+            }, (err) => {
+                console.error("Error fetching slideshows:", err);
+                setError("Could not load your saved slideshows.");
+                setIsLoading(false);
+            });
+            return () => unsubscribe();
+        } else {
+            setSavedSlideshows([]);
+        }
+    }, [user]);
 
     const handleLogin = async () => {
         const provider = new GoogleAuthProvider();
@@ -237,10 +275,10 @@ const App: React.FC = () => {
     const handleLogout = async () => {
         try {
             await signOut(auth);
-            // Reset state on logout
             setMediaFiles([]);
             setAudioFile(null);
             setSlideshowName('');
+            setCurrentSlideshowId(null);
             setSavedSlideshows([]);
         } catch (error) {
             console.error("Sign out error:", error);
@@ -248,7 +286,16 @@ const App: React.FC = () => {
         }
     };
     
-    // --- UI LOGIC ---
+    const resetWorkspace = () => {
+        setMediaFiles([]);
+        setAudioFile(null);
+        setSlideshowName('');
+        setCurrentSlideshowId(null);
+        if(fileInputRef.current) fileInputRef.current.value = '';
+        if(audioInputRef.current) audioInputRef.current.value = '';
+    }
+
+    // --- FILE HANDLING ---
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files) {
             const files = Array.from(e.target.files).slice(0, 20 - mediaFiles.length);
@@ -276,6 +323,7 @@ const App: React.FC = () => {
         setMediaFiles(prev => prev.filter(media => media.id !== id));
     };
 
+    // --- SLIDESHOW PLAYBACK ---
     const handlePlay = () => {
         if (mediaFiles.length === 0) {
             setError("Please upload at least one image or video to start the slideshow.");
@@ -290,7 +338,6 @@ const App: React.FC = () => {
         }
     };
 
-    // Slideshow playback logic
     useEffect(() => {
         let timer: NodeJS.Timeout;
         if (isPlaying && mediaFiles.length > 0) {
@@ -307,12 +354,146 @@ const App: React.FC = () => {
             audioRef.current.pause();
         }
     };
+    
+    // --- SAVE/LOAD/DELETE LOGIC ---
+    const handleSaveSlideshow = async () => {
+        if (!user) {
+            setError("You must be signed in to save a slideshow.");
+            return;
+        }
+        if (!slideshowName.trim()) {
+            setError("Please enter a name for your slideshow.");
+            return;
+        }
+        if (mediaFiles.length === 0) {
+            setError("Please add some media before saving.");
+            return;
+        }
+
+        setIsSaving(true);
+        setError(null);
+
+        try {
+            const slideshowId = currentSlideshowId || doc(collection(db, 'slideshows')).id;
+
+            const serializedMedia: SerializedMediaFile[] = await Promise.all(
+                mediaFiles.map(async (media) => {
+                    const filePath = `users/${user.uid}/${slideshowId}/${media.file.name}-${media.id}`;
+                    const fileRef = ref(storage, filePath);
+                    await uploadBytes(fileRef, media.file);
+                    const url = await getDownloadURL(fileRef);
+                    return {
+                        id: media.id, type: media.type, name: media.file.name, url, storagePath: filePath,
+                        caption: (media as ImageFile).caption || '',
+                    };
+                })
+            );
+
+            let serializedAudio: SerializedAudioFile | null = null;
+            if (audioFile) {
+                const filePath = `users/${user.uid}/${slideshowId}/${audioFile.file.name}`;
+                const fileRef = ref(storage, filePath);
+                await uploadBytes(fileRef, audioFile.file);
+                const url = await getDownloadURL(fileRef);
+                serializedAudio = { name: audioFile.file.name, url, storagePath: filePath };
+            }
+
+            const slideshowData: Omit<SavedSlideshow, 'id'> = {
+                userId: user.uid, name: slideshowName.trim(), media: serializedMedia, audio: serializedAudio, settings,
+                timestamp: serverTimestamp() as Timestamp,
+            };
+
+            await setDoc(doc(db, 'slideshows', slideshowId), slideshowData);
+            setCurrentSlideshowId(slideshowId);
+
+        } catch (err) {
+            console.error("Error saving slideshow:", err);
+            setError("An error occurred while saving. Please try again.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleLoadSlideshow = async (slideshow: SavedSlideshow) => {
+        setIsProcessing(true);
+        setError(null);
+        try {
+            const newMediaFiles: MediaFile[] = await Promise.all(
+                slideshow.media.map(async (media): Promise<MediaFile> => {
+                    const file = await urlToFile(media.url, media.name);
+                    const mediaFile = {
+                        id: media.id, type: media.type, file, previewUrl: URL.createObjectURL(file),
+                    };
+                    if (media.type === 'image') {
+                        (mediaFile as ImageFile).caption = media.caption;
+                    }
+                    return mediaFile;
+                })
+            );
+
+            let newAudioFile: { file: File; name: string } | null = null;
+            if (slideshow.audio) {
+                const file = await urlToFile(slideshow.audio.url, slideshow.audio.name);
+                newAudioFile = { file, name: file.name };
+            }
+
+            setMediaFiles(newMediaFiles);
+            setAudioFile(newAudioFile);
+            setSettings(slideshow.settings);
+            setSlideshowName(slideshow.name);
+            setCurrentSlideshowId(slideshow.id);
+
+        } catch (err) {
+            console.error("Error loading slideshow:", err);
+            setError("Failed to load slideshow assets. Please check your connection.");
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+    
+    const handleDeleteSlideshow = async (slideshow: SavedSlideshow) => {
+        if (!user || user.uid !== slideshow.userId) return;
+        if (!window.confirm(`Are you sure you want to delete "${slideshow.name}"? This action cannot be undone.`)) return;
+
+        setIsProcessing(true);
+        setError(null);
+        try {
+            const filePaths = slideshow.media.map(m => m.storagePath);
+            if (slideshow.audio) filePaths.push(slideshow.audio.storagePath);
+            
+            await Promise.all(filePaths.map(path => 
+                deleteObject(ref(storage, path)).catch(err => console.warn("Asset not found or permission error:", path, err))
+            ));
+            
+            await deleteDoc(doc(db, 'slideshows', slideshow.id));
+
+            if (currentSlideshowId === slideshow.id) {
+                resetWorkspace();
+            }
+
+        } catch (err) {
+            console.error("Error deleting slideshow:", err);
+            setError("Failed to delete the slideshow. Please try again.");
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
 
     const currentMedia = useMemo(() => mediaFiles[currentSlide], [mediaFiles, currentSlide]);
 
     return (
         <div className="min-h-screen bg-brand-dark text-gray-200 font-sans">
-            <header className="bg-gray-900/50 backdrop-blur-sm shadow-lg p-4 flex justify-between items-center sticky top-0 z-50">
+            {(isSaving || isProcessing) && (
+                <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center">
+                    <div className="text-center">
+                        <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-brand-purple mx-auto"></div>
+                        <p className="text-white text-xl mt-4">{isSaving ? 'Saving...' : (isProcessing ? 'Processing...' : 'Loading...')}</p>
+                    </div>
+                </div>
+            )}
+
+            <header className="bg-gray-900/50 backdrop-blur-sm shadow-lg p-4 flex justify-between items-center sticky top-0 z-40">
                 <div className="flex items-center gap-4">
                     <h1 className="text-3xl font-bold text-white tracking-wider">
                         <span className="text-brand-purple">Muziq</span> Slides
@@ -322,7 +503,7 @@ const App: React.FC = () => {
                     </button>
                 </div>
                 <div>
-                    {isLoading ? (
+                    {isLoading && !user ? (
                         <div className="text-gray-400">Loading...</div>
                     ) : user ? (
                         <div className="flex items-center gap-4">
@@ -341,7 +522,7 @@ const App: React.FC = () => {
                 </div>
             </header>
 
-            <main className="p-8">
+            <main className="p-4 sm:p-8">
                  {!user ? (
                     <div className="text-center py-20 bg-gray-800/50 rounded-lg">
                         <h2 className="text-4xl font-bold mb-4">Welcome to Muziq Slides</h2>
@@ -352,16 +533,13 @@ const App: React.FC = () => {
                         </button>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         {/* Controls Column */}
-                        <div className="lg:col-span-1 space-y-6">
+                        <div className="space-y-6">
                            {/* Uploader */}
                             <div className="bg-gray-800/50 p-6 rounded-lg">
                                 <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">1. Upload Media</h3>
-                                <div 
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-gray-800 transition-colors"
-                                >
+                                <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-gray-800 transition-colors">
                                     <UploadIcon className="w-12 h-12 mx-auto text-gray-500" />
                                     <p className="mt-2 text-gray-400">Click to upload images/videos</p>
                                     <p className="text-xs text-gray-500">Max 20 files</p>
@@ -382,10 +560,7 @@ const App: React.FC = () => {
                             {/* Music Picker */}
                             <div className="bg-gray-800/50 p-6 rounded-lg">
                                 <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">2. Add Music</h3>
-                                 <div 
-                                    onClick={() => audioInputRef.current?.click()}
-                                    className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-gray-800 transition-colors"
-                                >
+                                 <div onClick={() => audioInputRef.current?.click()} className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-gray-800 transition-colors">
                                     <MusicIcon className="w-12 h-12 mx-auto text-gray-500" />
                                     <p className="mt-2 text-gray-400">{audioFile ? audioFile.name : 'Click to select an audio file'}</p>
                                 </div>
@@ -395,17 +570,39 @@ const App: React.FC = () => {
                                 )}
                             </div>
 
+                             {/* Settings */}
+                            <div className="bg-gray-800/50 p-6 rounded-lg">
+                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">3. Settings</h3>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label htmlFor="interval" className="block mb-2 text-sm font-medium text-gray-300">Slide Duration: {settings.interval}s</label>
+                                        <input id="interval" type="range" min="1" max="30" value={settings.interval} onChange={(e) => setSettings(s => ({ ...s, interval: parseInt(e.target.value) }))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="slideStyle" className="block mb-2 text-sm font-medium text-gray-300">Slide Style</label>
+                                        <select id="slideStyle" value={settings.slideStyle} onChange={(e) => setSettings(s => ({...s, slideStyle: e.target.value}))} className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5">
+                                            {SLIDE_STYLES.map(style => <option key={style.id} value={style.id}>{style.name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <label htmlFor="showClock" className="text-sm font-medium text-gray-300">Show Clock in Preview</label>
+                                        <button onClick={() => setSettings(s => ({...s, showClock: !s.showClock}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showClock ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                            <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.showClock ? 'translate-x-6' : 'translate-x-1'}`}/>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         
-                        {/* Preview and Settings Column */}
-                        <div className="lg:col-span-2 space-y-6">
+                        {/* Preview and Manage Column */}
+                        <div className="space-y-6">
                             <div className="bg-gray-800/50 p-6 rounded-lg">
-                               <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">3. Preview & Launch</h3>
+                               <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">4. Preview & Launch</h3>
                                 <div className="aspect-video bg-black rounded-lg flex items-center justify-center relative overflow-hidden">
                                     {mediaFiles.length > 0 ? (
                                         <img src={mediaFiles[0].previewUrl} alt="Preview" className="w-full h-full object-contain" />
                                     ) : (
-                                        <div className="text-gray-500">
+                                        <div className="text-gray-500 text-center">
                                             <FilmIcon className="w-24 h-24 mx-auto" />
                                             <p>Your slideshow will appear here</p>
                                         </div>
@@ -415,12 +612,39 @@ const App: React.FC = () => {
                                     </button>
                                 </div>
                             </div>
+                            
+                            {/* Save & Manage */}
+                            <div className="bg-gray-800/50 p-6 rounded-lg">
+                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">5. Save & Manage</h3>
+                                <div className="flex gap-4 mb-4">
+                                     <input type="text" value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Enter slideshow name" className="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5" />
+                                     <button onClick={handleSaveSlideshow} disabled={isSaving || mediaFiles.length === 0} className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors disabled:bg-gray-500">
+                                        <SaveIcon className="w-5 h-5" />
+                                        {currentSlideshowId ? 'Update' : 'Save'}
+                                     </button>
+                                     <button onClick={resetWorkspace} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">New</button>
+                                </div>
+                                
+                                <h4 className="text-lg font-semibold mt-6 mb-2">My Slideshows</h4>
+                                <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                                    {isLoading ? <p>Loading slideshows...</p> : savedSlideshows.length > 0 ? savedSlideshows.map(s => (
+                                        <div key={s.id} className="flex justify-between items-center bg-gray-700/50 p-3 rounded-lg">
+                                            <p className="truncate">{s.name}</p>
+                                            <div className="flex gap-2 flex-shrink-0">
+                                                <button onClick={() => handleLoadSlideshow(s)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded-md text-sm">Load</button>
+                                                <button onClick={() => handleDeleteSlideshow(s)} className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded-md"><TrashIcon className="w-4 h-4"/></button>
+                                            </div>
+                                        </div>
+                                    )) : <p className="text-gray-400">No saved slideshows yet.</p>}
+                                </div>
+                            </div>
+
                         </div>
                     </div>
                 )}
 
                 {error && (
-                    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-500 text-white py-2 px-6 rounded-lg shadow-lg z-50 flex items-center gap-2">
+                    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-500 text-white py-2 px-6 rounded-lg shadow-lg z-50 flex items-center gap-2 animate-fade-in">
                         <InfoIcon className="w-5 h-5" />
                         {error}
                         <button onClick={() => setError(null)} className="ml-4 font-bold">
@@ -453,7 +677,6 @@ const App: React.FC = () => {
                                     src={currentMedia.previewUrl}
                                     className="w-full h-full object-contain"
                                     autoPlay
-                                    muted
                                 />
                             )}
                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30" />
@@ -462,7 +685,7 @@ const App: React.FC = () => {
 
                     {settings.showClock && (
                         <div className="absolute top-5 left-5 text-white text-2xl font-semibold bg-black/30 p-2 rounded-lg">
-                           {new Date().toLocaleTimeString()}
+                           {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
                     )}
                 </div>
@@ -483,6 +706,8 @@ const App: React.FC = () => {
                                 <li><strong>Sign In:</strong> Click the "Sign in with Google" button to save and manage your creations.</li>
                                 <li><strong>Upload Media:</strong> Click the upload box to select up to 20 of your favorite images and videos.</li>
                                 <li><strong>Add Music:</strong> Click the music box to add a background audio track to your slideshow.</li>
+                                <li><strong>Customize:</strong> Use the Settings panel to choose slide styles and duration.</li>
+                                <li><strong>Save:</strong> Name your slideshow and hit "Save" to store it in your account.</li>
                                 <li><strong>Preview:</strong> Hover over the preview window and click the play icon to see your slideshow in action.</li>
                             </ol>
                             <p>That's it! Enjoy your personalized slideshow.</p>
