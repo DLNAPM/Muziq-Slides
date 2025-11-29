@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  // Fix: Use process.cwd() directly, as 'process' is globally available in Node.js environments like Vite's config. This removes the need for a problematic import.
-  const env = loadEnv(mode, process.cwd(), '');
+  // Fix: Cast `process` to `any` to access `cwd()` and resolve a TypeScript error. `process.cwd()` is valid in the Node.js context for a Vite config file, but the type definitions for `process` are incomplete in this environment.
+  const env = loadEnv(mode, (process as any).cwd(), '');
   return {
     plugins: [react()],
     define: {

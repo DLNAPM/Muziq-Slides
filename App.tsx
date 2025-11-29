@@ -2,10 +2,10 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
-// Fix: Changed firebase imports to use scoped packages (firebase/...)
+// Fix: Changed firebase imports to use scoped packages (@firebase/...)
 // to resolve "no exported member" errors, which typically occur when
 // using the modular v9 SDK with an environment that expects scoped packages.
-import { initializeApp } from 'firebase/app';
+import { initializeApp } from '@firebase/app';
 import {
     getAuth,
     onAuthStateChanged,
@@ -15,7 +15,7 @@ import {
     type User,
     setPersistence,
     browserLocalPersistence
-} from 'firebase/auth';
+} from '@firebase/auth';
 import {
     getFirestore,
     collection,
@@ -28,14 +28,14 @@ import {
     orderBy,
     onSnapshot,
     deleteDoc,
-} from '@irebase/firestore';
+} from '@firebase/firestore';
 import {
     getStorage,
     ref,
     uploadBytes,
     getDownloadURL,
     deleteObject
-} from 'firebase/storage';
+} from '@firebase/storage';
 
 
 // --- FIREBASE CONFIGURATION ---
@@ -174,6 +174,11 @@ const GoogleIcon: React.FC<{ className?: string }> = ({ className }) => (
         <path fill="none" d="M0 0h48v48H0z"></path>
     </svg>
 );
+const QuestionMarkCircleIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+);
 
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
@@ -193,6 +198,7 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
 
     const audioRef = useRef<HTMLAudioElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -307,9 +313,14 @@ const App: React.FC = () => {
     return (
         <div className="min-h-screen bg-brand-dark text-gray-200 font-sans">
             <header className="bg-gray-900/50 backdrop-blur-sm shadow-lg p-4 flex justify-between items-center sticky top-0 z-50">
-                <h1 className="text-3xl font-bold text-white tracking-wider">
-                    <span className="text-brand-purple">Muziq</span> Slides
-                </h1>
+                <div className="flex items-center gap-4">
+                    <h1 className="text-3xl font-bold text-white tracking-wider">
+                        <span className="text-brand-purple">Muziq</span> Slides
+                    </h1>
+                     <button onClick={() => setIsHelpModalOpen(true)} className="text-gray-400 hover:text-white transition-colors" aria-label="Open help guide">
+                        <QuestionMarkCircleIcon className="w-7 h-7" />
+                    </button>
+                </div>
                 <div>
                     {isLoading ? (
                         <div className="text-gray-400">Loading...</div>
@@ -454,6 +465,29 @@ const App: React.FC = () => {
                            {new Date().toLocaleTimeString()}
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Help Modal */}
+            {isHelpModalOpen && (
+                <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center animate-fade-in p-4" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
+                    <div className="bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full p-8 relative">
+                        <button onClick={() => setIsHelpModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white" aria-label="Close help guide">
+                            <XIcon className="w-6 h-6" />
+                        </button>
+                        <h2 id="help-modal-title" className="text-2xl font-bold text-brand-purple mb-4">How to Use Muziq Slides</h2>
+                        <div className="space-y-4 text-gray-300">
+                            <p>Welcome! Muziq Slides helps you create beautiful, animated slideshows with your favorite photos, videos, and music. It's perfect for creating a custom screensaver for your TV.</p>
+                            <h3 className="text-xl font-semibold text-white pt-2 border-t border-gray-700">Quick Start Guide:</h3>
+                            <ol className="list-decimal list-inside space-y-2">
+                                <li><strong>Sign In:</strong> Click the "Sign in with Google" button to save and manage your creations.</li>
+                                <li><strong>Upload Media:</strong> Click the upload box to select up to 20 of your favorite images and videos.</li>
+                                <li><strong>Add Music:</strong> Click the music box to add a background audio track to your slideshow.</li>
+                                <li><strong>Preview:</strong> Hover over the preview window and click the play icon to see your slideshow in action.</li>
+                            </ol>
+                            <p>That's it! Enjoy your personalized slideshow.</p>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
