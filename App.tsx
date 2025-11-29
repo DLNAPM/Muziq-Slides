@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 // Fix: Corrected Firebase imports to use the v9 modular SDK style (e.g., 'firebase/app')
@@ -26,6 +25,9 @@ import {
     orderBy,
     onSnapshot,
     deleteDoc,
+    updateDoc,
+    arrayUnion,
+    arrayRemove,
 } from 'firebase/firestore';
 import {
     getStorage,
@@ -103,6 +105,12 @@ interface SavedSlideshow {
     audio: SerializedAudioFile | null;
     settings: SlideshowSettings;
     timestamp?: Timestamp;
+    // Fields for sharing functionality
+    ownerInfo?: {
+        displayName: string | null;
+        photoURL: string | null;
+    };
+    sharedWith?: string[]; // Array of user emails
 }
 
 // --- HELPER FUNCTIONS ---
@@ -192,6 +200,11 @@ const SettingsIcon: React.FC<{ className?: string }> = ({ className }) => (
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     </svg>
 );
+const ShareIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12s-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.368a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
+    </svg>
+);
 
 
 // --- MAIN APP COMPONENT ---
@@ -209,12 +222,19 @@ const App: React.FC = () => {
     const [currentSlide, setCurrentSlide] = useState(0);
     const [slideshowName, setSlideshowName] = useState('');
     const [currentSlideshowId, setCurrentSlideshowId] = useState<string | null>(null);
-    const [savedSlideshows, setSavedSlideshows] = useState<SavedSlideshow[]>([]);
+    const [ownedSlideshows, setOwnedSlideshows] = useState<SavedSlideshow[]>([]);
+    const [sharedSlideshows, setSharedSlideshows] = useState<SavedSlideshow[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false); // For loading/deleting
     const [error, setError] = useState<string | null>(null);
     const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+    
+    // Sharing state
+    const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+    const [slideshowToShare, setSlideshowToShare] = useState<SavedSlideshow | null>(null);
+    const [shareEmail, setShareEmail] = useState('');
+    const [isSharing, setIsSharing] = useState(false);
 
     const audioRef = useRef<HTMLAudioElement>(null);
     const videoPreviewRef = useRef<HTMLVideoElement>(null);
@@ -224,48 +244,68 @@ const App: React.FC = () => {
     // --- AUTHENTICATION & DATA FETCHING ---
     useEffect(() => {
         setIsLoading(true);
-        setPersistence(auth, browserLocalPersistence)
-            .then(() => {
-                const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-                    setUser(currentUser);
-                    if (!currentUser) {
-                        setIsLoading(false);
-                    }
-                });
-                return unsubscribe;
-            })
-            .catch((err) => {
-                console.error("Error setting persistence:", err);
-                setError("Could not save your login session. Please try again.");
+        const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+            setUser(currentUser);
+            if (!currentUser) {
                 setIsLoading(false);
-            });
+                setOwnedSlideshows([]);
+                setSharedSlideshows([]);
+            }
+        });
+        return unsubscribeAuth;
     }, []);
     
     useEffect(() => {
-        if (user) {
+        if (user?.uid && user?.email) {
             setIsLoading(true);
-            const q = query(collection(db, "slideshows"), where("userId", "==", user.uid), orderBy("timestamp", "desc"));
-            const unsubscribe = onSnapshot(q, (querySnapshot) => {
+
+            // Listener for slideshows owned by the user
+            const ownedQuery = query(collection(db, "slideshows"), where("userId", "==", user.uid), orderBy("timestamp", "desc"));
+            const unsubscribeOwned = onSnapshot(ownedQuery, (querySnapshot) => {
                 const slideshows: SavedSlideshow[] = [];
                 querySnapshot.forEach((doc) => {
                     slideshows.push({ id: doc.id, ...doc.data() } as SavedSlideshow);
                 });
-                setSavedSlideshows(slideshows);
+                setOwnedSlideshows(slideshows);
                 setIsLoading(false);
             }, (err) => {
-                console.error("Error fetching slideshows:", err);
+                console.error("Error fetching owned slideshows:", err);
                 setError("Could not load your saved slideshows.");
                 setIsLoading(false);
             });
-            return () => unsubscribe();
+
+            // Listener for slideshows shared with the user
+            const sharedQuery = query(collection(db, "slideshows"), where("sharedWith", "array-contains", user.email));
+            const unsubscribeShared = onSnapshot(sharedQuery, (querySnapshot) => {
+                const slideshows: SavedSlideshow[] = [];
+                querySnapshot.forEach((doc) => {
+                    slideshows.push({ id: doc.id, ...doc.data() } as SavedSlideshow);
+                });
+                setSharedSlideshows(slideshows);
+            }, (err) => {
+                console.error("Error fetching shared slideshows:", err);
+            });
+
+            return () => {
+                unsubscribeOwned();
+                unsubscribeShared();
+            };
         } else {
-            setSavedSlideshows([]);
+            setOwnedSlideshows([]);
+            setSharedSlideshows([]);
         }
     }, [user]);
+
+    const allSlideshows = useMemo(() => {
+        const combined = [...ownedSlideshows, ...sharedSlideshows];
+        const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+        return unique.sort((a, b) => (b.timestamp?.toMillis() ?? 0) - (a.timestamp?.toMillis() ?? 0));
+    }, [ownedSlideshows, sharedSlideshows]);
 
     const handleLogin = async () => {
         const provider = new GoogleAuthProvider();
         try {
+            await setPersistence(auth, browserLocalPersistence);
             await signInWithPopup(auth, provider);
         } catch (error) {
             console.error("Authentication error:", error);
@@ -276,11 +316,9 @@ const App: React.FC = () => {
     const handleLogout = async () => {
         try {
             await signOut(auth);
-            setMediaFiles([]);
-            setAudioFile(null);
-            setSlideshowName('');
-            setCurrentSlideshowId(null);
-            setSavedSlideshows([]);
+            resetWorkspace();
+            setOwnedSlideshows([]);
+            setSharedSlideshows([]);
         } catch (error) {
             console.error("Sign out error:", error);
             setError("Failed to sign out. Please try again.");
@@ -335,16 +373,12 @@ const App: React.FC = () => {
         setError(null);
         setCurrentSlide(0);
         setIsPlaying(true);
-        // Fix: Only start background audio if the first slide is an image and audio is available.
-        // This prevents a brief audio blip if the slideshow starts with a video.
         if (audioRef.current && audioFile && mediaFiles[0].type === 'image') {
             audioRef.current.currentTime = 0;
             audioRef.current.play().catch(e => console.error("Audio play failed", e));
         }
     };
 
-    // Fix: This effect now correctly handles transitions for images and lets videos
-    // control their own transition via the onEnded event.
     useEffect(() => {
         let timer: NodeJS.Timeout;
         if (isPlaying && mediaFiles.length > 0) {
@@ -354,28 +388,19 @@ const App: React.FC = () => {
                     setCurrentSlide(prev => (prev + 1) % mediaFiles.length);
                 }, settings.interval * 1000);
             }
-             // Video transitions are handled by the onEnded event on the video element itself
         }
         return () => clearTimeout(timer);
     }, [isPlaying, currentSlide, mediaFiles, settings.interval]);
 
-    // Fix: This new effect manages the audio context, pausing background music
-    // for videos and ensuring video audio is audible.
     useEffect(() => {
         if (!isPlaying || !currentMedia) return;
-
         if (currentMedia.type === 'video') {
-            // If there's a video, pause the background music
-            if (audioRef.current) {
-                audioRef.current.pause();
-            }
-            // And ensure the video element itself is unmuted and plays
+            if (audioRef.current) audioRef.current.pause();
             if (videoPreviewRef.current) {
                 videoPreviewRef.current.muted = false;
                 videoPreviewRef.current.play().catch(e => console.error("Video play failed", e));
             }
         } else if (currentMedia.type === 'image') {
-            // If there's an image, play the background music (if it exists)
             if (audioRef.current && audioFile) {
                 audioRef.current.play().catch(e => console.error("Audio play failed", e));
             }
@@ -390,7 +415,7 @@ const App: React.FC = () => {
         }
     };
     
-    // --- SAVE/LOAD/DELETE LOGIC ---
+    // --- SAVE/LOAD/DELETE/SHARE LOGIC ---
     const handleSaveSlideshow = async () => {
         if (!user) {
             setError("You must be signed in to save a slideshow.");
@@ -410,7 +435,7 @@ const App: React.FC = () => {
 
         try {
             const slideshowId = currentSlideshowId || doc(collection(db, 'slideshows')).id;
-
+            
             const serializedMedia: SerializedMediaFile[] = await Promise.all(
                 mediaFiles.map(async (media) => {
                     const filePath = `users/${user.uid}/${slideshowId}/${media.file.name}-${media.id}`;
@@ -433,13 +458,32 @@ const App: React.FC = () => {
                 serializedAudio = { name: audioFile.file.name, url, storagePath: filePath };
             }
 
-            const slideshowData: Omit<SavedSlideshow, 'id'> = {
-                userId: user.uid, name: slideshowName.trim(), media: serializedMedia, audio: serializedAudio, settings,
-                timestamp: serverTimestamp() as Timestamp,
-            };
-
-            await setDoc(doc(db, 'slideshows', slideshowId), slideshowData);
-            setCurrentSlideshowId(slideshowId);
+            if (currentSlideshowId) { // Update existing slideshow
+                const updateData = {
+                    name: slideshowName.trim(),
+                    media: serializedMedia,
+                    audio: serializedAudio,
+                    settings,
+                    timestamp: serverTimestamp() as Timestamp,
+                };
+                await updateDoc(doc(db, 'slideshows', currentSlideshowId), updateData);
+            } else { // Create new slideshow
+                const slideshowData: Omit<SavedSlideshow, 'id'> = {
+                    userId: user.uid,
+                    name: slideshowName.trim(),
+                    media: serializedMedia,
+                    audio: serializedAudio,
+                    settings,
+                    timestamp: serverTimestamp() as Timestamp,
+                    ownerInfo: {
+                        displayName: user.displayName,
+                        photoURL: user.photoURL,
+                    },
+                    sharedWith: [],
+                };
+                await setDoc(doc(db, 'slideshows', slideshowId), slideshowData);
+                setCurrentSlideshowId(slideshowId);
+            }
 
         } catch (err) {
             console.error("Error saving slideshow:", err);
@@ -456,7 +500,7 @@ const App: React.FC = () => {
             const newMediaFiles: MediaFile[] = await Promise.all(
                 slideshow.media.map(async (media): Promise<MediaFile> => {
                     const file = await urlToFile(media.url, media.name);
-                    const mediaFile = {
+                    const mediaFile: MediaFile = {
                         id: media.id, type: media.type, file, previewUrl: URL.createObjectURL(file),
                     };
                     if (media.type === 'image') {
@@ -497,7 +541,7 @@ const App: React.FC = () => {
             if (slideshow.audio) filePaths.push(slideshow.audio.storagePath);
             
             await Promise.all(filePaths.map(path => 
-                deleteObject(ref(storage, path)).catch(err => console.warn("Asset not found or permission error:", path, err))
+                deleteObject(ref(storage, path)).catch(err => console.warn("Asset deletion failed:", path, err))
             ));
             
             await deleteDoc(doc(db, 'slideshows', slideshow.id));
@@ -513,6 +557,69 @@ const App: React.FC = () => {
             setIsProcessing(false);
         }
     };
+    
+    const handleOpenShareModal = (slideshow: SavedSlideshow) => {
+        setSlideshowToShare(slideshow);
+        setIsShareModalOpen(true);
+    };
+
+    const handleCloseShareModal = () => {
+        setIsShareModalOpen(false);
+        setSlideshowToShare(null);
+        setShareEmail('');
+    };
+
+    const handleAddShare = async () => {
+        if (!slideshowToShare || !shareEmail.trim() || !user) return;
+        const emailToAdd = shareEmail.trim().toLowerCase();
+        
+        if (!/\S+@\S+\.\S+/.test(emailToAdd)) {
+            setError("Please enter a valid email address.");
+            return;
+        }
+        if (emailToAdd === user.email) {
+             setError("You can't share a slideshow with yourself.");
+             return;
+        }
+
+        setIsSharing(true);
+        setError(null);
+        try {
+            const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
+            await updateDoc(slideshowRef, { sharedWith: arrayUnion(emailToAdd) });
+            setSlideshowToShare(prev => ({
+                ...prev!,
+                sharedWith: [...(prev!.sharedWith || []), emailToAdd]
+            }));
+            setShareEmail('');
+        } catch (err) {
+            console.error("Error sharing slideshow:", err);
+            setError("Failed to add user. Please try again.");
+        } finally {
+            setIsSharing(false);
+        }
+    };
+
+    const handleRemoveShare = async (emailToRemove: string) => {
+        if (!slideshowToShare) return;
+
+        setIsSharing(true);
+        setError(null);
+        try {
+            const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
+            await updateDoc(slideshowRef, { sharedWith: arrayRemove(emailToRemove) });
+             setSlideshowToShare(prev => ({
+                ...prev!,
+                sharedWith: (prev!.sharedWith || []).filter(e => e !== emailToRemove)
+            }));
+        } catch (err) {
+            console.error("Error removing share:", err);
+            setError("Failed to remove user. Please try again.");
+        } finally {
+            setIsSharing(false);
+        }
+    };
+
 
     return (
         <div className="min-h-screen bg-brand-dark text-gray-200 font-sans">
@@ -558,7 +665,7 @@ const App: React.FC = () => {
                  {!user ? (
                     <div className="text-center py-20 bg-gray-800/50 rounded-lg">
                         <h2 className="text-4xl font-bold mb-4">Welcome to Muziq Slides</h2>
-                        <p className="text-xl text-gray-400 mb-8">Sign in to create, save, and load your beautiful photo slideshows.</p>
+                        <p className="text-xl text-gray-400 mb-8">Sign in to create, save, share, and collaborate on beautiful photo slideshows.</p>
                         <button onClick={handleLogin} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg flex items-center gap-2 transition-colors mx-auto text-lg">
                             <GoogleIcon className="w-6 h-6" />
                             Sign in with Google to Get Started
@@ -647,7 +754,7 @@ const App: React.FC = () => {
                             
                             {/* Save & Manage */}
                             <div className="bg-gray-800/50 p-6 rounded-lg">
-                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">5. Save & Manage</h3>
+                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">5. Save, Share & Manage</h3>
                                 <div className="flex gap-4 mb-4">
                                      <input type="text" value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Enter slideshow name" className="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5" />
                                      <button onClick={handleSaveSlideshow} disabled={isSaving || mediaFiles.length === 0} className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors disabled:bg-gray-500">
@@ -659,12 +766,27 @@ const App: React.FC = () => {
                                 
                                 <h4 className="text-lg font-semibold mt-6 mb-2">My Slideshows</h4>
                                 <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                                    {isLoading ? <p>Loading slideshows...</p> : savedSlideshows.length > 0 ? savedSlideshows.map(s => (
-                                        <div key={s.id} className="flex justify-between items-center bg-gray-700/50 p-3 rounded-lg">
-                                            <p className="truncate">{s.name}</p>
+                                    {isLoading ? <p>Loading slideshows...</p> : allSlideshows.length > 0 ? allSlideshows.map(s => (
+                                        <div key={s.id} className="flex justify-between items-center bg-gray-700/50 p-2 rounded-lg gap-2">
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                 {s.userId !== user.uid && s.ownerInfo?.photoURL && (
+                                                    <img src={s.ownerInfo.photoURL} alt={s.ownerInfo.displayName ?? 'Owner'} className="w-8 h-8 rounded-full flex-shrink-0" title={`Shared by ${s.ownerInfo.displayName}`} />
+                                                 )}
+                                                <div className="truncate">
+                                                    <p className="truncate font-semibold">{s.name}</p>
+                                                     {s.userId !== user.uid && s.ownerInfo?.displayName && (
+                                                        <p className="text-xs text-gray-400 truncate">By {s.ownerInfo.displayName}</p>
+                                                    )}
+                                                </div>
+                                            </div>
                                             <div className="flex gap-2 flex-shrink-0">
                                                 <button onClick={() => handleLoadSlideshow(s)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded-md text-sm">Load</button>
-                                                <button onClick={() => handleDeleteSlideshow(s)} className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded-md"><TrashIcon className="w-4 h-4"/></button>
+                                                {s.userId === user.uid && (
+                                                    <>
+                                                        <button onClick={() => handleOpenShareModal(s)} className="bg-green-600 hover:bg-green-700 text-white font-bold p-2 rounded-md" title="Share"><ShareIcon className="w-4 h-4"/></button>
+                                                        <button onClick={() => handleDeleteSlideshow(s)} className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded-md" title="Delete"><TrashIcon className="w-4 h-4"/></button>
+                                                    </>
+                                                )}
                                             </div>
                                         </div>
                                     )) : <p className="text-gray-400">No saved slideshows yet.</p>}
@@ -725,6 +847,48 @@ const App: React.FC = () => {
                 </div>
             )}
 
+             {/* Share Modal */}
+            {isShareModalOpen && slideshowToShare && (
+                <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center animate-fade-in p-4" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
+                    <div className="bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 relative">
+                        <button onClick={handleCloseShareModal} className="absolute top-4 right-4 text-gray-400 hover:text-white" aria-label="Close share menu">
+                            <XIcon className="w-6 h-6" />
+                        </button>
+                        <h2 id="share-modal-title" className="text-xl font-bold text-brand-purple mb-4">Share "{slideshowToShare.name}"</h2>
+                        <div className="space-y-4">
+                            <div className="flex gap-2">
+                                <input
+                                    type="email"
+                                    value={shareEmail}
+                                    onChange={(e) => setShareEmail(e.target.value)}
+                                    placeholder="Enter user's Google email"
+                                    className="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5"
+                                    aria-label="Email to share with"
+                                />
+                                <button onClick={handleAddShare} disabled={isSharing || !shareEmail} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-500 flex-shrink-0">
+                                    {isSharing ? 'Adding...' : 'Add'}
+                                </button>
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-semibold mb-2">Shared with:</h3>
+                                <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                                    {(slideshowToShare.sharedWith ?? []).length > 0 ? (
+                                        slideshowToShare.sharedWith!.map(email => (
+                                            <div key={email} className="flex justify-between items-center bg-gray-700/50 p-2 rounded">
+                                                <span className="text-sm truncate">{email}</span>
+                                                <button onClick={() => handleRemoveShare(email)} disabled={isSharing} className="text-red-400 hover:text-red-300 p-1 disabled:opacity-50" aria-label={`Remove ${email}`}>
+                                                    <TrashIcon className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        ))
+                                    ) : <p className="text-gray-400 text-sm italic">Not shared with anyone yet.</p>}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Help Modal */}
             {isHelpModalOpen && (
                 <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center animate-fade-in p-4" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
@@ -741,7 +905,7 @@ const App: React.FC = () => {
                                 <li><strong>Upload Media:</strong> Click the upload box to select up to 20 of your favorite images and videos.</li>
                                 <li><strong>Add Music:</strong> Click the music box to add a background audio track to your slideshow.</li>
                                 <li><strong>Customize:</strong> Use the Settings panel to choose slide styles and duration.</li>
-                                <li><strong>Save:</strong> Name your slideshow and hit "Save" to store it in your account.</li>
+                                <li><strong>Save & Share:</strong> Name your slideshow, hit "Save", and use the "Share" icon to invite friends.</li>
                                 <li><strong>Preview:</strong> Hover over the preview window and click the play icon to see your slideshow in action.</li>
                             </ol>
                             <p>That's it! Enjoy your personalized slideshow.</p>
