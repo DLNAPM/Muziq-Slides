@@ -217,6 +217,7 @@ const App: React.FC = () => {
     const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
 
     const audioRef = useRef<HTMLAudioElement>(null);
+    const videoPreviewRef = useRef<HTMLVideoElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
 
@@ -323,6 +324,8 @@ const App: React.FC = () => {
         setMediaFiles(prev => prev.filter(media => media.id !== id));
     };
 
+    const currentMedia = useMemo(() => mediaFiles[currentSlide], [mediaFiles, currentSlide]);
+
     // --- SLIDESHOW PLAYBACK ---
     const handlePlay = () => {
         if (mediaFiles.length === 0) {
@@ -332,21 +335,53 @@ const App: React.FC = () => {
         setError(null);
         setCurrentSlide(0);
         setIsPlaying(true);
-        if (audioRef.current && audioFile) {
+        // Fix: Only start background audio if the first slide is an image and audio is available.
+        // This prevents a brief audio blip if the slideshow starts with a video.
+        if (audioRef.current && audioFile && mediaFiles[0].type === 'image') {
             audioRef.current.currentTime = 0;
-            audioRef.current.play();
+            audioRef.current.play().catch(e => console.error("Audio play failed", e));
         }
     };
 
+    // Fix: This effect now correctly handles transitions for images and lets videos
+    // control their own transition via the onEnded event.
     useEffect(() => {
         let timer: NodeJS.Timeout;
         if (isPlaying && mediaFiles.length > 0) {
-            timer = setTimeout(() => {
-                setCurrentSlide(prev => (prev + 1) % mediaFiles.length);
-            }, settings.interval * 1000);
+            const currentMedia = mediaFiles[currentSlide];
+            if (currentMedia.type === 'image') {
+                timer = setTimeout(() => {
+                    setCurrentSlide(prev => (prev + 1) % mediaFiles.length);
+                }, settings.interval * 1000);
+            }
+             // Video transitions are handled by the onEnded event on the video element itself
         }
         return () => clearTimeout(timer);
-    }, [isPlaying, currentSlide, mediaFiles.length, settings.interval]);
+    }, [isPlaying, currentSlide, mediaFiles, settings.interval]);
+
+    // Fix: This new effect manages the audio context, pausing background music
+    // for videos and ensuring video audio is audible.
+    useEffect(() => {
+        if (!isPlaying || !currentMedia) return;
+
+        if (currentMedia.type === 'video') {
+            // If there's a video, pause the background music
+            if (audioRef.current) {
+                audioRef.current.pause();
+            }
+            // And ensure the video element itself is unmuted and plays
+            if (videoPreviewRef.current) {
+                videoPreviewRef.current.muted = false;
+                videoPreviewRef.current.play().catch(e => console.error("Video play failed", e));
+            }
+        } else if (currentMedia.type === 'image') {
+            // If there's an image, play the background music (if it exists)
+            if (audioRef.current && audioFile) {
+                audioRef.current.play().catch(e => console.error("Audio play failed", e));
+            }
+        }
+    }, [isPlaying, currentMedia, audioFile]);
+
 
     const handleClosePreview = () => {
         setIsPlaying(false);
@@ -478,9 +513,6 @@ const App: React.FC = () => {
             setIsProcessing(false);
         }
     };
-
-
-    const currentMedia = useMemo(() => mediaFiles[currentSlide], [mediaFiles, currentSlide]);
 
     return (
         <div className="min-h-screen bg-brand-dark text-gray-200 font-sans">
@@ -673,10 +705,12 @@ const App: React.FC = () => {
                             )}
                             {currentMedia.type === 'video' && (
                                 <video
+                                    ref={videoPreviewRef}
                                     key={currentMedia.id}
                                     src={currentMedia.previewUrl}
                                     className="w-full h-full object-contain"
                                     autoPlay
+                                    onEnded={() => setCurrentSlide(prev => (prev + 1) % mediaFiles.length)}
                                 />
                             )}
                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30" />
