@@ -243,6 +243,23 @@ const App: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
 
+    // Fix: Memoize the audio object URL to prevent it from being regenerated on every
+    // render, which was causing the audio to restart on each slide transition.
+    const audioSrc = useMemo(() => {
+        return audioFile ? URL.createObjectURL(audioFile.file) : null;
+    }, [audioFile]);
+
+    // Add cleanup for the object URL to prevent memory leaks
+    useEffect(() => {
+        // This is a cleanup function that will run when the audioSrc changes or component unmounts.
+        return () => {
+            if (audioSrc) {
+                URL.revokeObjectURL(audioSrc);
+            }
+        };
+    }, [audioSrc]);
+
+
     // --- AUTHENTICATION & DATA FETCHING ---
     useEffect(() => {
         setIsLoading(true);
@@ -767,8 +784,8 @@ const App: React.FC = () => {
                                     <p className="mt-2 text-gray-400">{audioFile ? audioFile.name : 'Click to select an audio file'}</p>
                                 </div>
                                 <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*" className="hidden" />
-                                {audioFile && (
-                                    <audio ref={audioRef} src={URL.createObjectURL(audioFile.file)} loop className="w-full mt-4" controls />
+                                {audioFile && audioSrc && (
+                                    <audio ref={audioRef} src={audioSrc} loop className="w-full mt-4" controls />
                                 )}
                             </div>
 
