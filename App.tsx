@@ -82,6 +82,7 @@ interface SlideshowSettings {
     showClock: boolean;
     smartCaptionsEnabled: boolean;
     repeatSlideshow: boolean;
+    showCaptions: boolean;
 }
 
 interface SerializedMediaFile {
@@ -220,6 +221,7 @@ const App: React.FC = () => {
         showClock: true,
         smartCaptionsEnabled: false,
         repeatSlideshow: false,
+        showCaptions: true,
     });
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentSlide, setCurrentSlide] = useState(0);
@@ -859,6 +861,12 @@ const App: React.FC = () => {
                                             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.repeatSlideshow ? 'translate-x-6' : 'translate-x-1'}`}/>
                                         </button>
                                     </div>
+                                    <div className="flex items-center justify-between">
+                                        <label htmlFor="showCaptions" className="text-sm font-medium text-gray-300">Show Captions</label>
+                                        <button onClick={() => setSettings(s => ({...s, showCaptions: !s.showCaptions}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showCaptions ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                            <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.showCaptions ? 'translate-x-6' : 'translate-x-1'}`}/>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -955,9 +963,9 @@ const App: React.FC = () => {
                                         alt="Slideshow"
                                         className={`w-full h-full object-cover animate-${settings.slideStyle}`}
                                     />
-                                    {(mediaFiles[currentSlide] as ImageFile).caption && (
-                                        <div className="absolute bottom-10 left-0 right-0 p-4 text-center">
-                                            <p className="inline-block bg-black/50 text-white text-2xl md:text-3xl font-semibold py-2 px-4 rounded-lg animate-fade-in">
+                                    {settings.showCaptions && (mediaFiles[currentSlide] as ImageFile).caption && (
+                                        <div className="absolute bottom-5 left-0 right-0 p-4 text-center">
+                                            <p className="inline-block bg-black/50 text-white text-xl md:text-2xl font-semibold py-2 px-4 rounded-lg animate-fade-in">
                                                 {(mediaFiles[currentSlide] as ImageFile).caption}
                                             </p>
                                         </div>
