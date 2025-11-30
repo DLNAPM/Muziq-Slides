@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 // Fix: Corrected Firebase imports to use the v9 modular SDK style (e.g., 'firebase/app')
@@ -63,7 +64,7 @@ interface ImageFile {
   type: 'image';
   file: File;
   previewUrl: string;
-  caption?: string;
+  caption: string;
 }
 
 interface VideoFile {
@@ -358,17 +359,34 @@ const App: React.FC = () => {
         if (e.target.files) {
             const files = Array.from(e.target.files).slice(0, 20 - mediaFiles.length);
             const newMediaFiles: MediaFile[] = files.map(file => {
-                const newFile: MediaFile = {
-                    id: `${file.name}-${Date.now()}`,
-                    file,
-                    previewUrl: URL.createObjectURL(file),
-                    type: file.type.startsWith('image/') ? 'image' : 'video'
-                };
-                if (newFile.type === 'image') (newFile as ImageFile).caption = '';
-                return newFile;
+                 if (file.type.startsWith('image/')) {
+                    return {
+                        id: `${file.name}-${Date.now()}`,
+                        file,
+                        previewUrl: URL.createObjectURL(file),
+                        type: 'image',
+                        caption: '',
+                    };
+                } else {
+                     return {
+                        id: `${file.name}-${Date.now()}`,
+                        file,
+                        previewUrl: URL.createObjectURL(file),
+                        type: 'video',
+                    };
+                }
             });
             setMediaFiles(prev => [...prev, ...newMediaFiles]);
         }
+    };
+    
+    const handleCaptionChange = (id: string, newCaption: string) => {
+        setMediaFiles(prev => prev.map(media => {
+            if (media.id === id && media.type === 'image') {
+                return { ...media, caption: newCaption };
+            }
+            return media;
+        }));
     };
 
     const handleAudioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -523,8 +541,12 @@ const App: React.FC = () => {
                     await uploadBytes(fileRef, media.file);
                     const url = await getDownloadURL(fileRef);
                     return {
-                        id: media.id, type: media.type, name: media.file.name, url, storagePath: filePath,
-                        caption: (media as ImageFile).caption || '',
+                        id: media.id,
+                        type: media.type,
+                        name: media.file.name,
+                        url,
+                        storagePath: filePath,
+                        caption: media.type === 'image' ? media.caption : undefined,
                     };
                 })
             );
@@ -580,13 +602,22 @@ const App: React.FC = () => {
             const newMediaFiles: MediaFile[] = await Promise.all(
                 slideshow.media.map(async (media): Promise<MediaFile> => {
                     const file = await urlToFile(media.url, media.name);
-                    const mediaFile: MediaFile = {
-                        id: media.id, type: media.type, file, previewUrl: URL.createObjectURL(file),
-                    };
                     if (media.type === 'image') {
-                        (mediaFile as ImageFile).caption = media.caption;
+                        return {
+                           id: media.id,
+                           type: 'image',
+                           file,
+                           previewUrl: URL.createObjectURL(file),
+                           caption: media.caption || '',
+                        };
+                    } else {
+                        return {
+                           id: media.id,
+                           type: 'video',
+                           file,
+                           previewUrl: URL.createObjectURL(file),
+                        };
                     }
-                    return mediaFile;
                 })
             );
 
@@ -764,13 +795,26 @@ const App: React.FC = () => {
                                     <p className="text-xs text-gray-500">Max 20 files</p>
                                 </div>
                                 <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*" className="hidden" />
-                                <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 gap-2">
+                                <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 gap-4">
                                     {mediaFiles.map(media => (
-                                        <div key={media.id} className="relative group">
-                                            <img src={media.previewUrl} alt={media.file.name} className="w-full h-24 object-cover rounded-md" />
-                                            <button onClick={() => handleDeleteMedia(media.id)} className="absolute top-1 right-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <XIcon className="w-4 h-4" />
-                                            </button>
+                                        <div key={media.id} className="group flex flex-col gap-1">
+                                            <div className="relative">
+                                                <img src={media.previewUrl} alt={media.file.name} className="w-full h-24 object-cover rounded-md" />
+                                                <button onClick={() => handleDeleteMedia(media.id)} className="absolute top-1 right-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <XIcon className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                            {media.type === 'image' && (
+                                                <input
+                                                    type="text"
+                                                    value={media.caption}
+                                                    onChange={(e) => handleCaptionChange(media.id, e.target.value)}
+                                                    placeholder="Caption..."
+                                                    maxLength={80}
+                                                    className="w-full bg-gray-700 text-white text-xs rounded p-1 border border-transparent focus:outline-none focus:ring-1 focus:ring-brand-purple"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                />
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -904,12 +948,21 @@ const App: React.FC = () => {
                     {mediaFiles[currentSlide] && (
                         <div className="w-full h-full relative">
                             {mediaFiles[currentSlide].type === 'image' && (
-                                <img
-                                    key={mediaFiles[currentSlide].id}
-                                    src={mediaFiles[currentSlide].previewUrl}
-                                    alt="Slideshow"
-                                    className={`w-full h-full object-cover animate-${settings.slideStyle}`}
-                                />
+                                <>
+                                    <img
+                                        key={mediaFiles[currentSlide].id}
+                                        src={mediaFiles[currentSlide].previewUrl}
+                                        alt="Slideshow"
+                                        className={`w-full h-full object-cover animate-${settings.slideStyle}`}
+                                    />
+                                    {(mediaFiles[currentSlide] as ImageFile).caption && (
+                                        <div className="absolute bottom-10 left-0 right-0 p-4 text-center">
+                                            <p className="inline-block bg-black/50 text-white text-2xl md:text-3xl font-semibold py-2 px-4 rounded-lg animate-fade-in">
+                                                {(mediaFiles[currentSlide] as ImageFile).caption}
+                                            </p>
+                                        </div>
+                                    )}
+                                </>
                             )}
                             {mediaFiles[currentSlide].type === 'video' && (
                                 <video
@@ -996,6 +1049,7 @@ const App: React.FC = () => {
                             <ol className="list-decimal list-inside space-y-2">
                                 <li><strong>Sign In:</strong> Click the "Sign in with Google" button to save and manage your creations.</li>
                                 <li><strong>Upload Media:</strong> Click the upload box to select up to 20 of your favorite images and videos.</li>
+                                <li><strong>Add Captions:</strong> After uploading, type a short description below each image. It will appear during the slideshow.</li>
                                 <li><strong>Add Music:</strong> Click the music box to add a background audio track to your slideshow.</li>
                                 <li><strong>Customize:</strong> Use the Settings panel to choose slide styles and duration.</li>
                                 <li><strong>Save & Share:</strong> Name your slideshow, hit "Save", and use the "Share" icon to invite friends.</li>
