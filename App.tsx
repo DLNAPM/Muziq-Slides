@@ -208,6 +208,11 @@ const ShareIcon: React.FC<{ className?: string }> = ({ className }) => (
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12s-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.368a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
     </svg>
 );
+const SparklesIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="currentColor" viewBox="0 0 24 24">
+        <path d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.321l5.478.698a.563.563 0 01.31.95l-4.233 3.585a.563.563 0 00-.154.543l1.232 5.022a.563.563 0 01-.82.63l-4.735-2.79a.563.563 0 00-.536 0l-4.735 2.79a.563.563 0 01-.82-.63l1.232-5.022a.563.563 0 00-.154-.543l-4.233-3.585a.563.563 0 01.31-.95l5.478-.698a.563.563 0 00.475-.321L11.48 3.5z" />
+    </svg>
+);
 
 
 // --- MAIN APP COMPONENT ---
@@ -240,6 +245,9 @@ const App: React.FC = () => {
     const [slideshowToShare, setSlideshowToShare] = useState<SavedSlideshow | null>(null);
     const [shareEmail, setShareEmail] = useState('');
     const [isSharing, setIsSharing] = useState(false);
+
+    // AI Caption state
+    const [generatingCaptionId, setGeneratingCaptionId] = useState<string | null>(null);
 
     const audioRef = useRef<HTMLAudioElement>(null);
     const videoPreviewRef = useRef<HTMLVideoElement>(null);
@@ -400,6 +408,37 @@ const App: React.FC = () => {
     const handleDeleteMedia = (id: string) => {
         setMediaFiles(prev => prev.filter(media => media.id !== id));
     };
+
+    // --- AI CAPTION GENERATION ---
+    const handleGenerateCaption = async (mediaId: string, mediaFile: File) => {
+        if (!process.env.API_KEY) {
+            setError("API key is not configured for AI features.");
+            return;
+        }
+        setGeneratingCaptionId(mediaId);
+        setError(null);
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const imagePart = await fileToGenerativePart(mediaFile);
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: { parts: [imagePart, { text: "Describe this image in a short, one-sentence caption." }] },
+            });
+            
+            const caption = response.text;
+            if (caption) {
+                handleCaptionChange(mediaId, caption.trim());
+            } else {
+                throw new Error("AI did not generate a caption.");
+            }
+        } catch (err) {
+            console.error("AI Caption Generation Error:", err);
+            setError("Failed to generate AI caption. Please try again.");
+        } finally {
+            setGeneratingCaptionId(null);
+        }
+    };
+
 
     // --- SLIDESHOW PLAYBACK ---
     const handlePlay = () => {
@@ -807,15 +846,31 @@ const App: React.FC = () => {
                                                 </button>
                                             </div>
                                             {media.type === 'image' && (
-                                                <input
-                                                    type="text"
-                                                    value={media.caption}
-                                                    onChange={(e) => handleCaptionChange(media.id, e.target.value)}
-                                                    placeholder="Caption..."
-                                                    maxLength={80}
-                                                    className="w-full bg-gray-700 text-white text-xs rounded p-1 border border-transparent focus:outline-none focus:ring-1 focus:ring-brand-purple"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                />
+                                                <div className="relative w-full">
+                                                    <input
+                                                        type="text"
+                                                        value={media.caption}
+                                                        onChange={(e) => handleCaptionChange(media.id, e.target.value)}
+                                                        placeholder="Caption..."
+                                                        maxLength={80}
+                                                        className="w-full bg-gray-700 text-white text-xs rounded p-1 border border-transparent focus:outline-none focus:ring-1 focus:ring-brand-purple pr-6"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    />
+                                                    {settings.smartCaptionsEnabled && (
+                                                        <button
+                                                            onClick={() => handleGenerateCaption(media.id, media.file)}
+                                                            disabled={generatingCaptionId === media.id}
+                                                            className="absolute top-1/2 right-1 -translate-y-1/2 text-yellow-400 hover:text-yellow-300 disabled:text-gray-500 disabled:cursor-not-allowed"
+                                                            title="Generate AI Caption"
+                                                        >
+                                                            {generatingCaptionId === media.id ? (
+                                                                <div className="w-3 h-3 border-2 border-dashed rounded-full animate-spin border-white"></div>
+                                                            ) : (
+                                                                <SparklesIcon className="w-4 h-4" />
+                                                            )}
+                                                        </button>
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
                                     ))}
@@ -865,6 +920,12 @@ const App: React.FC = () => {
                                         <label htmlFor="showCaptions" className="text-sm font-medium text-gray-300">Show Captions</label>
                                         <button onClick={() => setSettings(s => ({...s, showCaptions: !s.showCaptions}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showCaptions ? 'bg-brand-purple' : 'bg-gray-600'}`}>
                                             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.showCaptions ? 'translate-x-6' : 'translate-x-1'}`}/>
+                                        </button>
+                                    </div>
+                                     <div className="flex items-center justify-between pt-2 border-t border-gray-700/50">
+                                        <label htmlFor="smartCaptions" className="text-sm font-medium text-gray-300">Enable Smart Captions (AI)</label>
+                                        <button onClick={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.smartCaptionsEnabled ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                            <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.smartCaptionsEnabled ? 'translate-x-6' : 'translate-x-1'}`}/>
                                         </button>
                                     </div>
                                 </div>
@@ -1057,7 +1118,7 @@ const App: React.FC = () => {
                             <ol className="list-decimal list-inside space-y-2">
                                 <li><strong>Sign In:</strong> Click the "Sign in with Google" button to save and manage your creations.</li>
                                 <li><strong>Upload Media:</strong> Click the upload box to select up to 20 of your favorite images and videos.</li>
-                                <li><strong>Add Captions:</strong> After uploading, type a short description below each image. It will appear during the slideshow.</li>
+                                <li><strong>Add Captions:</strong> Type a description below each image. Or, enable "Smart Captions" in Settings and click the ✨ icon to generate one with AI!</li>
                                 <li><strong>Add Music:</strong> Click the music box to add a background audio track to your slideshow.</li>
                                 <li><strong>Customize:</strong> Use the Settings panel to choose slide styles and duration.</li>
                                 <li><strong>Save & Share:</strong> Name your slideshow, hit "Save", and use the "Share" icon to invite friends.</li>
