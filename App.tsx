@@ -768,7 +768,7 @@ const App: React.FC = () => {
                                 </div>
                                 <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*" className="hidden" />
                                 {audioFile && (
-                                    <audio ref={audioRef} src={URL.createObjectURL(audioFile.file)} className="w-full mt-4" controls />
+                                    <audio ref={audioRef} src={URL.createObjectURL(audioFile.file)} loop className="w-full mt-4" controls />
                                 )}
                             </div>
 
