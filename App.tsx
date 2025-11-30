@@ -80,6 +80,7 @@ interface SlideshowSettings {
     slideStyle: string;
     showClock: boolean;
     smartCaptionsEnabled: boolean;
+    repeatSlideshow: boolean;
 }
 
 interface SerializedMediaFile {
@@ -217,6 +218,7 @@ const App: React.FC = () => {
         slideStyle: 'ken-burns',
         showClock: true,
         smartCaptionsEnabled: false,
+        repeatSlideshow: false,
     });
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentSlide, setCurrentSlide] = useState(0);
@@ -362,8 +364,6 @@ const App: React.FC = () => {
         setMediaFiles(prev => prev.filter(media => media.id !== id));
     };
 
-    const currentMedia = useMemo(() => mediaFiles[currentSlide], [mediaFiles, currentSlide]);
-
     // --- SLIDESHOW PLAYBACK ---
     const handlePlay = () => {
         if (mediaFiles.length === 0) {
@@ -373,47 +373,110 @@ const App: React.FC = () => {
         setError(null);
         setCurrentSlide(0);
         setIsPlaying(true);
-        if (audioRef.current && audioFile && mediaFiles[0].type === 'image') {
+        if (audioRef.current && audioFile) {
             audioRef.current.currentTime = 0;
-            audioRef.current.play().catch(e => console.error("Audio play failed", e));
+            audioRef.current.volume = 1;
+            if (mediaFiles[0].type === 'image') {
+              audioRef.current.play().catch(e => console.error("Audio play failed", e));
+            }
         }
     };
-
-    useEffect(() => {
-        let timer: NodeJS.Timeout;
-        if (isPlaying && mediaFiles.length > 0) {
-            const currentMedia = mediaFiles[currentSlide];
-            if (currentMedia.type === 'image') {
-                timer = setTimeout(() => {
-                    setCurrentSlide(prev => (prev + 1) % mediaFiles.length);
-                }, settings.interval * 1000);
-            }
-        }
-        return () => clearTimeout(timer);
-    }, [isPlaying, currentSlide, mediaFiles, settings.interval]);
-
-    useEffect(() => {
-        if (!isPlaying || !currentMedia) return;
-        if (currentMedia.type === 'video') {
-            if (audioRef.current) audioRef.current.pause();
-            if (videoPreviewRef.current) {
-                videoPreviewRef.current.muted = false;
-                videoPreviewRef.current.play().catch(e => console.error("Video play failed", e));
-            }
-        } else if (currentMedia.type === 'image') {
-            if (audioRef.current && audioFile) {
-                audioRef.current.play().catch(e => console.error("Audio play failed", e));
-            }
-        }
-    }, [isPlaying, currentMedia, audioFile]);
-
 
     const handleClosePreview = () => {
         setIsPlaying(false);
         if (audioRef.current) {
             audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+            audioRef.current.volume = 1; // Reset volume
         }
     };
+    
+    useEffect(() => {
+        // Timers to clean up
+        let slideTimer: NodeJS.Timeout | undefined;
+        let fadeStartTimer: NodeJS.Timeout | undefined;
+        let fadeInterval: NodeJS.Timeout | undefined;
+
+        const cleanup = () => {
+            if (slideTimer) clearTimeout(slideTimer);
+            if (fadeStartTimer) clearTimeout(fadeStartTimer);
+            if (fadeInterval) clearInterval(fadeInterval);
+            // On cleanup, ensure volume is reset if we interrupt a fade
+            if (audioRef.current) {
+                audioRef.current.volume = 1;
+            }
+        };
+
+        if (!isPlaying || !mediaFiles.length) {
+            return cleanup;
+        }
+
+        const currentMedia = mediaFiles[currentSlide];
+        const isLastSlide = currentSlide === mediaFiles.length - 1;
+
+        // --- Manage state for the CURRENT slide ---
+        if (currentMedia.type === 'video') {
+            if (audioRef.current && !audioRef.current.paused) audioRef.current.pause();
+            if (videoPreviewRef.current) {
+                videoPreviewRef.current.muted = false; // This is for the fullscreen preview
+                videoPreviewRef.current.play().catch(e => console.error("Video play failed", e));
+            }
+        } else { // Image
+            if (audioRef.current && audioFile && audioRef.current.paused) {
+                audioRef.current.volume = 1; // Reset volume at start of slide
+                audioRef.current.play().catch(e => console.error("Audio play failed", e));
+            }
+        }
+
+        // --- Set up transitions and audio effects for IMAGE slides ---
+        if (currentMedia.type === 'image') {
+            // --- 1. Set timer to advance to the next slide ---
+            slideTimer = setTimeout(() => {
+                const nextSlideIndex = (currentSlide + 1) % mediaFiles.length;
+
+                if (isLastSlide && !settings.repeatSlideshow) {
+                    setIsPlaying(false); // End of slideshow
+                } else {
+                    if (nextSlideIndex === 0 && audioRef.current && audioFile) {
+                        // Loop back to start, reset music
+                        audioRef.current.currentTime = 0;
+                    }
+                    setCurrentSlide(nextSlideIndex);
+                }
+            }, settings.interval * 1000);
+
+            // --- 2. Handle audio fade out on the last slide (if not repeating) ---
+            const FADE_DURATION = 5000;
+            if (isLastSlide && !settings.repeatSlideshow && audioRef.current && audioFile) {
+                const fadeStartTime = Math.max(0, settings.interval * 1000 - FADE_DURATION);
+
+                fadeStartTimer = setTimeout(() => {
+                    if (!audioRef.current) return;
+                    let currentVolume = audioRef.current.volume;
+                    const steps = 50; // 100ms interval for 5s
+                    const decrement = currentVolume / steps;
+
+                    fadeInterval = setInterval(() => {
+                        currentVolume -= decrement;
+                        if (currentVolume < 0) currentVolume = 0;
+                        if (audioRef.current) audioRef.current.volume = currentVolume;
+
+                        if (currentVolume <= 0) {
+                            clearInterval(fadeInterval);
+                            if (audioRef.current) {
+                                audioRef.current.pause();
+                                audioRef.current.currentTime = 0;
+                            }
+                        }
+                    }, FADE_DURATION / steps);
+                }, fadeStartTime);
+            }
+        }
+
+        return cleanup;
+    }, [isPlaying, currentSlide, mediaFiles, audioFile, settings]);
+
+
     
     // --- SAVE/LOAD/DELETE/SHARE LOGIC ---
     const handleSaveSlideshow = async () => {
@@ -729,6 +792,12 @@ const App: React.FC = () => {
                                             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.showClock ? 'translate-x-6' : 'translate-x-1'}`}/>
                                         </button>
                                     </div>
+                                    <div className="flex items-center justify-between">
+                                        <label htmlFor="repeatSlideshow" className="text-sm font-medium text-gray-300">Repeat Slideshow</label>
+                                        <button onClick={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.repeatSlideshow ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                            <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.repeatSlideshow ? 'translate-x-6' : 'translate-x-1'}`}/>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -736,7 +805,7 @@ const App: React.FC = () => {
                         {/* Preview and Manage Column */}
                         <div className="space-y-6">
                             <div className="bg-gray-800/50 p-6 rounded-lg">
-                               <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">4. Preview & Launch</h3>
+                               <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">4. Run Slideshow</h3>
                                 <div className="aspect-video bg-black rounded-lg flex items-center justify-center relative overflow-hidden">
                                     {mediaFiles.length > 0 ? (
                                         <img src={mediaFiles[0].previewUrl} alt="Preview" className="w-full h-full object-contain" />
@@ -815,24 +884,31 @@ const App: React.FC = () => {
                         <XIcon className="w-8 h-8" />
                     </button>
                     
-                    {currentMedia && (
+                    {mediaFiles[currentSlide] && (
                         <div className="w-full h-full relative">
-                            {currentMedia.type === 'image' && (
+                            {mediaFiles[currentSlide].type === 'image' && (
                                 <img
-                                    key={currentMedia.id}
-                                    src={currentMedia.previewUrl}
+                                    key={mediaFiles[currentSlide].id}
+                                    src={mediaFiles[currentSlide].previewUrl}
                                     alt="Slideshow"
                                     className={`w-full h-full object-cover animate-${settings.slideStyle}`}
                                 />
                             )}
-                            {currentMedia.type === 'video' && (
+                            {mediaFiles[currentSlide].type === 'video' && (
                                 <video
                                     ref={videoPreviewRef}
-                                    key={currentMedia.id}
-                                    src={currentMedia.previewUrl}
+                                    key={mediaFiles[currentSlide].id}
+                                    src={mediaFiles[currentSlide].previewUrl}
                                     className="w-full h-full object-contain"
                                     autoPlay
-                                    onEnded={() => setCurrentSlide(prev => (prev + 1) % mediaFiles.length)}
+                                    onEnded={() => {
+                                        const nextSlide = (currentSlide + 1) % mediaFiles.length;
+                                        if (nextSlide === 0 && !settings.repeatSlideshow) {
+                                            setIsPlaying(false);
+                                        } else {
+                                          setCurrentSlide(nextSlide);
+                                        }
+                                    }}
                                 />
                             )}
                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30" />
