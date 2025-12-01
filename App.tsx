@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 // Fix: Corrected Firebase imports to use the v9 modular SDK style (e.g., 'firebase/app')
@@ -469,15 +470,15 @@ const App: React.FC = () => {
         }
     };
     
+    // FIX: Reworked playback logic to be more robust. It now correctly handles transitions
+    // from videos to images by centralizing all advancement logic within this useEffect
+    // and using a reliable event listener for the 'ended' event on videos.
     useEffect(() => {
-        // FIX: Replaced `NodeJS.Timeout` with browser-compatible timer types
-        // (`ReturnType<typeof...`) to resolve "Cannot find namespace 'NodeJS'" errors.
         let slideTimer: ReturnType<typeof setTimeout> | undefined;
         let fadeStartTimer: ReturnType<typeof setTimeout> | undefined;
         let fadeInterval: ReturnType<typeof setInterval> | undefined;
+        const videoElement = videoPreviewRef.current;
 
-        // The cleanup function now only clears timers, preventing it from
-        // resetting the volume during a fade-out.
         const cleanup = () => {
             if (slideTimer) clearTimeout(slideTimer);
             if (fadeStartTimer) clearTimeout(fadeStartTimer);
@@ -485,7 +486,6 @@ const App: React.FC = () => {
         };
 
         if (!isPlaying || !mediaFiles.length) {
-            // When stopping playback, explicitly reset volume
             if (audioRef.current) {
                 audioRef.current.volume = 1;
             }
@@ -495,67 +495,62 @@ const App: React.FC = () => {
         const currentMedia = mediaFiles[currentSlide];
         const isLastSlide = currentSlide === mediaFiles.length - 1;
 
-        // --- Manage state for the CURRENT slide ---
+        const advanceSlide = () => {
+            const nextSlideIndex = (currentSlide + 1) % mediaFiles.length;
+            if (isLastSlide && !settings.repeatSlideshow) {
+                setIsPlaying(false);
+            } else {
+                 if (nextSlideIndex === 0 && settings.repeatSlideshow && audioRef.current) {
+                    audioRef.current.currentTime = 0;
+                }
+                setCurrentSlide(nextSlideIndex);
+            }
+        };
+
         if (currentMedia.type === 'video') {
             if (audioRef.current && !audioRef.current.paused) audioRef.current.pause();
-            if (videoPreviewRef.current) {
-                videoPreviewRef.current.muted = false;
-                videoPreviewRef.current.play().catch(e => console.error("Video play failed", e));
+            if (videoElement) {
+                videoElement.muted = false;
+                videoElement.play().catch(e => console.error("Video play failed", e));
+
+                const handleVideoEnd = () => advanceSlide();
+                videoElement.addEventListener('ended', handleVideoEnd);
+
+                return () => {
+                    cleanup();
+                    videoElement.removeEventListener('ended', handleVideoEnd);
+                };
             }
         } else { // Image
             if (audioRef.current && audioFile && audioRef.current.paused) {
-                // Ensure volume is full for non-fading slides
                 audioRef.current.volume = 1;
                 audioRef.current.play().catch(e => console.error("Audio play failed", e));
             }
-        }
-
-        // --- Set up transitions and audio effects for IMAGE slides ---
-        if (currentMedia.type === 'image') {
+            
             const slideDurationMs = settings.interval * 1000;
+            slideTimer = setTimeout(advanceSlide, slideDurationMs);
 
-            // --- 1. Set timer to advance to the next slide ---
-            slideTimer = setTimeout(() => {
-                const nextSlideIndex = (currentSlide + 1) % mediaFiles.length;
-
-                if (isLastSlide && !settings.repeatSlideshow) {
-                    setIsPlaying(false); // End of slideshow
-                } else {
-                    if (nextSlideIndex === 0 && audioRef.current && audioFile) {
-                        audioRef.current.currentTime = 0;
-                    }
-                    setCurrentSlide(nextSlideIndex);
-                }
-            }, slideDurationMs);
-
-            // --- 2. Handle audio fade out on the last slide (if not repeating) ---
             if (isLastSlide && !settings.repeatSlideshow && audioRef.current && audioFile) {
-                // The fade duration is now dynamic: it's the shorter of 5s or the slide's duration.
                 const fadeDuration = Math.min(5000, slideDurationMs);
                 const fadeStartTime = Math.max(0, slideDurationMs - fadeDuration);
 
                 fadeStartTimer = setTimeout(() => {
                     if (!audioRef.current) return;
                     let currentVolume = audioRef.current.volume;
-                    const steps = 50; 
+                    const steps = 50;
                     const decrement = currentVolume / steps;
                     const intervalTime = fadeDuration / steps;
 
                     fadeInterval = setInterval(() => {
                         currentVolume -= decrement;
                         if (currentVolume < 0) currentVolume = 0;
-                        
-                        if (audioRef.current) {
-                            audioRef.current.volume = currentVolume;
-                        }
-
+                        if (audioRef.current) audioRef.current.volume = currentVolume;
                         if (currentVolume <= 0) {
                             clearInterval(fadeInterval);
                             if (audioRef.current) {
                                 audioRef.current.pause();
                                 audioRef.current.currentTime = 0;
-                                // Reset volume after pausing for next playback
-                                audioRef.current.volume = 1; 
+                                audioRef.current.volume = 1;
                             }
                         }
                     }, intervalTime);
@@ -1054,14 +1049,6 @@ const App: React.FC = () => {
                                     src={mediaFiles[currentSlide].previewUrl}
                                     className="w-full h-full object-contain"
                                     autoPlay
-                                    onEnded={() => {
-                                        const nextSlide = (currentSlide + 1) % mediaFiles.length;
-                                        if (nextSlide === 0 && !settings.repeatSlideshow) {
-                                            setIsPlaying(false);
-                                        } else {
-                                          setCurrentSlide(nextSlide);
-                                        }
-                                    }}
                                 />
                             )}
                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30" />
