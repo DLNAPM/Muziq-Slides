@@ -250,6 +250,10 @@ const App: React.FC = () => {
     // AI Caption state
     const [generatingCaptionId, setGeneratingCaptionId] = useState<string | null>(null);
 
+    // Drag and Drop state
+    const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
+    const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
     const audioRef = useRef<HTMLAudioElement>(null);
     const videoPreviewRef = useRef<HTMLVideoElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -411,6 +415,47 @@ const App: React.FC = () => {
     const handleDeleteMedia = (id: string) => {
         setMediaFiles(prev => prev.filter(media => media.id !== id));
     };
+
+    // --- DRAG AND DROP HANDLERS ---
+    const handleDragStart = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+        setDraggedItemIndex(index);
+        e.dataTransfer.effectAllowed = 'move';
+        // setData is required for Firefox to initiate drag
+        e.dataTransfer.setData('text/plain', index.toString());
+    };
+
+    const handleDragOver = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+        e.preventDefault(); // Necessary to allow dropping
+        if (index !== dragOverIndex) {
+            setDragOverIndex(index);
+        }
+    };
+
+    const handleDragLeave = () => {
+        setDragOverIndex(null);
+    };
+
+    const handleDrop = (dropIndex: number) => {
+        if (draggedItemIndex === null || draggedItemIndex === dropIndex) {
+            setDraggedItemIndex(null);
+            setDragOverIndex(null);
+            return;
+        }
+
+        const newMediaFiles = [...mediaFiles];
+        const [draggedItem] = newMediaFiles.splice(draggedItemIndex, 1);
+        newMediaFiles.splice(dropIndex, 0, draggedItem);
+
+        setMediaFiles(newMediaFiles);
+        setDraggedItemIndex(null);
+        setDragOverIndex(null);
+    };
+
+    const handleDragEnd = () => {
+        setDraggedItemIndex(null);
+        setDragOverIndex(null);
+    };
+
 
     // --- AI CAPTION GENERATION ---
     const handleGenerateCaption = async (mediaId: string, mediaFile: File) => {
@@ -845,10 +890,22 @@ const App: React.FC = () => {
                                 </div>
                                 <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*" className="hidden" />
                                 <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 gap-4">
-                                    {mediaFiles.map(media => (
-                                        <div key={media.id} className="group flex flex-col gap-1">
-                                            <div className="relative">
-                                                <img src={media.previewUrl} alt={media.file.name} className="w-full h-24 object-cover rounded-md" />
+                                    {mediaFiles.map((media, index) => (
+                                        <div 
+                                            key={media.id} 
+                                            className={`flex flex-col gap-1 transition-all duration-200 cursor-grab active:cursor-grabbing
+                                                ${draggedItemIndex === index ? 'opacity-30 scale-95' : 'opacity-100'}
+                                                ${dragOverIndex === index ? 'bg-brand-purple/20 rounded-lg' : ''}
+                                            `}
+                                            draggable
+                                            onDragStart={(e) => handleDragStart(e, index)}
+                                            onDragOver={(e) => handleDragOver(e, index)}
+                                            onDragLeave={handleDragLeave}
+                                            onDrop={() => handleDrop(index)}
+                                            onDragEnd={handleDragEnd}
+                                        >
+                                            <div className="group relative">
+                                                <img src={media.previewUrl} alt={media.file.name} className="w-full h-24 object-cover rounded-md pointer-events-none" />
                                                 <button onClick={() => handleDeleteMedia(media.id)} className="absolute top-1 right-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity">
                                                     <XIcon className="w-4 h-4" />
                                                 </button>
@@ -1118,6 +1175,7 @@ const App: React.FC = () => {
                             <ol className="list-decimal list-inside space-y-2">
                                 <li><strong>Sign In:</strong> Click the "Sign in with Google" button to save and manage your creations.</li>
                                 <li><strong>Upload Media:</strong> Click the upload box to select up to 20 of your favorite images and videos.</li>
+                                <li><strong>Arrange Your Story:</strong> Simply drag and drop the thumbnails to reorder your media and perfect the flow of your slideshow.</li>
                                 <li><strong>Add Captions:</strong> Type a description below each image. Or, enable "Smart Captions" in Settings and click the ✨ icon to generate one with AI!</li>
                                 <li><strong>Add Music:</strong> Click the music box to add a background audio track to your slideshow.</li>
                                 <li><strong>Customize:</strong> Use the Settings panel to choose slide styles and duration.</li>
