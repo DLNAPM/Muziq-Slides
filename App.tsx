@@ -486,9 +486,6 @@ const App: React.FC = () => {
         };
 
         if (!isPlaying || !mediaFiles.length) {
-            if (audioRef.current) {
-                audioRef.current.volume = 1;
-            }
             return cleanup;
         }
 
@@ -550,7 +547,9 @@ const App: React.FC = () => {
                             if (audioRef.current) {
                                 audioRef.current.pause();
                                 audioRef.current.currentTime = 0;
-                                audioRef.current.volume = 1;
+                                // FIX: Removed the line that reset the volume to 1 immediately,
+                                // which was canceling the fade-out effect. The volume is now
+                                // correctly reset only when the preview is closed or restarted.
                             }
                         }
                     }, intervalTime);
