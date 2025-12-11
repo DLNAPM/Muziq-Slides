@@ -515,13 +515,11 @@ const App: React.FC = () => {
     // Reworked playback logic to mute videos and keep background music playing.
     useEffect(() => {
         let slideTimer: ReturnType<typeof setTimeout> | undefined;
-        let fadeStartTimer: ReturnType<typeof setTimeout> | undefined;
         let fadeInterval: ReturnType<typeof setInterval> | undefined;
         const videoElement = videoPreviewRef.current;
 
         const cleanup = () => {
             if (slideTimer) clearTimeout(slideTimer);
-            if (fadeStartTimer) clearTimeout(fadeStartTimer);
             if (fadeInterval) clearInterval(fadeInterval);
         };
 
@@ -532,6 +530,39 @@ const App: React.FC = () => {
         const currentMedia = mediaFiles[currentSlide];
         const isLastSlide = currentSlide === mediaFiles.length - 1;
 
+        // --- AUDIO MANAGEMENT ---
+        if (audioRef.current && audioFile) {
+            // Ensure audio is playing
+            if (audioRef.current.paused) {
+                audioRef.current.play().catch(e => console.error("Audio play failed", e));
+            }
+            
+            // Ensure volume is reset to 1 at the start of each slide.
+            // If it is the last slide, the fade logic below will immediately start decrementing it.
+            audioRef.current.volume = 1;
+        }
+        
+        // --- FADE OUT LOGIC (Last Slide Only) ---
+        if (isLastSlide && !settings.repeatSlideshow && audioRef.current && audioFile) {
+            const fadeDuration = settings.interval * 1000;
+            const steps = 50;
+            const intervalTime = fadeDuration / steps;
+            let currentVolume = 1;
+            const decrement = currentVolume / steps;
+
+            fadeInterval = setInterval(() => {
+                if (!audioRef.current) return;
+                currentVolume -= decrement;
+                if (currentVolume < 0) currentVolume = 0;
+                audioRef.current.volume = currentVolume;
+                
+                if (currentVolume <= 0) {
+                    clearInterval(fadeInterval);
+                }
+            }, intervalTime);
+        }
+
+        // --- ADVANCE SLIDE LOGIC ---
         const advanceSlide = () => {
             const nextSlideIndex = (currentSlide + 1) % mediaFiles.length;
             if (isLastSlide && !settings.repeatSlideshow) {
@@ -539,19 +570,15 @@ const App: React.FC = () => {
             } else {
                  if (nextSlideIndex === 0 && settings.repeatSlideshow && audioRef.current) {
                     audioRef.current.currentTime = 0;
+                    // Volume will be reset to 1 by the effect running for the next slide (slide 0)
                 }
                 setCurrentSlide(nextSlideIndex);
             }
         };
 
         if (currentMedia.type === 'video') {
-            // Ensure background music continues playing.
-            if (audioRef.current && audioFile && audioRef.current.paused) {
-                audioRef.current.play().catch(e => console.error("Audio play failed", e));
-            }
-            
-            // The video element itself is muted via a JSX property.
             if (videoElement) {
+                // Ensure video is playing (muted by prop)
                 videoElement.play().catch(e => console.error("Video play failed", e));
 
                 const handleVideoEnd = () => advanceSlide();
@@ -565,40 +592,8 @@ const App: React.FC = () => {
                 };
             }
         } else { // Image
-            // This logic will start music or resume it if it was paused.
-            if (audioRef.current && audioFile && audioRef.current.paused) {
-                audioRef.current.volume = 1;
-                audioRef.current.play().catch(e => console.error("Audio play failed", e));
-            }
-            
             const slideDurationMs = settings.interval * 1000;
             slideTimer = setTimeout(advanceSlide, slideDurationMs);
-
-            if (isLastSlide && !settings.repeatSlideshow && audioRef.current && audioFile) {
-                const fadeDuration = Math.min(5000, slideDurationMs);
-                const fadeStartTime = Math.max(0, slideDurationMs - fadeDuration);
-
-                fadeStartTimer = setTimeout(() => {
-                    if (!audioRef.current) return;
-                    let currentVolume = audioRef.current.volume;
-                    const steps = 50;
-                    const decrement = currentVolume / steps;
-                    const intervalTime = fadeDuration / steps;
-
-                    fadeInterval = setInterval(() => {
-                        currentVolume -= decrement;
-                        if (currentVolume < 0) currentVolume = 0;
-                        if (audioRef.current) audioRef.current.volume = currentVolume;
-                        if (currentVolume <= 0) {
-                            clearInterval(fadeInterval);
-                            if (audioRef.current) {
-                                audioRef.current.pause();
-                                audioRef.current.currentTime = 0;
-                            }
-                        }
-                    }, intervalTime);
-                }, fadeStartTime);
-            }
         }
 
         return cleanup;
