@@ -65,6 +65,7 @@ interface ImageFile {
   previewUrl: string;
   caption: string;
   rotation: number;
+  serverData?: { url: string; storagePath: string; };
 }
 
 interface VideoFile {
@@ -73,9 +74,16 @@ interface VideoFile {
     file: File;
     previewUrl: string;
     rotation: number;
+    serverData?: { url: string; storagePath: string; };
 }
 
 type MediaFile = ImageFile | VideoFile;
+
+interface AppStateAudio {
+    file: File;
+    name: string;
+    serverData?: { url: string; storagePath: string; };
+}
 
 interface SlideshowSettings {
     interval: number;
@@ -226,7 +234,7 @@ const RotateIcon: React.FC<{ className?: string }> = ({ className }) => (
 const App: React.FC = () => {
     const [user, setUser] = useState<User | null>(null);
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
-    const [audioFile, setAudioFile] = useState<{ file: File, name: string } | null>(null);
+    const [audioFile, setAudioFile] = useState<AppStateAudio | null>(null);
     const [settings, setSettings] = useState<SlideshowSettings>({
         interval: 5,
         slideStyle: 'ken-burns',
@@ -684,12 +692,28 @@ const App: React.FC = () => {
             
             const serializedMedia: SerializedMediaFile[] = await Promise.all(
                 mediaFiles.map(async (media) => {
+                    // Check if file is already on server (for existing/shared media)
+                    if (media.serverData) {
+                         const baseMedia = {
+                            id: media.id,
+                            type: media.type,
+                            name: media.file.name,
+                            url: media.serverData.url,
+                            storagePath: media.serverData.storagePath,
+                            rotation: media.rotation,
+                        };
+                        if (media.type === 'image') {
+                            return { ...baseMedia, caption: media.caption };
+                        }
+                        return baseMedia;
+                    }
+
+                    // New file - upload it
                     const filePath = `users/${user.uid}/${slideshowId}/${media.file.name}-${media.id}`;
                     const fileRef = ref(storage, filePath);
                     await uploadBytes(fileRef, media.file);
                     const url = await getDownloadURL(fileRef);
                     
-                    // Base object with common properties
                     const baseMedia = {
                         id: media.id,
                         type: media.type,
@@ -699,25 +723,28 @@ const App: React.FC = () => {
                         rotation: media.rotation,
                     };
 
-                    // Only add caption for images to avoid undefined values in Firestore
                     if (media.type === 'image') {
-                        return {
-                            ...baseMedia,
-                            caption: media.caption
-                        };
+                        return { ...baseMedia, caption: media.caption };
                     }
-
                     return baseMedia;
                 })
             );
 
             let serializedAudio: SerializedAudioFile | null = null;
             if (audioFile) {
-                const filePath = `users/${user.uid}/${slideshowId}/${audioFile.file.name}`;
-                const fileRef = ref(storage, filePath);
-                await uploadBytes(fileRef, audioFile.file);
-                const url = await getDownloadURL(fileRef);
-                serializedAudio = { name: audioFile.file.name, url, storagePath: filePath };
+                if (audioFile.serverData) {
+                    serializedAudio = {
+                        name: audioFile.name,
+                        url: audioFile.serverData.url,
+                        storagePath: audioFile.serverData.storagePath
+                    };
+                } else {
+                    const filePath = `users/${user.uid}/${slideshowId}/${audioFile.file.name}`;
+                    const fileRef = ref(storage, filePath);
+                    await uploadBytes(fileRef, audioFile.file);
+                    const url = await getDownloadURL(fileRef);
+                    serializedAudio = { name: audioFile.file.name, url, storagePath: filePath };
+                }
             }
 
             if (currentSlideshowId) { // Update existing slideshow
@@ -728,6 +755,7 @@ const App: React.FC = () => {
                     settings,
                     timestamp: serverTimestamp() as Timestamp,
                 };
+                // Ensure we are updating the existing doc, preserving sharedWith and ownerInfo
                 await updateDoc(doc(db, 'slideshows', currentSlideshowId), updateData);
             } else { // Create new slideshow
                 const slideshowData: Omit<SavedSlideshow, 'id'> = {
@@ -770,6 +798,7 @@ const App: React.FC = () => {
                            previewUrl: URL.createObjectURL(file),
                            caption: media.caption || '',
                            rotation: media.rotation || 0,
+                           serverData: { url: media.url, storagePath: media.storagePath }
                         };
                     } else {
                         return {
@@ -778,15 +807,20 @@ const App: React.FC = () => {
                            file,
                            previewUrl: URL.createObjectURL(file),
                            rotation: media.rotation || 0,
+                           serverData: { url: media.url, storagePath: media.storagePath }
                         };
                     }
                 })
             );
 
-            let newAudioFile: { file: File; name: string } | null = null;
+            let newAudioFile: AppStateAudio | null = null;
             if (slideshow.audio) {
                 const file = await urlToFile(slideshow.audio.url, slideshow.audio.name);
-                newAudioFile = { file, name: file.name };
+                newAudioFile = { 
+                    file, 
+                    name: file.name,
+                    serverData: { url: slideshow.audio.url, storagePath: slideshow.audio.storagePath }
+                };
             }
 
             setMediaFiles(newMediaFiles);
