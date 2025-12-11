@@ -64,6 +64,7 @@ interface ImageFile {
   file: File;
   previewUrl: string;
   caption: string;
+  rotation: number;
 }
 
 interface VideoFile {
@@ -71,6 +72,7 @@ interface VideoFile {
     type: 'video';
     file: File;
     previewUrl: string;
+    rotation: number;
 }
 
 type MediaFile = ImageFile | VideoFile;
@@ -91,6 +93,7 @@ interface SerializedMediaFile {
     url: string; 
     storagePath: string;
     caption?: string;
+    rotation?: number;
 }
 
 interface SerializedAudioFile {
@@ -210,6 +213,11 @@ const ShareIcon: React.FC<{ className?: string }> = ({ className }) => (
 const SparklesIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="currentColor" viewBox="0 0 24 24">
         <path d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.321l5.478.698a.563.563 0 01.31.95l-4.233 3.585a.563.563 0 00-.154.543l1.232 5.022a.563.563 0 01-.82.63l-4.735-2.79a.563.563 0 00-.536 0l-4.735 2.79a.563.563 0 01-.82-.63l1.232-5.022a.563.563 0 00-.154-.543l-4.233-3.585a.563.563 0 01.31-.95l5.478-.698a.563.563 0 00.475-.321L11.48 3.5z" />
+    </svg>
+);
+const RotateIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
     </svg>
 );
 
@@ -381,6 +389,7 @@ const App: React.FC = () => {
                         previewUrl: URL.createObjectURL(file),
                         type: 'image',
                         caption: '',
+                        rotation: 0,
                     };
                 } else {
                      return {
@@ -388,6 +397,7 @@ const App: React.FC = () => {
                         file,
                         previewUrl: URL.createObjectURL(file),
                         type: 'video',
+                        rotation: 0,
                     };
                 }
             });
@@ -412,6 +422,16 @@ const App: React.FC = () => {
 
     const handleDeleteMedia = (id: string) => {
         setMediaFiles(prev => prev.filter(media => media.id !== id));
+    };
+
+    const handleRotateMedia = (id: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setMediaFiles(prev => prev.map(media => {
+            if (media.id === id) {
+                return { ...media, rotation: (media.rotation + 90) % 360 };
+            }
+            return media;
+        }));
     };
 
     // --- DRAG AND DROP HANDLERS ---
@@ -635,6 +655,7 @@ const App: React.FC = () => {
                         url,
                         storagePath: filePath,
                         caption: media.type === 'image' ? media.caption : undefined,
+                        rotation: media.rotation,
                     };
                 })
             );
@@ -697,6 +718,7 @@ const App: React.FC = () => {
                            file,
                            previewUrl: URL.createObjectURL(file),
                            caption: media.caption || '',
+                           rotation: media.rotation || 0,
                         };
                     } else {
                         return {
@@ -704,6 +726,7 @@ const App: React.FC = () => {
                            type: 'video',
                            file,
                            previewUrl: URL.createObjectURL(file),
+                           rotation: media.rotation || 0,
                         };
                     }
                 })
@@ -898,14 +921,27 @@ const App: React.FC = () => {
                                             onDrop={() => handleDrop(index)}
                                             onDragEnd={handleDragEnd}
                                         >
-                                            <div className="group relative w-full h-24">
+                                            <div className="group relative w-full h-24 overflow-hidden rounded-md">
                                                 {media.type === 'video' ? (
-                                                    <video src={media.previewUrl} className="w-full h-full object-cover rounded-md pointer-events-none" muted />
+                                                    <video 
+                                                        src={media.previewUrl} 
+                                                        className="w-full h-full object-cover pointer-events-none transition-transform duration-300" 
+                                                        style={{ transform: `rotate(${media.rotation}deg)` }}
+                                                        muted 
+                                                    />
                                                 ) : (
-                                                    <img src={media.previewUrl} alt={media.file.name} className="w-full h-full object-cover rounded-md pointer-events-none" />
+                                                    <img 
+                                                        src={media.previewUrl} 
+                                                        alt={media.file.name} 
+                                                        className="w-full h-full object-cover pointer-events-none transition-transform duration-300"
+                                                        style={{ transform: `rotate(${media.rotation}deg)` }} 
+                                                    />
                                                 )}
-                                                <button onClick={() => handleDeleteMedia(media.id)} className="absolute top-1 right-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button onClick={() => handleDeleteMedia(media.id)} className="absolute top-1 right-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity z-10">
                                                     <XIcon className="w-4 h-4" />
+                                                </button>
+                                                 <button onClick={(e) => handleRotateMedia(media.id, e)} className="absolute top-1 left-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity z-10" title="Rotate">
+                                                    <RotateIcon className="w-4 h-4" />
                                                 </button>
                                             </div>
                                             {media.type === 'image' && (
@@ -1001,7 +1037,24 @@ const App: React.FC = () => {
                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">4. Run Slideshow</h3>
                                 <div className="aspect-video bg-black rounded-lg flex items-center justify-center relative overflow-hidden">
                                     {mediaFiles.length > 0 ? (
-                                        <img src={mediaFiles[0].previewUrl} alt="Preview" className="w-full h-full object-contain" />
+                                        <div className="w-full h-full relative">
+                                            {/* Static preview uses simple image/video tag. Rotation applied. */}
+                                            {mediaFiles[0].type === 'image' ? (
+                                                 <img 
+                                                    src={mediaFiles[0].previewUrl} 
+                                                    alt="Preview" 
+                                                    className="w-full h-full object-contain"
+                                                    style={{ transform: `rotate(${mediaFiles[0].rotation}deg)` }}
+                                                />
+                                            ) : (
+                                                 <video 
+                                                    src={mediaFiles[0].previewUrl} 
+                                                    className="w-full h-full object-contain"
+                                                    style={{ transform: `rotate(${mediaFiles[0].rotation}deg)` }}
+                                                    muted
+                                                />
+                                            )}
+                                        </div>
                                     ) : (
                                         <div className="text-gray-500 text-center">
                                             <FilmIcon className="w-24 h-24 mx-auto" />
@@ -1078,35 +1131,40 @@ const App: React.FC = () => {
                     </button>
                     
                     {mediaFiles[currentSlide] && (
-                        <div className="w-full h-full relative">
-                            {mediaFiles[currentSlide].type === 'image' && (
-                                <>
-                                    <img
+                        <div className="w-full h-full relative overflow-hidden">
+                            {/* Wrapper applies the animation */}
+                            <div className={`w-full h-full absolute inset-0 animate-${settings.slideStyle}`}>
+                                {mediaFiles[currentSlide].type === 'image' && (
+                                    <>
+                                        <img
+                                            key={mediaFiles[currentSlide].id}
+                                            src={mediaFiles[currentSlide].previewUrl}
+                                            alt="Slideshow"
+                                            className="w-full h-full object-cover"
+                                            style={{ transform: `rotate(${mediaFiles[currentSlide].rotation}deg)` }}
+                                        />
+                                        {settings.showCaptions && (mediaFiles[currentSlide] as ImageFile).caption && (
+                                            <div className="absolute bottom-5 left-0 right-0 p-4 text-center">
+                                                <p className="inline-block bg-black/50 text-white text-xl md:text-2xl font-semibold py-2 px-4 rounded-lg animate-fade-in">
+                                                    {(mediaFiles[currentSlide] as ImageFile).caption}
+                                                </p>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                                {mediaFiles[currentSlide].type === 'video' && (
+                                    <video
+                                        ref={videoPreviewRef}
                                         key={mediaFiles[currentSlide].id}
                                         src={mediaFiles[currentSlide].previewUrl}
-                                        alt="Slideshow"
-                                        className={`w-full h-full object-cover animate-${settings.slideStyle}`}
+                                        className="w-full h-full object-contain"
+                                        style={{ transform: `rotate(${mediaFiles[currentSlide].rotation}deg)` }}
+                                        autoPlay
+                                        muted
                                     />
-                                    {settings.showCaptions && (mediaFiles[currentSlide] as ImageFile).caption && (
-                                        <div className="absolute bottom-5 left-0 right-0 p-4 text-center">
-                                            <p className="inline-block bg-black/50 text-white text-xl md:text-2xl font-semibold py-2 px-4 rounded-lg animate-fade-in">
-                                                {(mediaFiles[currentSlide] as ImageFile).caption}
-                                            </p>
-                                        </div>
-                                    )}
-                                </>
-                            )}
-                            {mediaFiles[currentSlide].type === 'video' && (
-                                <video
-                                    ref={videoPreviewRef}
-                                    key={mediaFiles[currentSlide].id}
-                                    src={mediaFiles[currentSlide].previewUrl}
-                                    className="w-full h-full object-contain"
-                                    autoPlay
-                                    muted
-                                />
-                            )}
-                             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30" />
+                                )}
+                            </div>
+                             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30 pointer-events-none" />
                         </div>
                     )}
 
@@ -1174,7 +1232,7 @@ const App: React.FC = () => {
                             <ol className="list-decimal list-inside space-y-2">
                                 <li><strong>Sign In:</strong> Click the "Sign in with Google" button to save and manage your creations.</li>
                                 <li><strong>Upload Media:</strong> Click the upload box to select up to 20 of your favorite images and videos.</li>
-                                <li><strong>Arrange Your Story:</strong> Simply drag and drop the thumbnails to reorder your media and perfect the flow of your slideshow.</li>
+                                <li><strong>Arrange & Rotate:</strong> Drag and drop thumbnails to reorder. Click the rotate icon on any image/video to fix its orientation.</li>
                                 <li><strong>Add Captions:</strong> Type a description below each image. Or, enable "Smart Captions" in Settings and click the ✨ icon to generate one with AI!</li>
                                 <li><strong>Add Music:</strong> Click the music box to add a background audio track to your slideshow.</li>
                                 <li><strong>Customize:</strong> Use the Settings panel to choose slide styles and duration.</li>
