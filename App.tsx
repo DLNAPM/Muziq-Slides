@@ -531,16 +531,27 @@ const App: React.FC = () => {
             audioRef.current.volume = 1; // Reset volume
         }
     };
+
+    // Ensure audio stops if slideshow ends automatically (via state change)
+    useEffect(() => {
+        if (!isPlaying && audioRef.current) {
+             audioRef.current.pause();
+             audioRef.current.currentTime = 0;
+             audioRef.current.volume = 1;
+        }
+    }, [isPlaying]);
     
     // Reworked playback logic to mute videos and keep background music playing.
     useEffect(() => {
         let slideTimer: ReturnType<typeof setTimeout> | undefined;
         let fadeInterval: ReturnType<typeof setInterval> | undefined;
+        let fadeTimer: ReturnType<typeof setTimeout> | undefined;
         const videoElement = videoPreviewRef.current;
 
         const cleanup = () => {
             if (slideTimer) clearTimeout(slideTimer);
             if (fadeInterval) clearInterval(fadeInterval);
+            if (fadeTimer) clearTimeout(fadeTimer);
         };
 
         if (!isPlaying || !mediaFiles.length) {
@@ -558,28 +569,58 @@ const App: React.FC = () => {
             }
             
             // Ensure volume is reset to 1 at the start of each slide.
-            // If it is the last slide, the fade logic below will immediately start decrementing it.
-            audioRef.current.volume = 1;
+            // If it is the last slide, the fade logic below will handle decreasing it.
+            // We only reset if we are NOT in the fading process.
+            if (!isLastSlide || settings.repeatSlideshow) {
+                audioRef.current.volume = 1;
+            }
         }
         
         // --- FADE OUT LOGIC (Last Slide Only) ---
         if (isLastSlide && !settings.repeatSlideshow && audioRef.current && audioFile) {
-            const fadeDuration = settings.interval * 1000;
+            const fadeDurationMs = settings.interval * 1000;
             const steps = 50;
-            const intervalTime = fadeDuration / steps;
-            let currentVolume = 1;
-            const decrement = currentVolume / steps;
-
-            fadeInterval = setInterval(() => {
-                if (!audioRef.current) return;
-                currentVolume -= decrement;
-                if (currentVolume < 0) currentVolume = 0;
-                audioRef.current.volume = currentVolume;
+            const intervalTime = fadeDurationMs / steps;
+            const decrement = 1 / steps;
+            
+            const startFade = () => {
+                // Clear any existing interval just in case
+                if (fadeInterval) clearInterval(fadeInterval);
                 
-                if (currentVolume <= 0) {
-                    clearInterval(fadeInterval);
+                // Set initial volume explicitly to 1 before starting fade
+                if(audioRef.current) audioRef.current.volume = 1;
+
+                fadeInterval = setInterval(() => {
+                    if (!audioRef.current) return;
+                    let newVol = audioRef.current.volume - decrement;
+                    if (newVol < 0) newVol = 0;
+                    audioRef.current.volume = newVol;
+                    
+                    if (newVol <= 0) {
+                        clearInterval(fadeInterval);
+                    }
+                }, intervalTime);
+            };
+
+            if (currentMedia.type === 'video' && videoElement) {
+                // For videos, wait to start the fade so it finishes right at the end of the video
+                const setupVideoFade = () => {
+                    const videoDurationMs = (videoElement.duration || 0) * 1000;
+                    // If video is shorter than fade duration, start immediately.
+                    // Otherwise start at (Duration - Fade).
+                    const delay = Math.max(0, videoDurationMs - fadeDurationMs);
+                    fadeTimer = setTimeout(startFade, delay);
+                };
+
+                if (videoElement.readyState >= 1) { // Metadata loaded
+                     setupVideoFade();
+                } else {
+                     videoElement.addEventListener('loadedmetadata', setupVideoFade);
                 }
-            }, intervalTime);
+            } else {
+                // For images, start fading immediately as slide duration equals fade duration
+                startFade();
+            }
         }
 
         // --- ADVANCE SLIDE LOGIC ---
@@ -590,7 +631,6 @@ const App: React.FC = () => {
             } else {
                  if (nextSlideIndex === 0 && settings.repeatSlideshow && audioRef.current) {
                     audioRef.current.currentTime = 0;
-                    // Volume will be reset to 1 by the effect running for the next slide (slide 0)
                 }
                 setCurrentSlide(nextSlideIndex);
             }
@@ -608,6 +648,9 @@ const App: React.FC = () => {
                     cleanup();
                     if(videoElement) {
                       videoElement.removeEventListener('ended', handleVideoEnd);
+                      // Event listener for loadedmetadata is automatically cleaned up by React when the element updates/unmounts, 
+                      // or we can remove it if we made it a named function, but the closure complexity is high.
+                      // Since 'videoElement' ref changes per slide, specific cleanup of metadata listener isn't strictly critical here if the element is destroyed.
                     }
                 };
             }
@@ -1088,7 +1131,10 @@ const App: React.FC = () => {
                                                     <img src={s.ownerInfo.photoURL} alt={s.ownerInfo.displayName ?? 'Owner'} className="w-8 h-8 rounded-full flex-shrink-0" title={`Shared by ${s.ownerInfo.displayName}`} />
                                                  )}
                                                 <div className="truncate">
-                                                    <p className="truncate font-semibold">{s.name}</p>
+                                                    <p className="truncate font-semibold flex items-center gap-2">
+                                                        {s.name}
+                                                        {s.userId !== user.uid && <span className="text-[10px] bg-blue-900 text-blue-200 px-1.5 py-0.5 rounded uppercase tracking-wide">Shared</span>}
+                                                    </p>
                                                      {s.userId !== user.uid && s.ownerInfo?.displayName && (
                                                         <p className="text-xs text-gray-400 truncate">By {s.ownerInfo.displayName}</p>
                                                     )}
@@ -1236,7 +1282,7 @@ const App: React.FC = () => {
                                 <li><strong>Add Captions:</strong> Type a description below each image. Or, enable "Smart Captions" in Settings and click the ✨ icon to generate one with AI!</li>
                                 <li><strong>Add Music:</strong> Click the music box to add a background audio track to your slideshow.</li>
                                 <li><strong>Customize:</strong> Use the Settings panel to choose slide styles and duration.</li>
-                                <li><strong>Save & Share:</strong> Name your slideshow, hit "Save", and use the "Share" icon to invite friends.</li>
+                                <li><strong>Save & Share:</strong> Name your slideshow, hit "Save", and use the "Share" icon to invite friends by email.</li>
                                 <li><strong>Preview:</strong> Hover over the preview window and click the play icon to see your slideshow in action.</li>
                             </ol>
                             <p>That's it! Enjoy your personalized slideshow.</p>
