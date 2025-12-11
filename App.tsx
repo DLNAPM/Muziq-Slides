@@ -648,9 +648,6 @@ const App: React.FC = () => {
                     cleanup();
                     if(videoElement) {
                       videoElement.removeEventListener('ended', handleVideoEnd);
-                      // Event listener for loadedmetadata is automatically cleaned up by React when the element updates/unmounts, 
-                      // or we can remove it if we made it a named function, but the closure complexity is high.
-                      // Since 'videoElement' ref changes per slide, specific cleanup of metadata listener isn't strictly critical here if the element is destroyed.
                     }
                 };
             }
@@ -691,15 +688,26 @@ const App: React.FC = () => {
                     const fileRef = ref(storage, filePath);
                     await uploadBytes(fileRef, media.file);
                     const url = await getDownloadURL(fileRef);
-                    return {
+                    
+                    // Base object with common properties
+                    const baseMedia = {
                         id: media.id,
                         type: media.type,
                         name: media.file.name,
                         url,
                         storagePath: filePath,
-                        caption: media.type === 'image' ? media.caption : undefined,
                         rotation: media.rotation,
                     };
+
+                    // Only add caption for images to avoid undefined values in Firestore
+                    if (media.type === 'image') {
+                        return {
+                            ...baseMedia,
+                            caption: media.caption
+                        };
+                    }
+
+                    return baseMedia;
                 })
             );
 
