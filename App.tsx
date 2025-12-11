@@ -1,5 +1,3 @@
-
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 // Fix: Corrected Firebase imports to use the v9 modular SDK style (e.g., 'firebase/app')
@@ -500,9 +498,8 @@ const App: React.FC = () => {
         if (audioRef.current && audioFile) {
             audioRef.current.currentTime = 0;
             audioRef.current.volume = 1;
-            if (mediaFiles[0].type === 'image') {
-              audioRef.current.play().catch(e => console.error("Audio play failed", e));
-            }
+            // Play audio regardless of whether the first slide is an image or video
+            audioRef.current.play().catch(e => console.error("Audio play failed", e));
         }
     };
 
@@ -515,9 +512,7 @@ const App: React.FC = () => {
         }
     };
     
-    // FIX: Reworked playback logic to be more robust. It now correctly handles transitions
-    // from videos to images by centralizing all advancement logic within this useEffect
-    // and using a reliable event listener for the 'ended' event on videos.
+    // Reworked playback logic to mute videos and keep background music playing.
     useEffect(() => {
         let slideTimer: ReturnType<typeof setTimeout> | undefined;
         let fadeStartTimer: ReturnType<typeof setTimeout> | undefined;
@@ -550,9 +545,13 @@ const App: React.FC = () => {
         };
 
         if (currentMedia.type === 'video') {
-            if (audioRef.current && !audioRef.current.paused) audioRef.current.pause();
+            // Ensure background music continues playing.
+            if (audioRef.current && audioFile && audioRef.current.paused) {
+                audioRef.current.play().catch(e => console.error("Audio play failed", e));
+            }
+            
+            // The video element itself is muted via a JSX property.
             if (videoElement) {
-                videoElement.muted = false;
                 videoElement.play().catch(e => console.error("Video play failed", e));
 
                 const handleVideoEnd = () => advanceSlide();
@@ -560,10 +559,13 @@ const App: React.FC = () => {
 
                 return () => {
                     cleanup();
-                    videoElement.removeEventListener('ended', handleVideoEnd);
+                    if(videoElement) {
+                      videoElement.removeEventListener('ended', handleVideoEnd);
+                    }
                 };
             }
         } else { // Image
+            // This logic will start music or resume it if it was paused.
             if (audioRef.current && audioFile && audioRef.current.paused) {
                 audioRef.current.volume = 1;
                 audioRef.current.play().catch(e => console.error("Audio play failed", e));
@@ -592,9 +594,6 @@ const App: React.FC = () => {
                             if (audioRef.current) {
                                 audioRef.current.pause();
                                 audioRef.current.currentTime = 0;
-                                // FIX: Removed the line that reset the volume to 1 immediately,
-                                // which was canceling the fade-out effect. The volume is now
-                                // correctly reset only when the preview is closed or restarted.
                             }
                         }
                     }, intervalTime);
@@ -904,8 +903,12 @@ const App: React.FC = () => {
                                             onDrop={() => handleDrop(index)}
                                             onDragEnd={handleDragEnd}
                                         >
-                                            <div className="group relative">
-                                                <img src={media.previewUrl} alt={media.file.name} className="w-full h-24 object-cover rounded-md pointer-events-none" />
+                                            <div className="group relative w-full h-24">
+                                                {media.type === 'video' ? (
+                                                    <video src={media.previewUrl} className="w-full h-full object-cover rounded-md pointer-events-none" muted />
+                                                ) : (
+                                                    <img src={media.previewUrl} alt={media.file.name} className="w-full h-full object-cover rounded-md pointer-events-none" />
+                                                )}
                                                 <button onClick={() => handleDeleteMedia(media.id)} className="absolute top-1 right-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity">
                                                     <XIcon className="w-4 h-4" />
                                                 </button>
@@ -1105,6 +1108,7 @@ const App: React.FC = () => {
                                     src={mediaFiles[currentSlide].previewUrl}
                                     className="w-full h-full object-contain"
                                     autoPlay
+                                    muted
                                 />
                             )}
                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30" />
