@@ -233,6 +233,7 @@ const RotateIcon: React.FC<{ className?: string }> = ({ className }) => (
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
     const [user, setUser] = useState<User | null>(null);
+    const [isGuestMode, setIsGuestMode] = useState(false);
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
     const [audioFile, setAudioFile] = useState<AppStateAudio | null>(null);
     const [settings, setSettings] = useState<SlideshowSettings>({
@@ -295,6 +296,9 @@ const App: React.FC = () => {
         setIsLoading(true);
         const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
+            if(currentUser) {
+                setIsGuestMode(false);
+            }
             if (!currentUser) {
                 setIsLoading(false);
                 setOwnedSlideshows([]);
@@ -303,6 +307,20 @@ const App: React.FC = () => {
         });
         return unsubscribeAuth;
     }, []);
+    
+    // Enforce Guest Settings
+    useEffect(() => {
+        if (!user && isGuestMode) {
+             setSettings({
+                interval: 5,
+                slideStyle: 'ken-burns',
+                showClock: true,
+                smartCaptionsEnabled: false,
+                repeatSlideshow: false,
+                showCaptions: true,
+            });
+        }
+    }, [user, isGuestMode]);
     
     useEffect(() => {
         if (user?.uid && user?.email) {
@@ -366,6 +384,7 @@ const App: React.FC = () => {
         try {
             await signOut(auth);
             resetWorkspace();
+            setIsGuestMode(false);
             setOwnedSlideshows([]);
             setSharedSlideshows([]);
         } catch (error) {
@@ -382,34 +401,91 @@ const App: React.FC = () => {
         if(fileInputRef.current) fileInputRef.current.value = '';
         if(audioInputRef.current) audioInputRef.current.value = '';
     }
+    
+    const handleGuestAction = (e: React.MouseEvent) => {
+        if (!user) {
+            e.preventDefault();
+            e.stopPropagation();
+            setError("Sign-in to Experience what the App can do.");
+        }
+    };
 
     // --- FILE HANDLING ---
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files) {
-            const files = Array.from(e.target.files).slice(0, 20 - mediaFiles.length);
+            let files: File[] = Array.from(e.target.files);
+            
+            // Guest Limitations
+            if (!user) {
+                const currentImages = mediaFiles.filter(m => m.type === 'image').length;
+                const currentVideos = mediaFiles.filter(m => m.type === 'video').length;
+                
+                const imageFiles = files.filter((f: File) => f.type.startsWith('image/'));
+                const videoFiles = files.filter((f: File) => f.type.startsWith('video/'));
+                
+                // Allow only needed amount to reach limits
+                const allowedImages = Math.max(0, 5 - currentImages);
+                const allowedVideos = Math.max(0, 1 - currentVideos);
+                
+                if (allowedImages === 0 && imageFiles.length > 0) {
+                     setError("Free users can only upload up to 5 images.");
+                }
+                if (allowedVideos === 0 && videoFiles.length > 0) {
+                     setError("Free users can only upload 1 video.");
+                }
+
+                files = [
+                    ...imageFiles.slice(0, allowedImages),
+                    ...videoFiles.slice(0, allowedVideos)
+                ];
+            } else {
+                 files = files.slice(0, 20 - mediaFiles.length);
+            }
+            
+            if (files.length === 0) return;
+
             // FIX: Explicitly type `file` as `File` in the map callback to resolve a
             // potential type inference issue where it was being treated as `unknown`.
-            const newMediaFiles: MediaFile[] = files.map((file: File) => {
+            const newMediaFilesPromise = files.map(async (file: File) => {
+                 // Guest Video Duration Check
+                 if (!user && file.type.startsWith('video/')) {
+                     const url = URL.createObjectURL(file);
+                     const duration = await new Promise<number>((resolve) => {
+                         const v = document.createElement('video');
+                         v.preload = 'metadata';
+                         v.onloadedmetadata = () => resolve(v.duration);
+                         v.onerror = () => resolve(0);
+                         v.src = url;
+                     });
+                     if (duration > 30.5) { // Add small buffer for precision
+                         setError("Free users can only upload videos up to 30 seconds.");
+                         return null; 
+                     }
+                 }
+
                  if (file.type.startsWith('image/')) {
                     return {
-                        id: `${file.name}-${Date.now()}`,
+                        id: `${file.name}-${Date.now()}-${Math.random()}`,
                         file,
                         previewUrl: URL.createObjectURL(file),
-                        type: 'image',
+                        type: 'image' as const,
                         caption: '',
                         rotation: 0,
                     };
                 } else {
                      return {
-                        id: `${file.name}-${Date.now()}`,
+                        id: `${file.name}-${Date.now()}-${Math.random()}`,
                         file,
                         previewUrl: URL.createObjectURL(file),
-                        type: 'video',
+                        type: 'video' as const,
                         rotation: 0,
                     };
                 }
             });
-            setMediaFiles(prev => [...prev, ...newMediaFiles]);
+            
+            const resolvedFiles = await Promise.all(newMediaFilesPromise);
+            const validFiles = resolvedFiles.filter((f): f is MediaFile => f !== null);
+            setMediaFiles(prev => [...prev, ...validFiles]);
         }
     };
     
@@ -929,7 +1005,7 @@ const App: React.FC = () => {
 
 
     return (
-        <div className={`min-h-screen font-sans transition-colors duration-500 ${user ? 'bg-brand-dark text-gray-200' : 'bg-white text-gray-900'}`}>
+        <div className={`min-h-screen font-sans transition-colors duration-500 ${user ? 'bg-brand-dark text-gray-200' : (isGuestMode ? 'bg-brand-dark text-gray-200' : 'bg-white text-gray-900')}`}>
             {(isSaving || isProcessing) && (
                 <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center">
                     <div className="text-center">
@@ -939,12 +1015,12 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            <header className={`backdrop-blur-sm p-4 flex justify-between items-center sticky top-0 z-40 transition-all duration-300 ${user ? 'bg-gray-900/50 shadow-lg' : 'bg-white/90 border-b border-gray-100 supports-[backdrop-filter]:bg-white/60'}`}>
+            <header className={`backdrop-blur-sm p-4 flex justify-between items-center sticky top-0 z-40 transition-all duration-300 ${user || isGuestMode ? 'bg-gray-900/50 shadow-lg' : 'bg-white/90 border-b border-gray-100 supports-[backdrop-filter]:bg-white/60'}`}>
                 <div className="flex items-center gap-4">
                     <h1 className="text-3xl font-bold tracking-wider">
-                        <span className="text-brand-purple">Muziq</span> <span className={user ? 'text-white' : 'text-gray-900'}>Slides</span>
+                        <span className="text-brand-purple">Muziq</span> <span className={user || isGuestMode ? 'text-white' : 'text-gray-900'}>Slides</span>
                     </h1>
-                     <button onClick={() => setIsHelpModalOpen(true)} className={`transition-colors ${user ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-brand-purple'}`} aria-label="Open help guide">
+                     <button onClick={() => setIsHelpModalOpen(true)} className={`transition-colors ${user || isGuestMode ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-brand-purple'}`} aria-label="Open help guide">
                         <QuestionMarkCircleIcon className="w-7 h-7" />
                     </button>
                 </div>
@@ -960,16 +1036,21 @@ const App: React.FC = () => {
                             </button>
                         </div>
                     ) : (
-                        <button onClick={handleLogin} className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors shadow-md hover:shadow-lg">
-                            <GoogleIcon className="w-5 h-5 bg-white rounded-full p-0.5" />
-                            Sign in
-                        </button>
+                        <div className="flex items-center gap-4">
+                             {isGuestMode && (
+                                <span className="text-brand-purple font-semibold bg-brand-purple/10 px-3 py-1 rounded-full text-sm border border-brand-purple/20">Guest Mode</span>
+                             )}
+                            <button onClick={handleLogin} className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors shadow-md hover:shadow-lg">
+                                <GoogleIcon className="w-5 h-5 bg-white rounded-full p-0.5" />
+                                Sign in
+                            </button>
+                        </div>
                     )}
                 </div>
             </header>
 
-            <main className={user ? "p-4 sm:p-8" : ""}>
-                 {!user ? (
+            <main className={user || isGuestMode ? "p-4 sm:p-8" : ""}>
+                 {!user && !isGuestMode ? (
                     <div className="animate-fade-in">
                         {/* Hero Section */}
                         <section className="py-20 lg:py-32 text-center px-4">
@@ -981,7 +1062,7 @@ const App: React.FC = () => {
                                     Muziq Slides is the easiest way to create stunning slideshows with your photos, videos, and favorite music. Perfect for sharing moments on any screen.
                                 </p>
                                 <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-                                    <button onClick={handleLogin} className="bg-brand-purple hover:bg-purple-700 text-white text-lg font-bold py-4 px-8 rounded-full shadow-xl hover:shadow-2xl transition-all transform hover:-translate-y-1 flex items-center gap-3">
+                                    <button onClick={() => setIsGuestMode(true)} className="bg-brand-purple hover:bg-purple-700 text-white text-lg font-bold py-4 px-8 rounded-full shadow-xl hover:shadow-2xl transition-all transform hover:-translate-y-1 flex items-center gap-3">
                                         <GoogleIcon className="w-6 h-6 bg-white rounded-full p-1" />
                                         Get Started for Free
                                     </button>
@@ -1052,7 +1133,9 @@ const App: React.FC = () => {
                                 <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-gray-800 transition-colors">
                                     <UploadIcon className="w-12 h-12 mx-auto text-gray-500" />
                                     <p className="mt-2 text-gray-400">Click to upload images/videos</p>
-                                    <p className="text-xs text-gray-500">Max 20 files</p>
+                                    <p className="text-xs text-gray-500">
+                                        {user ? 'Max 20 files' : 'Free: Max 5 images & 1 video (30s)'}
+                                    </p>
                                 </div>
                                 <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*" className="hidden" />
                                 <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 gap-4">
@@ -1139,40 +1222,43 @@ const App: React.FC = () => {
                             </div>
 
                              {/* Settings */}
-                            <div className="bg-gray-800/50 p-6 rounded-lg">
-                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">3. Settings</h3>
-                                <div className="space-y-4">
+                            <div className="bg-gray-800/50 p-6 rounded-lg relative overflow-hidden" onClickCapture={handleGuestAction}>
+                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 flex justify-between">
+                                    3. Settings
+                                    {!user && <span className="text-xs bg-yellow-600 text-white px-2 py-1 rounded ml-2">Premium</span>}
+                                </h3>
+                                <div className={`space-y-4 ${!user ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
                                     <div>
                                         <label htmlFor="interval" className="block mb-2 text-sm font-medium text-gray-300">Slide Duration: {settings.interval}s</label>
-                                        <input id="interval" type="range" min="1" max="30" value={settings.interval} onChange={(e) => setSettings(s => ({ ...s, interval: parseInt(e.target.value) }))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
+                                        <input id="interval" type="range" min="1" max="30" value={settings.interval} onChange={(e) => setSettings(s => ({ ...s, interval: parseInt(e.target.value) }))} disabled={!user} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
                                     </div>
                                     <div>
                                         <label htmlFor="slideStyle" className="block mb-2 text-sm font-medium text-gray-300">Slide Style</label>
-                                        <select id="slideStyle" value={settings.slideStyle} onChange={(e) => setSettings(s => ({...s, slideStyle: e.target.value}))} className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5">
+                                        <select id="slideStyle" value={settings.slideStyle} onChange={(e) => setSettings(s => ({...s, slideStyle: e.target.value}))} disabled={!user} className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5">
                                             {SLIDE_STYLES.map(style => <option key={style.id} value={style.id}>{style.name}</option>)}
                                         </select>
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <label htmlFor="showClock" className="text-sm font-medium text-gray-300">Show Clock in Preview</label>
-                                        <button onClick={() => setSettings(s => ({...s, showClock: !s.showClock}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showClock ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                        <button disabled={!user} onClick={() => setSettings(s => ({...s, showClock: !s.showClock}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showClock ? 'bg-brand-purple' : 'bg-gray-600'}`}>
                                             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.showClock ? 'translate-x-6' : 'translate-x-1'}`}/>
                                         </button>
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <label htmlFor="repeatSlideshow" className="text-sm font-medium text-gray-300">Repeat Slideshow</label>
-                                        <button onClick={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.repeatSlideshow ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                        <button disabled={!user} onClick={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.repeatSlideshow ? 'bg-brand-purple' : 'bg-gray-600'}`}>
                                             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.repeatSlideshow ? 'translate-x-6' : 'translate-x-1'}`}/>
                                         </button>
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <label htmlFor="showCaptions" className="text-sm font-medium text-gray-300">Show Captions</label>
-                                        <button onClick={() => setSettings(s => ({...s, showCaptions: !s.showCaptions}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showCaptions ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                        <button disabled={!user} onClick={() => setSettings(s => ({...s, showCaptions: !s.showCaptions}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showCaptions ? 'bg-brand-purple' : 'bg-gray-600'}`}>
                                             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.showCaptions ? 'translate-x-6' : 'translate-x-1'}`}/>
                                         </button>
                                     </div>
                                      <div className="flex items-center justify-between pt-2 border-t border-gray-700/50">
                                         <label htmlFor="smartCaptions" className="text-sm font-medium text-gray-300">Enable Smart Captions (AI)</label>
-                                        <button onClick={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.smartCaptionsEnabled ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                        <button disabled={!user} onClick={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.smartCaptionsEnabled ? 'bg-brand-purple' : 'bg-gray-600'}`}>
                                             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.smartCaptionsEnabled ? 'translate-x-6' : 'translate-x-1'}`}/>
                                         </button>
                                     </div>
@@ -1217,47 +1303,59 @@ const App: React.FC = () => {
                             </div>
                             
                             {/* Save & Manage */}
-                            <div className="bg-gray-800/50 p-6 rounded-lg">
-                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">5. Save, Share & Manage</h3>
-                                <div className="flex gap-4 mb-4">
-                                     <input type="text" value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Enter slideshow name" className="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5" />
-                                     <button onClick={handleSaveSlideshow} disabled={isSaving || mediaFiles.length === 0} className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors disabled:bg-gray-500">
+                            <div className="bg-gray-800/50 p-6 rounded-lg relative overflow-hidden" onClickCapture={handleGuestAction}>
+                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 flex justify-between">
+                                    5. Save, Share & Manage
+                                    {!user && <span className="text-xs bg-yellow-600 text-white px-2 py-1 rounded ml-2">Premium</span>}
+                                </h3>
+                                <div className={`flex gap-4 mb-4 ${!user ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
+                                     <input type="text" value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Enter slideshow name" disabled={!user} className="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5" />
+                                     <button onClick={handleSaveSlideshow} disabled={!user || isSaving || mediaFiles.length === 0} className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors disabled:bg-gray-500">
                                         <SaveIcon className="w-5 h-5" />
                                         {currentSlideshowId ? 'Update' : 'Save'}
                                      </button>
-                                     <button onClick={resetWorkspace} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">New</button>
+                                     <button onClick={resetWorkspace} disabled={!user} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">New</button>
                                 </div>
                                 
-                                <h4 className="text-lg font-semibold mt-6 mb-2">My Slideshows</h4>
-                                <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                                    {isLoading ? <p>Loading slideshows...</p> : allSlideshows.length > 0 ? allSlideshows.map(s => (
-                                        <div key={s.id} className="flex justify-between items-center bg-gray-700/50 p-2 rounded-lg gap-2">
-                                            <div className="flex items-center gap-3 min-w-0">
-                                                 {s.userId !== user.uid && s.ownerInfo?.photoURL && (
-                                                    <img src={s.ownerInfo.photoURL} alt={s.ownerInfo.displayName ?? 'Owner'} className="w-8 h-8 rounded-full flex-shrink-0" title={`Shared by ${s.ownerInfo.displayName}`} />
-                                                 )}
-                                                <div className="truncate">
-                                                    <p className="truncate font-semibold flex items-center gap-2">
-                                                        {s.name}
-                                                        {s.userId !== user.uid && <span className="text-[10px] bg-blue-900 text-blue-200 px-1.5 py-0.5 rounded uppercase tracking-wide">Shared</span>}
-                                                    </p>
-                                                     {s.userId !== user.uid && s.ownerInfo?.displayName && (
-                                                        <p className="text-xs text-gray-400 truncate">By {s.ownerInfo.displayName}</p>
-                                                    )}
+                                {user && (
+                                    <>
+                                        <h4 className="text-lg font-semibold mt-6 mb-2">My Slideshows</h4>
+                                        <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
+                                            {isLoading ? <p>Loading slideshows...</p> : allSlideshows.length > 0 ? allSlideshows.map(s => (
+                                                <div key={s.id} className="flex justify-between items-center bg-gray-700/50 p-2 rounded-lg gap-2">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                         {s.userId !== user.uid && s.ownerInfo?.photoURL && (
+                                                            <img src={s.ownerInfo.photoURL} alt={s.ownerInfo.displayName ?? 'Owner'} className="w-8 h-8 rounded-full flex-shrink-0" title={`Shared by ${s.ownerInfo.displayName}`} />
+                                                         )}
+                                                        <div className="truncate">
+                                                            <p className="truncate font-semibold flex items-center gap-2">
+                                                                {s.name}
+                                                                {s.userId !== user.uid && <span className="text-[10px] bg-blue-900 text-blue-200 px-1.5 py-0.5 rounded uppercase tracking-wide">Shared</span>}
+                                                            </p>
+                                                             {s.userId !== user.uid && s.ownerInfo?.displayName && (
+                                                                <p className="text-xs text-gray-400 truncate">By {s.ownerInfo.displayName}</p>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex gap-2 flex-shrink-0">
+                                                        <button onClick={() => handleLoadSlideshow(s)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded-md text-sm">Load</button>
+                                                        {s.userId === user.uid && (
+                                                            <>
+                                                                <button onClick={() => handleOpenShareModal(s)} className="bg-green-600 hover:bg-green-700 text-white font-bold p-2 rounded-md" title="Share"><ShareIcon className="w-4 h-4"/></button>
+                                                                <button onClick={() => handleDeleteSlideshow(s)} className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded-md" title="Delete"><TrashIcon className="w-4 h-4"/></button>
+                                                            </>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            <div className="flex gap-2 flex-shrink-0">
-                                                <button onClick={() => handleLoadSlideshow(s)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded-md text-sm">Load</button>
-                                                {s.userId === user.uid && (
-                                                    <>
-                                                        <button onClick={() => handleOpenShareModal(s)} className="bg-green-600 hover:bg-green-700 text-white font-bold p-2 rounded-md" title="Share"><ShareIcon className="w-4 h-4"/></button>
-                                                        <button onClick={() => handleDeleteSlideshow(s)} className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded-md" title="Delete"><TrashIcon className="w-4 h-4"/></button>
-                                                    </>
-                                                )}
-                                            </div>
+                                            )) : <p className="text-gray-400">No saved slideshows yet.</p>}
                                         </div>
-                                    )) : <p className="text-gray-400">No saved slideshows yet.</p>}
-                                </div>
+                                    </>
+                                )}
+                                {!user && (
+                                    <div className="p-4 bg-gray-700/30 rounded text-center text-gray-400 text-sm">
+                                        Sign in to save your slideshows and share them with friends!
+                                    </div>
+                                )}
                             </div>
 
                         </div>
@@ -1265,7 +1363,7 @@ const App: React.FC = () => {
                 )}
 
                 {error && (
-                    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-500 text-white py-2 px-6 rounded-lg shadow-lg z-50 flex items-center gap-2 animate-fade-in">
+                    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-500 text-white py-2 px-6 rounded-lg shadow-lg z-50 flex items-center gap-2 animate-fade-in whitespace-nowrap">
                         <InfoIcon className="w-5 h-5" />
                         {error}
                         <button onClick={() => setError(null)} className="ml-4 font-bold">
