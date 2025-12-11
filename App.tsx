@@ -929,7 +929,7 @@ const App: React.FC = () => {
 
 
     return (
-        <div className="min-h-screen bg-brand-dark text-gray-200 font-sans">
+        <div className={`min-h-screen font-sans transition-colors duration-500 ${user ? 'bg-brand-dark text-gray-200' : 'bg-white text-gray-900'}`}>
             {(isSaving || isProcessing) && (
                 <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center">
                     <div className="text-center">
@@ -939,12 +939,12 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            <header className="bg-gray-900/50 backdrop-blur-sm shadow-lg p-4 flex justify-between items-center sticky top-0 z-40">
+            <header className={`backdrop-blur-sm p-4 flex justify-between items-center sticky top-0 z-40 transition-all duration-300 ${user ? 'bg-gray-900/50 shadow-lg' : 'bg-white/90 border-b border-gray-100 supports-[backdrop-filter]:bg-white/60'}`}>
                 <div className="flex items-center gap-4">
-                    <h1 className="text-3xl font-bold text-white tracking-wider">
-                        <span className="text-brand-purple">Muziq</span> Slides
+                    <h1 className="text-3xl font-bold tracking-wider">
+                        <span className="text-brand-purple">Muziq</span> <span className={user ? 'text-white' : 'text-gray-900'}>Slides</span>
                     </h1>
-                     <button onClick={() => setIsHelpModalOpen(true)} className="text-gray-400 hover:text-white transition-colors" aria-label="Open help guide">
+                     <button onClick={() => setIsHelpModalOpen(true)} className={`transition-colors ${user ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-brand-purple'}`} aria-label="Open help guide">
                         <QuestionMarkCircleIcon className="w-7 h-7" />
                     </button>
                 </div>
@@ -953,30 +953,94 @@ const App: React.FC = () => {
                         <div className="text-gray-400">Loading...</div>
                     ) : user ? (
                         <div className="flex items-center gap-4">
-                            <img src={user.photoURL ?? ''} alt={user.displayName ?? 'User'} className="w-10 h-10 rounded-full" />
-                            <span className="hidden sm:block">{user.displayName}</span>
-                            <button onClick={handleLogout} className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                            <img src={user.photoURL ?? ''} alt={user.displayName ?? 'User'} className="w-10 h-10 rounded-full border-2 border-gray-700" />
+                            <span className="hidden sm:block font-medium">{user.displayName}</span>
+                            <button onClick={handleLogout} className="bg-gray-200 hover:bg-gray-300 text-gray-900 font-bold py-2 px-4 rounded-lg transition-colors text-sm">
                                 Logout
                             </button>
                         </div>
                     ) : (
-                        <button onClick={handleLogin} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors">
-                            <GoogleIcon className="w-5 h-5" />
-                            Sign in with Google
+                        <button onClick={handleLogin} className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors shadow-md hover:shadow-lg">
+                            <GoogleIcon className="w-5 h-5 bg-white rounded-full p-0.5" />
+                            Sign in
                         </button>
                     )}
                 </div>
             </header>
 
-            <main className="p-4 sm:p-8">
+            <main className={user ? "p-4 sm:p-8" : ""}>
                  {!user ? (
-                    <div className="text-center py-20 bg-gray-800/50 rounded-lg">
-                        <h2 className="text-4xl font-bold mb-4">Welcome to Muziq Slides</h2>
-                        <p className="text-xl text-gray-400 mb-8">Sign in to create, save, share, and collaborate on beautiful photo slideshows.</p>
-                        <button onClick={handleLogin} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg flex items-center gap-2 transition-colors mx-auto text-lg">
-                            <GoogleIcon className="w-6 h-6" />
-                            Sign in with Google to Get Started
-                        </button>
+                    <div className="animate-fade-in">
+                        {/* Hero Section */}
+                        <section className="py-20 lg:py-32 text-center px-4">
+                            <div className="max-w-4xl mx-auto">
+                                <h2 className="text-5xl md:text-6xl font-extrabold text-gray-900 mb-8 tracking-tight leading-tight">
+                                    Turn Memories into <br/><span className="text-brand-purple">Masterpieces</span>
+                                </h2>
+                                <p className="text-xl text-gray-600 mb-10 max-w-2xl mx-auto leading-relaxed">
+                                    Muziq Slides is the easiest way to create stunning slideshows with your photos, videos, and favorite music. Perfect for sharing moments on any screen.
+                                </p>
+                                <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+                                    <button onClick={handleLogin} className="bg-brand-purple hover:bg-purple-700 text-white text-lg font-bold py-4 px-8 rounded-full shadow-xl hover:shadow-2xl transition-all transform hover:-translate-y-1 flex items-center gap-3">
+                                        <GoogleIcon className="w-6 h-6 bg-white rounded-full p-1" />
+                                        Get Started for Free
+                                    </button>
+                                     <button onClick={() => setIsHelpModalOpen(true)} className="text-gray-600 hover:text-brand-purple font-semibold py-4 px-8 rounded-full hover:bg-gray-50 transition-colors">
+                                        Learn More
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+
+                        {/* 3 Features Section */}
+                        <section className="py-20 bg-gray-50 border-t border-gray-100">
+                            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                                <div className="text-center mb-16">
+                                    <h3 className="text-base font-semibold text-brand-purple tracking-wide uppercase">Features</h3>
+                                    <p className="mt-2 text-3xl leading-8 font-extrabold tracking-tight text-gray-900 sm:text-4xl">
+                                        Everything you need
+                                    </p>
+                                </div>
+
+                                <div className="grid md:grid-cols-3 gap-10">
+                                    {/* Feature 1 */}
+                                    <div className="bg-white p-8 rounded-2xl shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 relative group">
+                                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-400 to-pink-600 rounded-t-2xl transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>
+                                        <div className="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center mb-6 text-brand-purple mx-auto md:mx-0">
+                                            <UploadIcon className="w-8 h-8" />
+                                        </div>
+                                        <h4 className="text-xl font-bold text-gray-900 mb-3 text-center md:text-left">Upload & Organize</h4>
+                                        <p className="text-gray-600 leading-relaxed text-center md:text-left">
+                                            Easily upload up to 20 images and videos. Drag and drop to reorder, rotate to fix orientation, and curate your perfect flow.
+                                        </p>
+                                    </div>
+
+                                    {/* Feature 2 */}
+                                    <div className="bg-white p-8 rounded-2xl shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 relative group">
+                                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 to-cyan-600 rounded-t-2xl transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>
+                                        <div className="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center mb-6 text-blue-600 mx-auto md:mx-0">
+                                            <MusicIcon className="w-8 h-8" />
+                                        </div>
+                                        <h4 className="text-xl font-bold text-gray-900 mb-3 text-center md:text-left">Music & AI Magic</h4>
+                                        <p className="text-gray-600 leading-relaxed text-center md:text-left">
+                                            Set the mood with background music. Use Gemini AI to generate smart captions and apply cinematic effects like Ken Burns.
+                                        </p>
+                                    </div>
+
+                                    {/* Feature 3 */}
+                                    <div className="bg-white p-8 rounded-2xl shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 relative group">
+                                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-400 to-emerald-600 rounded-t-2xl transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>
+                                        <div className="w-14 h-14 bg-green-100 rounded-xl flex items-center justify-center mb-6 text-green-600 mx-auto md:mx-0">
+                                            <ShareIcon className="w-8 h-8" />
+                                        </div>
+                                        <h4 className="text-xl font-bold text-gray-900 mb-3 text-center md:text-left">Save & Collaborate</h4>
+                                        <p className="text-gray-600 leading-relaxed text-center md:text-left">
+                                            Save your slideshows to the cloud. Share access with friends via email so they can view updates instantly.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
