@@ -931,7 +931,7 @@ const App: React.FC = () => {
     return (
         <div className="min-h-screen bg-brand-dark text-gray-200 font-sans">
             {(isSaving || isProcessing) && (
-                <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center">
+                <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center">
                     <div className="text-center">
                         <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-brand-purple mx-auto"></div>
                         <p className="text-white text-xl mt-4">{isSaving ? 'Saving...' : (isProcessing ? 'Processing...' : 'Loading...')}</p>
@@ -1287,7 +1287,19 @@ const App: React.FC = () => {
                                 </button>
                             </div>
                             <div>
-                                <h3 className="text-lg font-semibold mb-2">Shared with:</h3>
+                                <div className="flex justify-between items-center mb-2">
+                                    <h3 className="text-lg font-semibold">Shared with:</h3>
+                                    {slideshowToShare.sharedWith && slideshowToShare.sharedWith.length > 0 && slideshowToShare.id === currentSlideshowId && (
+                                        <button
+                                            onClick={() => handleSaveSlideshow()}
+                                            disabled={isSaving}
+                                            className="text-xs bg-brand-purple hover:bg-purple-700 text-white font-bold py-1 px-3 rounded transition-colors disabled:opacity-50"
+                                            title="Save and push current changes to all shared users"
+                                        >
+                                            Update Share(s)
+                                        </button>
+                                    )}
+                                </div>
                                 <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
                                     {(slideshowToShare.sharedWith ?? []).length > 0 ? (
                                         slideshowToShare.sharedWith!.map(email => (
