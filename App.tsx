@@ -327,7 +327,10 @@ const App: React.FC = () => {
             setIsLoading(true);
 
             // Listener for slideshows owned by the user
-            const ownedQuery = query(collection(db, "slideshows"), where("userId", "==", user.uid), orderBy("timestamp", "desc"));
+            // FIX: Removed orderBy("timestamp", "desc") to prevent "Missing or insufficient permissions" error
+            // which occurs when the required composite index is missing in Firestore.
+            // Sorting is handled client-side in the useMemo hook below.
+            const ownedQuery = query(collection(db, "slideshows"), where("userId", "==", user.uid));
             const unsubscribeOwned = onSnapshot(ownedQuery, (querySnapshot) => {
                 const slideshows: SavedSlideshow[] = [];
                 querySnapshot.forEach((doc) => {
