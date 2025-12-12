@@ -175,7 +175,7 @@ const PauseIcon: React.FC<{ className?: string }> = ({ className }) => (
 const StopIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
   </svg>
 );
 const FastForwardIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -1120,6 +1120,16 @@ const App: React.FC = () => {
                                         Learn More
                                     </button>
                                 </div>
+                                
+                                {/* Disclaimer for Video Playback Issues */}
+                                <div className="mt-12 max-w-2xl mx-auto bg-yellow-900/30 border border-yellow-700/50 p-4 rounded-lg text-sm text-yellow-200">
+                                    <p className="flex items-start gap-3 text-left">
+                                        <InfoIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                                        <span>
+                                            <strong>Note on Video Playback:</strong> If videos do not appear on some mobile devices (especially iOS), it is often due to strict browser security policies regarding autoplay. We strive for maximum compatibility, but some settings are controlled by your device manufacturer.
+                                        </span>
+                                    </p>
+                                </div>
                             </div>
                         </section>
 
@@ -1595,6 +1605,14 @@ const App: React.FC = () => {
                                 <li><strong>Preview:</strong> Hover over the preview window and click the play icon to see your slideshow in action.</li>
                             </ol>
                             <p>That's it! Enjoy your personalized slideshow.</p>
+
+                            <h3 className="text-xl font-semibold text-white pt-2 border-t border-gray-700">Troubleshooting Video Playback</h3>
+                            <p>
+                                If you notice that images load but videos do not appear on certain devices (particularly iPhones or iPads), this is usually caused by <strong>strict browser policies</strong> that block autoplaying media to save battery or data.
+                            </p>
+                            <p>
+                                This is a common restriction on mobile browsers. We have added specific configurations to minimize this, but if videos remain hidden, try interacting with the page (tapping) or ensuring your device is not in "Low Power Mode".
+                            </p>
                         </div>
                     </div>
                 </div>
