@@ -53,7 +53,7 @@ const storage = getStorage(app as any);
 interface ImageFile {
   id: string;
   type: 'image';
-  file: File;
+  file?: File; // File is optional when loaded from server
   previewUrl: string;
   caption: string;
   rotation: number;
@@ -63,7 +63,7 @@ interface ImageFile {
 interface VideoFile {
     id:string;
     type: 'video';
-    file: File;
+    file?: File; // File is optional when loaded from server
     previewUrl: string;
     rotation: number;
     serverData?: { url: string; storagePath: string; };
@@ -72,7 +72,7 @@ interface VideoFile {
 type MediaFile = ImageFile | VideoFile;
 
 interface AppStateAudio {
-    file: File;
+    file?: File;
     name: string;
     serverData?: { url: string; storagePath: string; };
 }
@@ -128,6 +128,13 @@ const fileToGenerativePart = async (file: File) => {
     return {
         inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
     };
+};
+
+// Helper to fetch blob from URL (used for AI captions on existing images if needed)
+const urlToGenerativePart = async (url: string) => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return fileToGenerativePart(new File([blob], "image.jpg", { type: blob.type }));
 };
 
 const urlToFile = async (url: string, filename: string): Promise<File> => {
@@ -223,7 +230,7 @@ const QuestionMarkCircleIcon: React.FC<{ className?: string }> = ({ className })
 );
 const SettingsIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.096 2.572-1.065z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37.996.608 2.296.096 2.572-1.065z" />
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     </svg>
 );
@@ -291,14 +298,17 @@ const App: React.FC = () => {
     // Fix: Memoize the audio object URL to prevent it from being regenerated on every
     // render, which was causing the audio to restart on each slide transition.
     const audioSrc = useMemo(() => {
-        return audioFile ? URL.createObjectURL(audioFile.file) : null;
+        if (!audioFile) return null;
+        if (audioFile.file) {
+            return URL.createObjectURL(audioFile.file);
+        }
+        return audioFile.serverData?.url || null;
     }, [audioFile]);
 
     // Add cleanup for the object URL to prevent memory leaks
     useEffect(() => {
-        // This is a cleanup function that will run when the audioSrc changes or component unmounts.
         return () => {
-            if (audioSrc) {
+            if (audioSrc && audioSrc.startsWith('blob:')) {
                 URL.revokeObjectURL(audioSrc);
             }
         };
@@ -326,10 +336,6 @@ const App: React.FC = () => {
             setIsLoading(true);
 
             // Listener for slideshows owned by the user
-            // FIX: Removed orderBy("timestamp", "desc") to prevent "Missing or insufficient permissions" error
-            // which occurs when the required composite index is missing in Firestore.
-            // Sorting is handled client-side in the useMemo hook below.
-            // FIX: Added limit(50) to satisfy potential security rule constraints regarding unbounded queries.
             const ownedQuery = query(
                 collection(db, "slideshows"), 
                 where("userId", "==", user.uid),
@@ -438,13 +444,13 @@ const App: React.FC = () => {
 
             // FIX: Explicitly type `file` as `File` in the map callback to resolve a
             // potential type inference issue where it was being treated as `unknown`.
-            const newMediaFilesPromise = files.map(async (file: File) => {
+            const newMediaFilesPromise = files.map(async (file: File): Promise<MediaFile> => {
                  if (file.type.startsWith('image/')) {
                     return {
                         id: `item-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`,
                         file,
                         previewUrl: URL.createObjectURL(file),
-                        type: 'image' as const,
+                        type: 'image',
                         caption: '',
                         rotation: 0,
                     };
@@ -453,14 +459,14 @@ const App: React.FC = () => {
                         id: `item-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`,
                         file,
                         previewUrl: URL.createObjectURL(file),
-                        type: 'video' as const,
+                        type: 'video',
                         rotation: 0,
                     };
                 }
             });
             
             const resolvedFiles = await Promise.all(newMediaFilesPromise);
-            const validFiles = resolvedFiles.filter((f): f is MediaFile => f !== null);
+            const validFiles = resolvedFiles.filter((f) => f !== null);
             setMediaFiles(prev => [...prev, ...validFiles]);
         }
     };
@@ -536,16 +542,26 @@ const App: React.FC = () => {
 
 
     // --- AI CAPTION GENERATION ---
-    const handleGenerateCaption = async (mediaId: string, mediaFile: File) => {
+    const handleGenerateCaption = async (media: MediaFile) => {
         if (!process.env.API_KEY) {
             setError("API key is not configured for AI features.");
             return;
         }
-        setGeneratingCaptionId(mediaId);
+        setGeneratingCaptionId(media.id);
         setError(null);
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const imagePart = await fileToGenerativePart(mediaFile);
+            let imagePart;
+            if (media.file) {
+                imagePart = await fileToGenerativePart(media.file);
+            } else if (media.serverData) {
+                // If it's a remote file, we try to fetch it.
+                // Note: Fetching cross-origin might fail depending on CORS headers on the bucket.
+                imagePart = await urlToGenerativePart(media.previewUrl);
+            } else {
+                throw new Error("No image source found.");
+            }
+
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash',
                 contents: { parts: [imagePart, { text: "Describe this image in a short, one-sentence caption." }] },
@@ -553,13 +569,13 @@ const App: React.FC = () => {
             
             const caption = response.text;
             if (caption) {
-                handleCaptionChange(mediaId, caption.trim());
+                handleCaptionChange(media.id, caption.trim());
             } else {
                 throw new Error("AI did not generate a caption.");
             }
         } catch (err) {
             console.error("AI Caption Generation Error:", err);
-            setError("Failed to generate AI caption. Please try again.");
+            setError("Failed to generate AI caption. This might happen if cross-origin access is restricted for saved images.");
         } finally {
             setGeneratingCaptionId(null);
         }
@@ -789,7 +805,7 @@ const App: React.FC = () => {
                          const baseMedia = {
                             id: media.id,
                             type: media.type,
-                            name: media.file.name,
+                            name: media.file?.name || media.id, // Fallback name if file is missing
                             url: media.serverData.url,
                             storagePath: media.serverData.storagePath,
                             rotation: media.rotation,
@@ -801,6 +817,10 @@ const App: React.FC = () => {
                     }
 
                     // New file - upload it
+                    if (!media.file) {
+                        throw new Error(`Media file ${media.id} is missing data for upload.`);
+                    }
+
                     // SANITIZE: Use a safe filename for storage to avoid 'unauthorized' errors with long/special char names
                     const fileExt = media.file.name.split('.').pop() || 'bin';
                     const safeFileName = `${media.id}.${fileExt}`;
@@ -834,7 +854,7 @@ const App: React.FC = () => {
                         url: audioFile.serverData.url,
                         storagePath: audioFile.serverData.storagePath
                     };
-                } else {
+                } else if (audioFile.file) {
                     const fileExt = audioFile.file.name.split('.').pop() || 'mp3';
                     const safeFileName = `audio-${Date.now()}.${fileExt}`;
                     const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
@@ -891,38 +911,38 @@ const App: React.FC = () => {
         setIsProcessing(true);
         setError(null);
         try {
-            const newMediaFiles: MediaFile[] = await Promise.all(
-                slideshow.media.map(async (media): Promise<MediaFile> => {
-                    const file = await urlToFile(media.url, media.name);
-                    if (media.type === 'image') {
-                        return {
-                           id: media.id,
-                           type: 'image',
-                           file,
-                           previewUrl: URL.createObjectURL(file),
-                           caption: media.caption || '',
-                           rotation: media.rotation || 0,
-                           serverData: { url: media.url, storagePath: media.storagePath }
-                        };
-                    } else {
-                        return {
-                           id: media.id,
-                           type: 'video',
-                           file,
-                           previewUrl: URL.createObjectURL(file),
-                           rotation: media.rotation || 0,
-                           serverData: { url: media.url, storagePath: media.storagePath }
-                        };
-                    }
-                })
-            );
+            // OPTIMIZATION: Do not download files to creating Blobs. Use remote URLs directly.
+            // This prevents issues with CORS block on fetches and improves loading speed significantly.
+            const newMediaFiles: MediaFile[] = slideshow.media.map((media): MediaFile => {
+                // Determine if video or image based on stored type
+                if (media.type === 'image') {
+                    return {
+                        id: media.id,
+                        type: 'image',
+                        // file: undefined, // File is not loaded locally
+                        previewUrl: media.url, // Use remote URL directly
+                        caption: media.caption || '',
+                        rotation: media.rotation || 0,
+                        serverData: { url: media.url, storagePath: media.storagePath }
+                    };
+                } else {
+                    return {
+                        id: media.id,
+                        type: 'video',
+                        // file: undefined, // File is not loaded locally
+                        previewUrl: media.url, // Use remote URL directly
+                        rotation: media.rotation || 0,
+                        serverData: { url: media.url, storagePath: media.storagePath }
+                    };
+                }
+            });
 
             let newAudioFile: AppStateAudio | null = null;
             if (slideshow.audio) {
-                const file = await urlToFile(slideshow.audio.url, slideshow.audio.name);
+                // For audio, we can also use the remote URL directly in the <audio> tag logic.
                 newAudioFile = { 
-                    file, 
-                    name: file.name,
+                    // file: undefined,
+                    name: slideshow.audio.name,
                     serverData: { url: slideshow.audio.url, storagePath: slideshow.audio.storagePath }
                 };
             }
@@ -935,7 +955,7 @@ const App: React.FC = () => {
 
         } catch (err) {
             console.error("Error loading slideshow:", err);
-            setError("Failed to load slideshow assets. Please check your connection.");
+            setError("Failed to load slideshow settings. Please check your connection.");
         } finally {
             setIsProcessing(false);
         }
@@ -1192,7 +1212,7 @@ const App: React.FC = () => {
                                                 ) : (
                                                     <img 
                                                         src={media.previewUrl} 
-                                                        alt={media.file.name} 
+                                                        alt={media.file?.name || 'Slide'} 
                                                         className="w-full h-full object-cover pointer-events-none transition-transform duration-300"
                                                         style={{ transform: `rotate(${media.rotation}deg)` }} 
                                                     />
@@ -1217,7 +1237,7 @@ const App: React.FC = () => {
                                                     />
                                                     {settings.smartCaptionsEnabled && (
                                                         <button
-                                                            onClick={() => handleGenerateCaption(media.id, media.file)}
+                                                            onClick={() => handleGenerateCaption(media)}
                                                             disabled={generatingCaptionId === media.id}
                                                             className="absolute top-1/2 right-1 -translate-y-1/2 text-yellow-400 hover:text-yellow-300 disabled:text-gray-500 disabled:cursor-not-allowed"
                                                             title="Generate AI Caption"
