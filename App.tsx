@@ -1,16 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
-// Fix: Corrected Firebase imports to use the v9 modular SDK style (e.g., 'firebase/app')
-// which resolves build errors caused by referencing non-existent scoped packages.
-import { initializeApp } from 'firebase/app';
-import {
-    getAuth,
-    onAuthStateChanged,
-    GoogleAuthProvider,
-    signInWithPopup,
-    signOut,
-    type User,
-} from 'firebase/auth';
+// Switch to compat imports for App and Auth to resolve "no exported member" errors
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/auth';
 import {
     getFirestore,
     collection,
@@ -48,11 +40,13 @@ const firebaseConfig = {
 };
 
 
-// --- FIREBASE INITIALIZATION (v9+ Syntax) ---
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const storage = getStorage(app);
+// --- FIREBASE INITIALIZATION (Hybrid Compat/Modular) ---
+// Use compat initialization to workaround import errors
+const app = firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+// Cast app to any to allow interoperability between compat App and modular Services
+const db = getFirestore(app as any);
+const storage = getStorage(app as any);
 
 
 // --- TYPE DEFINITIONS ---
@@ -166,6 +160,28 @@ const MusicIcon: React.FC<{ className?: string }> = ({ className }) => (
 const PlayIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
 );
+const PauseIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+);
+const StopIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+  </svg>
+);
+const FastForwardIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" />
+  </svg>
+);
+const RewindIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
+  </svg>
+);
 const XIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -230,7 +246,7 @@ const RotateIcon: React.FC<{ className?: string }> = ({ className }) => (
 
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
-    const [user, setUser] = useState<User | null>(null);
+    const [user, setUser] = useState<firebase.User | null>(null);
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
     const [audioFile, setAudioFile] = useState<AppStateAudio | null>(null);
     const [settings, setSettings] = useState<SlideshowSettings>({
@@ -242,6 +258,7 @@ const App: React.FC = () => {
         showCaptions: true,
     });
     const [isPlaying, setIsPlaying] = useState(false);
+    const [isPaused, setIsPaused] = useState(false); // New state for pause
     const [currentSlide, setCurrentSlide] = useState(0);
     const [slideshowName, setSlideshowName] = useState('');
     const [currentSlideshowId, setCurrentSlideshowId] = useState<string | null>(null);
@@ -291,7 +308,8 @@ const App: React.FC = () => {
     // --- AUTHENTICATION & DATA FETCHING ---
     useEffect(() => {
         setIsLoading(true);
-        const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+        // Use compat auth.onAuthStateChanged
+        const unsubscribeAuth = auth.onAuthStateChanged((currentUser) => {
             setUser(currentUser);
             if (!currentUser) {
                 setIsLoading(false);
@@ -327,7 +345,11 @@ const App: React.FC = () => {
                 setIsLoading(false);
             }, (err) => {
                 console.error("Error fetching owned slideshows:", err);
-                setError("Could not load your saved slideshows. Please check your connection.");
+                if (err.message.includes("permissions")) {
+                     setError("Permission Error: Please check your Firebase Console Rules.");
+                } else {
+                     setError("Could not load your saved slideshows. Please check your connection.");
+                }
                 setIsLoading(false);
             });
 
@@ -370,19 +392,22 @@ const App: React.FC = () => {
     }, [ownedSlideshows, sharedSlideshows]);
 
     const handleLogin = async () => {
-        const provider = new GoogleAuthProvider();
+        // Use compat GoogleAuthProvider
+        const provider = new firebase.auth.GoogleAuthProvider();
         try {
             // Using default persistence (LOCAL) to avoid issues with explicit persistence setting
-            await signInWithPopup(auth, provider);
+            // Use compat signInWithPopup (auth.signInWithPopup)
+            await auth.signInWithPopup(provider);
         } catch (error) {
             console.error("Authentication error:", error);
-            setError("Failed to sign in with Google. Please try again.");
+            setError("Failed to sign in. If you see a 'blocked' error, please check browser popup settings.");
         }
     };
 
     const handleLogout = async () => {
         try {
-            await signOut(auth);
+            // Use compat signOut (auth.signOut)
+            await auth.signOut();
             resetWorkspace();
             setOwnedSlideshows([]);
             setSharedSlideshows([]);
@@ -549,6 +574,7 @@ const App: React.FC = () => {
         }
         setError(null);
         setCurrentSlide(0);
+        setIsPaused(false);
         setIsPlaying(true);
         if (audioRef.current && audioFile) {
             audioRef.current.currentTime = 0;
@@ -560,6 +586,7 @@ const App: React.FC = () => {
 
     const handleClosePreview = () => {
         setIsPlaying(false);
+        setIsPaused(false);
         if (audioRef.current) {
             audioRef.current.pause();
             audioRef.current.currentTime = 0;
@@ -582,6 +609,7 @@ const App: React.FC = () => {
         let fadeInterval: ReturnType<typeof setInterval> | undefined;
         let fadeTimer: ReturnType<typeof setTimeout> | undefined;
         const videoElement = videoPreviewRef.current;
+        const audioElement = audioRef.current;
 
         const cleanup = () => {
             if (slideTimer) clearTimeout(slideTimer);
@@ -593,26 +621,32 @@ const App: React.FC = () => {
             return cleanup;
         }
 
+        if (isPaused) {
+            if (audioElement) audioElement.pause();
+            if (videoElement) videoElement.pause();
+            return cleanup;
+        }
+
         const currentMedia = mediaFiles[currentSlide];
         const isLastSlide = currentSlide === mediaFiles.length - 1;
 
         // --- AUDIO MANAGEMENT ---
-        if (audioRef.current && audioFile) {
+        if (audioElement && audioFile) {
             // Ensure audio is playing
-            if (audioRef.current.paused) {
-                audioRef.current.play().catch(e => console.error("Audio play failed", e));
+            if (audioElement.paused) {
+                audioElement.play().catch(e => console.error("Audio play failed", e));
             }
             
             // Ensure volume is reset to 1 at the start of each slide.
             // If it is the last slide, the fade logic below will handle decreasing it.
             // We only reset if we are NOT in the fading process.
             if (!isLastSlide || settings.repeatSlideshow) {
-                audioRef.current.volume = 1;
+                audioElement.volume = 1;
             }
         }
         
         // --- FADE OUT LOGIC (Last Slide Only) ---
-        if (isLastSlide && !settings.repeatSlideshow && audioRef.current && audioFile) {
+        if (isLastSlide && !settings.repeatSlideshow && audioElement && audioFile) {
             const fadeDurationMs = settings.interval * 1000;
             const steps = 50;
             const intervalTime = fadeDurationMs / steps;
@@ -623,13 +657,13 @@ const App: React.FC = () => {
                 if (fadeInterval) clearInterval(fadeInterval);
                 
                 // Set initial volume explicitly to 1 before starting fade
-                if(audioRef.current) audioRef.current.volume = 1;
+                if(audioElement) audioElement.volume = 1;
 
                 fadeInterval = setInterval(() => {
-                    if (!audioRef.current) return;
-                    let newVol = audioRef.current.volume - decrement;
+                    if (!audioElement) return;
+                    let newVol = audioElement.volume - decrement;
                     if (newVol < 0) newVol = 0;
-                    audioRef.current.volume = newVol;
+                    audioElement.volume = newVol;
                     
                     if (newVol <= 0) {
                         clearInterval(fadeInterval);
@@ -639,11 +673,19 @@ const App: React.FC = () => {
 
             if (currentMedia.type === 'video' && videoElement) {
                 // For videos, wait to start the fade so it finishes right at the end of the video
+                // Logic updated to be robust against pauses
                 const setupVideoFade = () => {
                     const videoDurationMs = (videoElement.duration || 0) * 1000;
-                    // If video is shorter than fade duration, start immediately.
-                    // Otherwise start at (Duration - Fade).
-                    const delay = Math.max(0, videoDurationMs - fadeDurationMs);
+                    const currentTimeMs = (videoElement.currentTime || 0) * 1000;
+                    
+                    // The fade should start when (Remaining Time) == (Fade Duration aka Slide Duration)
+                    // Remaining Time = Total - Current
+                    // So: Total - Current = FadeDuration
+                    // Current = Total - FadeDuration
+                    
+                    const timeWhenFadeStartsMs = videoDurationMs - fadeDurationMs;
+                    const delay = Math.max(0, timeWhenFadeStartsMs - currentTimeMs);
+                    
                     fadeTimer = setTimeout(startFade, delay);
                 };
 
@@ -654,6 +696,7 @@ const App: React.FC = () => {
                 }
             } else {
                 // For images, start fading immediately as slide duration equals fade duration
+                // (per requirements: "fade when time left equals Slide duration")
                 startFade();
             }
         }
@@ -664,8 +707,9 @@ const App: React.FC = () => {
             if (isLastSlide && !settings.repeatSlideshow) {
                 setIsPlaying(false);
             } else {
-                 if (nextSlideIndex === 0 && settings.repeatSlideshow && audioRef.current) {
-                    audioRef.current.currentTime = 0;
+                 if (nextSlideIndex === 0 && settings.repeatSlideshow && audioElement) {
+                    audioElement.currentTime = 0;
+                    audioElement.volume = 1;
                 }
                 setCurrentSlide(nextSlideIndex);
             }
@@ -676,13 +720,13 @@ const App: React.FC = () => {
                 // Ensure video is playing (muted by prop)
                 videoElement.play().catch(e => console.error("Video play failed", e));
 
-                const handleVideoEnd = () => advanceSlide();
-                videoElement.addEventListener('ended', handleVideoEnd);
-
+                // Use onended directly for cleaner cleanup
+                videoElement.onended = advanceSlide;
+                
                 return () => {
                     cleanup();
                     if(videoElement) {
-                      videoElement.removeEventListener('ended', handleVideoEnd);
+                      videoElement.onended = null;
                     }
                 };
             }
@@ -692,9 +736,30 @@ const App: React.FC = () => {
         }
 
         return cleanup;
-    }, [isPlaying, currentSlide, mediaFiles, audioFile, settings]);
+    }, [isPlaying, isPaused, currentSlide, mediaFiles, audioFile, settings]);
 
+    // Navigation Handlers
+    const handleNext = (e?: React.MouseEvent) => {
+        e?.stopPropagation();
+        setCurrentSlide(prev => (prev + 1) % mediaFiles.length);
+        if (audioRef.current) audioRef.current.volume = 1;
+    };
 
+    const handlePrev = (e?: React.MouseEvent) => {
+        e?.stopPropagation();
+        setCurrentSlide(prev => prev === 0 ? mediaFiles.length - 1 : prev - 1);
+        if (audioRef.current) audioRef.current.volume = 1;
+    };
+    
+    const togglePause = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setIsPaused(prev => !prev);
+    }
+    
+    const handleStop = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        handleClosePreview();
+    }
     
     // --- SAVE/LOAD/DELETE/SHARE LOGIC ---
     const handleSaveSlideshow = async () => {
@@ -800,7 +865,7 @@ const App: React.FC = () => {
                     settings,
                     timestamp: serverTimestamp() as Timestamp,
                     ownerInfo: {
-                        displayName: user.displayName || '', // Fallback to avoid undefined
+                        displayName: user.displayName || 'User', // Fallback to avoid undefined
                         photoURL: user.photoURL || '',       // Fallback to avoid undefined
                     },
                     sharedWith: [],
@@ -811,7 +876,12 @@ const App: React.FC = () => {
 
         } catch (err) {
             console.error("Error saving slideshow:", err);
-            setError("An error occurred while saving. Please try again.");
+             // @ts-ignore
+            if (err.message && err.message.includes("permission")) {
+                 setError("Permission Error: Check Firebase Console Rules.");
+            } else {
+                 setError("An error occurred while saving. Please try again.");
+            }
         } finally {
             setIsSaving(false);
         }
@@ -893,7 +963,12 @@ const App: React.FC = () => {
 
         } catch (err) {
             console.error("Error deleting slideshow:", err);
-            setError("Failed to delete the slideshow. Please try again.");
+             // @ts-ignore
+             if (err.message && err.message.includes("permission")) {
+                 setError("Permission Error: Check Firebase Console Rules.");
+            } else {
+                setError("Failed to delete the slideshow. Please try again.");
+            }
         } finally {
             setIsProcessing(false);
         }
@@ -1321,15 +1396,19 @@ const App: React.FC = () => {
 
             {/* Fullscreen Preview Modal */}
             {isPlaying && (
-                <div className="fixed inset-0 bg-black z-50 flex flex-col items-center justify-center animate-fade-in">
-                    <button onClick={handleClosePreview} className="absolute top-4 right-4 text-white bg-black/50 rounded-full p-2 z-50">
+                <div className="fixed inset-0 bg-black z-50 flex flex-col items-center justify-center animate-fade-in group">
+                    {/* Top Right Close Button (Always visible) */}
+                    <button onClick={handleClosePreview} className="absolute top-4 right-4 text-white bg-black/50 hover:bg-red-600 rounded-full p-2 z-50 transition-colors">
                         <XIcon className="w-8 h-8" />
                     </button>
                     
                     {mediaFiles[currentSlide] && (
                         <div className="w-full h-full relative overflow-hidden">
                             {/* Wrapper applies the animation */}
-                            <div className={`w-full h-full absolute inset-0 animate-${settings.slideStyle}`}>
+                            <div 
+                                className={`w-full h-full absolute inset-0 animate-${settings.slideStyle}`}
+                                style={{ animationPlayState: isPaused ? 'paused' : 'running' }}
+                            >
                                 {mediaFiles[currentSlide].type === 'image' && (
                                     <>
                                         <img
@@ -1340,7 +1419,7 @@ const App: React.FC = () => {
                                             style={{ transform: `rotate(${mediaFiles[currentSlide].rotation}deg)` }}
                                         />
                                         {settings.showCaptions && (mediaFiles[currentSlide] as ImageFile).caption && (
-                                            <div className="absolute bottom-5 left-0 right-0 p-4 text-center">
+                                            <div className="absolute bottom-24 left-0 right-0 p-4 text-center z-40 pointer-events-none">
                                                 <p className="inline-block bg-black/50 text-white text-xl md:text-2xl font-semibold py-2 px-4 rounded-lg animate-fade-in">
                                                     {(mediaFiles[currentSlide] as ImageFile).caption}
                                                 </p>
@@ -1365,10 +1444,49 @@ const App: React.FC = () => {
                     )}
 
                     {settings.showClock && (
-                        <div className="absolute top-5 left-5 text-white text-2xl font-semibold bg-black/30 p-2 rounded-lg">
+                        <div className="absolute top-5 left-5 text-white text-2xl font-semibold bg-black/30 p-2 rounded-lg z-40">
                            {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
                     )}
+
+                    {/* Controls Overlay - Shows on hover or if paused */}
+                    <div className={`absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/90 to-transparent transition-opacity duration-300 flex justify-center items-center gap-6 z-50 opacity-0 group-hover:opacity-100 ${isPaused ? 'opacity-100' : ''}`}>
+                         <button 
+                            onClick={handlePrev} 
+                            className="text-white hover:text-brand-purple p-2 rounded-full hover:bg-white/10 transition-all transform hover:scale-110"
+                            title="Previous Slide"
+                        >
+                             <RewindIcon className="w-10 h-10" />
+                         </button>
+                         
+                         <button 
+                            onClick={togglePause} 
+                            className="text-white hover:text-brand-purple p-4 bg-white/10 rounded-full hover:bg-white/20 transition-all transform hover:scale-110 border-2 border-white/20"
+                            title={isPaused ? "Resume" : "Pause"}
+                        >
+                            {isPaused ? (
+                                <PlayIcon className="w-12 h-12 ml-1" />
+                            ) : (
+                                <PauseIcon className="w-12 h-12" />
+                            )}
+                         </button>
+
+                         <button 
+                            onClick={handleStop}
+                            className="text-white hover:text-red-500 p-2 rounded-full hover:bg-white/10 transition-all transform hover:scale-110"
+                            title="Stop Slideshow"
+                         >
+                             <StopIcon className="w-10 h-10" />
+                         </button>
+
+                         <button 
+                            onClick={handleNext} 
+                            className="text-white hover:text-brand-purple p-2 rounded-full hover:bg-white/10 transition-all transform hover:scale-110"
+                            title="Next Slide"
+                        >
+                             <FastForwardIcon className="w-10 h-10" />
+                         </button>
+                    </div>
                 </div>
             )}
 
