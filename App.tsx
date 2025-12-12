@@ -20,6 +20,7 @@ import {
     Timestamp,
     query,
     where,
+    limit,
     onSnapshot,
     deleteDoc,
     updateDoc,
@@ -310,7 +311,13 @@ const App: React.FC = () => {
             // FIX: Removed orderBy("timestamp", "desc") to prevent "Missing or insufficient permissions" error
             // which occurs when the required composite index is missing in Firestore.
             // Sorting is handled client-side in the useMemo hook below.
-            const ownedQuery = query(collection(db, "slideshows"), where("userId", "==", user.uid));
+            // FIX: Added limit(50) to satisfy potential security rule constraints regarding unbounded queries.
+            const ownedQuery = query(
+                collection(db, "slideshows"), 
+                where("userId", "==", user.uid),
+                limit(50)
+            );
+            
             const unsubscribeOwned = onSnapshot(ownedQuery, (querySnapshot) => {
                 const slideshows: SavedSlideshow[] = [];
                 querySnapshot.forEach((doc) => {
@@ -328,7 +335,12 @@ const App: React.FC = () => {
             // Only set up shared listener if user has an email
             let unsubscribeShared = () => {};
             if (user.email) {
-                const sharedQuery = query(collection(db, "slideshows"), where("sharedWith", "array-contains", user.email));
+                const sharedQuery = query(
+                    collection(db, "slideshows"), 
+                    where("sharedWith", "array-contains", user.email),
+                    limit(50)
+                );
+                
                 unsubscribeShared = onSnapshot(sharedQuery, (querySnapshot) => {
                     const slideshows: SavedSlideshow[] = [];
                     querySnapshot.forEach((doc) => {
