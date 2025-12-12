@@ -1,31 +1,11 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 // Switch to compat imports for App and Auth to resolve "no exported member" errors
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
-import {
-    getFirestore,
-    collection,
-    doc,
-    setDoc,
-    serverTimestamp,
-    Timestamp,
-    query,
-    where,
-    limit,
-    onSnapshot,
-    deleteDoc,
-    updateDoc,
-    arrayUnion,
-    arrayRemove,
-} from 'firebase/firestore';
-import {
-    getStorage,
-    ref,
-    uploadBytes,
-    getDownloadURL,
-    deleteObject
-} from 'firebase/storage';
+import 'firebase/compat/firestore';
+import 'firebase/compat/storage';
 
 
 // --- FIREBASE CONFIGURATION ---
@@ -40,13 +20,12 @@ const firebaseConfig = {
 };
 
 
-// --- FIREBASE INITIALIZATION (Hybrid Compat/Modular) ---
+// --- FIREBASE INITIALIZATION (Compat) ---
 // Use compat initialization to workaround import errors
 const app = firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
-// Cast app to any to allow interoperability between compat App and modular Services
-const db = getFirestore(app as any);
-const storage = getStorage(app as any);
+const db = firebase.firestore();
+const storage = firebase.storage();
 
 
 // --- TYPE DEFINITIONS ---
@@ -109,7 +88,7 @@ interface SavedSlideshow {
     media: SerializedMediaFile[];
     audio: SerializedAudioFile | null;
     settings: SlideshowSettings;
-    timestamp?: Timestamp;
+    timestamp?: firebase.firestore.Timestamp;
     // Fields for sharing functionality
     ownerInfo?: {
         displayName: string | null;
@@ -249,6 +228,11 @@ const RotateIcon: React.FC<{ className?: string }> = ({ className }) => (
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
     </svg>
 );
+const ChevronDownIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+    </svg>
+);
 
 
 // --- MAIN APP COMPONENT ---
@@ -336,13 +320,11 @@ const App: React.FC = () => {
             setIsLoading(true);
 
             // Listener for slideshows owned by the user
-            const ownedQuery = query(
-                collection(db, "slideshows"), 
-                where("userId", "==", user.uid),
-                limit(50)
-            );
+            const ownedQuery = db.collection("slideshows")
+                .where("userId", "==", user.uid)
+                .limit(50);
             
-            const unsubscribeOwned = onSnapshot(ownedQuery, (querySnapshot) => {
+            const unsubscribeOwned = ownedQuery.onSnapshot((querySnapshot) => {
                 const slideshows: SavedSlideshow[] = [];
                 querySnapshot.forEach((doc) => {
                     slideshows.push({ id: doc.id, ...doc.data() } as SavedSlideshow);
@@ -363,13 +345,11 @@ const App: React.FC = () => {
             // Only set up shared listener if user has an email
             let unsubscribeShared = () => {};
             if (user.email) {
-                const sharedQuery = query(
-                    collection(db, "slideshows"), 
-                    where("sharedWith", "array-contains", user.email),
-                    limit(50)
-                );
+                const sharedQuery = db.collection("slideshows") 
+                    .where("sharedWith", "array-contains", user.email)
+                    .limit(50);
                 
-                unsubscribeShared = onSnapshot(sharedQuery, (querySnapshot) => {
+                unsubscribeShared = sharedQuery.onSnapshot((querySnapshot) => {
                     const slideshows: SavedSlideshow[] = [];
                     querySnapshot.forEach((doc) => {
                         slideshows.push({ id: doc.id, ...doc.data() } as SavedSlideshow);
@@ -802,7 +782,7 @@ const App: React.FC = () => {
         setError(null);
 
         try {
-            const slideshowId = currentSlideshowId || doc(collection(db, 'slideshows')).id;
+            const slideshowId = currentSlideshowId || db.collection('slideshows').doc().id;
             
             const serializedMedia: SerializedMediaFile[] = await Promise.all(
                 mediaFiles.map(async (media) => {
@@ -832,9 +812,9 @@ const App: React.FC = () => {
                     const safeFileName = `${media.id}.${fileExt}`;
                     const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
                     
-                    const fileRef = ref(storage, filePath);
-                    await uploadBytes(fileRef, media.file);
-                    const url = await getDownloadURL(fileRef);
+                    const fileRef = storage.ref(filePath);
+                    await fileRef.put(media.file);
+                    const url = await fileRef.getDownloadURL();
                     
                     const baseMedia = {
                         id: media.id,
@@ -865,9 +845,9 @@ const App: React.FC = () => {
                     const safeFileName = `audio-${Date.now()}.${fileExt}`;
                     const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
                     
-                    const fileRef = ref(storage, filePath);
-                    await uploadBytes(fileRef, audioFile.file);
-                    const url = await getDownloadURL(fileRef);
+                    const fileRef = storage.ref(filePath);
+                    await fileRef.put(audioFile.file);
+                    const url = await fileRef.getDownloadURL();
                     serializedAudio = { name: audioFile.file.name, url, storagePath: filePath };
                 }
             }
@@ -878,10 +858,10 @@ const App: React.FC = () => {
                     media: serializedMedia,
                     audio: serializedAudio,
                     settings,
-                    timestamp: serverTimestamp() as Timestamp,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp() as unknown as firebase.firestore.Timestamp,
                 };
                 // Ensure we are updating the existing doc, preserving sharedWith and ownerInfo
-                await updateDoc(doc(db, 'slideshows', currentSlideshowId), updateData);
+                await db.collection('slideshows').doc(currentSlideshowId).update(updateData);
             } else { // Create new slideshow
                 const slideshowData: Omit<SavedSlideshow, 'id'> = {
                     userId: user.uid,
@@ -889,14 +869,14 @@ const App: React.FC = () => {
                     media: serializedMedia,
                     audio: serializedAudio,
                     settings,
-                    timestamp: serverTimestamp() as Timestamp,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp() as unknown as firebase.firestore.Timestamp,
                     ownerInfo: {
                         displayName: user.displayName || 'User', // Fallback to avoid undefined
                         photoURL: user.photoURL || '',       // Fallback to avoid undefined
                     },
                     sharedWith: [],
                 };
-                await setDoc(doc(db, 'slideshows', slideshowId), slideshowData);
+                await db.collection('slideshows').doc(slideshowId).set(slideshowData);
                 setCurrentSlideshowId(slideshowId);
             }
 
@@ -978,10 +958,10 @@ const App: React.FC = () => {
             if (slideshow.audio) filePaths.push(slideshow.audio.storagePath);
             
             await Promise.all(filePaths.map(path => 
-                deleteObject(ref(storage, path)).catch(err => console.warn("Asset deletion failed:", path, err))
+                storage.ref(path).delete().catch(err => console.warn("Asset deletion failed:", path, err))
             ));
             
-            await deleteDoc(doc(db, 'slideshows', slideshow.id));
+            await db.collection('slideshows').doc(slideshow.id).delete();
 
             if (currentSlideshowId === slideshow.id) {
                 resetWorkspace();
@@ -1027,8 +1007,8 @@ const App: React.FC = () => {
         setIsSharing(true);
         setError(null);
         try {
-            const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
-            await updateDoc(slideshowRef, { sharedWith: arrayUnion(emailToAdd) });
+            const slideshowRef = db.collection('slideshows').doc(slideshowToShare.id);
+            await slideshowRef.update({ sharedWith: firebase.firestore.FieldValue.arrayUnion(emailToAdd) });
             setSlideshowToShare(prev => ({
                 ...prev!,
                 sharedWith: [...(prev!.sharedWith || []), emailToAdd]
@@ -1048,8 +1028,8 @@ const App: React.FC = () => {
         setIsSharing(true);
         setError(null);
         try {
-            const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
-            await updateDoc(slideshowRef, { sharedWith: arrayRemove(emailToRemove) });
+            const slideshowRef = db.collection('slideshows').doc(slideshowToShare.id);
+            await slideshowRef.update({ sharedWith: firebase.firestore.FieldValue.arrayRemove(emailToRemove) });
              setSlideshowToShare(prev => ({
                 ...prev!,
                 sharedWith: (prev!.sharedWith || []).filter(e => e !== emailToRemove)
@@ -1137,6 +1117,14 @@ const App: React.FC = () => {
                                         <p className="text-gray-600 text-sm leading-relaxed">
                                             If videos do not appear on some mobile devices (especially iOS), it is often due to strict browser security policies regarding autoplay. We strive for maximum compatibility, but some settings are controlled by your device manufacturer.
                                         </p>
+                                    </div>
+                                </div>
+
+                                {/* Scroll Down Indicator */}
+                                <div className="mt-20 flex justify-center animate-bounce">
+                                    <div className="flex flex-col items-center text-gray-400">
+                                        <span className="text-[10px] uppercase tracking-widest font-bold mb-1">Scroll for more</span>
+                                        <ChevronDownIcon className="w-6 h-6 text-brand-purple" />
                                     </div>
                                 </div>
                             </div>
