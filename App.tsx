@@ -453,8 +453,14 @@ const App: React.FC = () => {
                      const duration = await new Promise<number>((resolve) => {
                          const v = document.createElement('video');
                          v.preload = 'metadata';
-                         v.onloadedmetadata = () => resolve(v.duration);
-                         v.onerror = () => resolve(0);
+                         v.onloadedmetadata = () => {
+                            URL.revokeObjectURL(url); // Cleanup
+                            resolve(v.duration);
+                         };
+                         v.onerror = () => {
+                             URL.revokeObjectURL(url); // Cleanup
+                             resolve(0);
+                         }
                          v.src = url;
                      });
                      if (duration > 30.5) { // Add small buffer for precision
@@ -465,7 +471,7 @@ const App: React.FC = () => {
 
                  if (file.type.startsWith('image/')) {
                     return {
-                        id: `${file.name}-${Date.now()}-${Math.random()}`,
+                        id: `item-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`,
                         file,
                         previewUrl: URL.createObjectURL(file),
                         type: 'image' as const,
@@ -474,7 +480,7 @@ const App: React.FC = () => {
                     };
                 } else {
                      return {
-                        id: `${file.name}-${Date.now()}-${Math.random()}`,
+                        id: `item-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`,
                         file,
                         previewUrl: URL.createObjectURL(file),
                         type: 'video' as const,
@@ -785,7 +791,11 @@ const App: React.FC = () => {
                     }
 
                     // New file - upload it
-                    const filePath = `users/${user.uid}/${slideshowId}/${media.file.name}-${media.id}`;
+                    // SANITIZE: Use a safe filename for storage to avoid 'unauthorized' errors with long/special char names
+                    const fileExt = media.file.name.split('.').pop() || 'bin';
+                    const safeFileName = `${media.id}.${fileExt}`;
+                    const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
+                    
                     const fileRef = ref(storage, filePath);
                     await uploadBytes(fileRef, media.file);
                     const url = await getDownloadURL(fileRef);
@@ -815,7 +825,10 @@ const App: React.FC = () => {
                         storagePath: audioFile.serverData.storagePath
                     };
                 } else {
-                    const filePath = `users/${user.uid}/${slideshowId}/${audioFile.file.name}`;
+                    const fileExt = audioFile.file.name.split('.').pop() || 'mp3';
+                    const safeFileName = `audio-${Date.now()}.${fileExt}`;
+                    const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
+                    
                     const fileRef = ref(storage, filePath);
                     await uploadBytes(fileRef, audioFile.file);
                     const url = await getDownloadURL(fileRef);
