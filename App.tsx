@@ -175,7 +175,7 @@ const PauseIcon: React.FC<{ className?: string }> = ({ className }) => (
 const StopIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
   </svg>
 );
 const FastForwardIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -1128,13 +1128,16 @@ const App: React.FC = () => {
                                 </div>
                                 
                                 {/* Disclaimer for Video Playback Issues */}
-                                <div className="mt-12 max-w-2xl mx-auto bg-yellow-900/30 border border-yellow-700/50 p-4 rounded-lg text-sm text-yellow-200">
-                                    <p className="flex items-start gap-3 text-left">
-                                        <InfoIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                                        <span>
-                                            <strong>Note on Video Playback:</strong> If videos do not appear on some mobile devices (especially iOS), it is often due to strict browser security policies regarding autoplay. We strive for maximum compatibility, but some settings are controlled by your device manufacturer.
-                                        </span>
-                                    </p>
+                                <div className="mt-12 max-w-2xl mx-auto bg-white border border-gray-100 shadow-md p-6 rounded-2xl text-left flex flex-col sm:flex-row gap-4 items-start hover:shadow-lg transition-shadow duration-300">
+                                    <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0 text-brand-purple">
+                                        <InfoIcon className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-gray-900 font-bold mb-1 text-lg">Video Playback Note</h4>
+                                        <p className="text-gray-600 text-sm leading-relaxed">
+                                            If videos do not appear on some mobile devices (especially iOS), it is often due to strict browser security policies regarding autoplay. We strive for maximum compatibility, but some settings are controlled by your device manufacturer.
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
                         </section>
