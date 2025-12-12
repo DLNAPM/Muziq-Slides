@@ -10,8 +10,6 @@ import {
     signInWithPopup,
     signOut,
     type User,
-    setPersistence,
-    browserLocalPersistence
 } from 'firebase/auth';
 import {
     getFirestore,
@@ -323,7 +321,8 @@ const App: React.FC = () => {
     }, [user, isGuestMode]);
     
     useEffect(() => {
-        if (user?.uid && user?.email) {
+        // Ensure user is defined and has necessary properties before setting up listeners
+        if (user?.uid) {
             setIsLoading(true);
 
             // Listener for slideshows owned by the user
@@ -340,21 +339,26 @@ const App: React.FC = () => {
                 setIsLoading(false);
             }, (err) => {
                 console.error("Error fetching owned slideshows:", err);
-                setError("Could not load your saved slideshows.");
+                setError("Could not load your saved slideshows. Please check your connection.");
                 setIsLoading(false);
             });
 
             // Listener for slideshows shared with the user
-            const sharedQuery = query(collection(db, "slideshows"), where("sharedWith", "array-contains", user.email));
-            const unsubscribeShared = onSnapshot(sharedQuery, (querySnapshot) => {
-                const slideshows: SavedSlideshow[] = [];
-                querySnapshot.forEach((doc) => {
-                    slideshows.push({ id: doc.id, ...doc.data() } as SavedSlideshow);
+            // Only set up shared listener if user has an email
+            let unsubscribeShared = () => {};
+            if (user.email) {
+                const sharedQuery = query(collection(db, "slideshows"), where("sharedWith", "array-contains", user.email));
+                unsubscribeShared = onSnapshot(sharedQuery, (querySnapshot) => {
+                    const slideshows: SavedSlideshow[] = [];
+                    querySnapshot.forEach((doc) => {
+                        slideshows.push({ id: doc.id, ...doc.data() } as SavedSlideshow);
+                    });
+                    setSharedSlideshows(slideshows);
+                }, (err) => {
+                    // Log error but don't block the UI for owned slideshows
+                    console.error("Error fetching shared slideshows:", err);
                 });
-                setSharedSlideshows(slideshows);
-            }, (err) => {
-                console.error("Error fetching shared slideshows:", err);
-            });
+            }
 
             return () => {
                 unsubscribeOwned();
@@ -375,7 +379,7 @@ const App: React.FC = () => {
     const handleLogin = async () => {
         const provider = new GoogleAuthProvider();
         try {
-            await setPersistence(auth, browserLocalPersistence);
+            // Using default persistence (LOCAL) to avoid issues with explicit persistence setting
             await signInWithPopup(auth, provider);
         } catch (error) {
             console.error("Authentication error:", error);
@@ -858,8 +862,8 @@ const App: React.FC = () => {
                     settings,
                     timestamp: serverTimestamp() as Timestamp,
                     ownerInfo: {
-                        displayName: user.displayName,
-                        photoURL: user.photoURL,
+                        displayName: user.displayName || '', // Fallback to avoid undefined
+                        photoURL: user.photoURL || '',       // Fallback to avoid undefined
                     },
                     sharedWith: [],
                 };
