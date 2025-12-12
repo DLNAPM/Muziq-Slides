@@ -175,7 +175,7 @@ const PauseIcon: React.FC<{ className?: string }> = ({ className }) => (
 const StopIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
   </svg>
 );
 const FastForwardIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -400,6 +400,12 @@ const App: React.FC = () => {
     const handleLogin = async () => {
         // Use compat GoogleAuthProvider
         const provider = new firebase.auth.GoogleAuthProvider();
+        
+        // Force the account selection prompt to allow switching accounts
+        provider.setCustomParameters({
+            prompt: 'select_account'
+        });
+
         try {
             // Using default persistence (LOCAL) to avoid issues with explicit persistence setting
             // Use compat signInWithPopup (auth.signInWithPopup)
