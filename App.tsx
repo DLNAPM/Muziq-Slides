@@ -1208,6 +1208,9 @@ const App: React.FC = () => {
                                                         className="w-full h-full object-cover pointer-events-none transition-transform duration-300" 
                                                         style={{ transform: `rotate(${media.rotation}deg)` }}
                                                         muted 
+                                                        playsInline
+                                                        preload="auto"
+                                                        crossOrigin="anonymous"
                                                     />
                                                 ) : (
                                                     <img 
@@ -1334,6 +1337,9 @@ const App: React.FC = () => {
                                                     className="w-full h-full object-contain"
                                                     style={{ transform: `rotate(${mediaFiles[0].rotation}deg)` }}
                                                     muted
+                                                    playsInline
+                                                    preload="auto"
+                                                    crossOrigin="anonymous"
                                                 />
                                             )}
                                         </div>
@@ -1456,6 +1462,9 @@ const App: React.FC = () => {
                                         style={{ transform: `rotate(${mediaFiles[currentSlide].rotation}deg)` }}
                                         autoPlay
                                         muted
+                                        playsInline
+                                        preload="auto"
+                                        crossOrigin="anonymous"
                                     />
                                 )}
                             </div>
