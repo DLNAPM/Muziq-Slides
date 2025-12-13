@@ -1,11 +1,31 @@
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 // Switch to compat imports for App and Auth to resolve "no exported member" errors
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
-import 'firebase/compat/firestore';
-import 'firebase/compat/storage';
+import {
+    getFirestore,
+    collection,
+    doc,
+    setDoc,
+    serverTimestamp,
+    Timestamp,
+    query,
+    where,
+    limit,
+    onSnapshot,
+    deleteDoc,
+    updateDoc,
+    arrayUnion,
+    arrayRemove,
+} from 'firebase/firestore';
+import {
+    getStorage,
+    ref,
+    uploadBytes,
+    getDownloadURL,
+    deleteObject
+} from 'firebase/storage';
 
 
 // --- FIREBASE CONFIGURATION ---
@@ -20,12 +40,13 @@ const firebaseConfig = {
 };
 
 
-// --- FIREBASE INITIALIZATION (Compat) ---
+// --- FIREBASE INITIALIZATION (Hybrid Compat/Modular) ---
 // Use compat initialization to workaround import errors
 const app = firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
-const db = firebase.firestore();
-const storage = firebase.storage();
+// Cast app to any to allow interoperability between compat App and modular Services
+const db = getFirestore(app as any);
+const storage = getStorage(app as any);
 
 
 // --- TYPE DEFINITIONS ---
@@ -88,7 +109,7 @@ interface SavedSlideshow {
     media: SerializedMediaFile[];
     audio: SerializedAudioFile | null;
     settings: SlideshowSettings;
-    timestamp?: firebase.firestore.Timestamp;
+    timestamp?: Timestamp;
     // Fields for sharing functionality
     ownerInfo?: {
         displayName: string | null;
@@ -320,11 +341,13 @@ const App: React.FC = () => {
             setIsLoading(true);
 
             // Listener for slideshows owned by the user
-            const ownedQuery = db.collection("slideshows")
-                .where("userId", "==", user.uid)
-                .limit(50);
+            const ownedQuery = query(
+                collection(db, "slideshows"), 
+                where("userId", "==", user.uid),
+                limit(50)
+            );
             
-            const unsubscribeOwned = ownedQuery.onSnapshot((querySnapshot) => {
+            const unsubscribeOwned = onSnapshot(ownedQuery, (querySnapshot) => {
                 const slideshows: SavedSlideshow[] = [];
                 querySnapshot.forEach((doc) => {
                     slideshows.push({ id: doc.id, ...doc.data() } as SavedSlideshow);
@@ -345,11 +368,13 @@ const App: React.FC = () => {
             // Only set up shared listener if user has an email
             let unsubscribeShared = () => {};
             if (user.email) {
-                const sharedQuery = db.collection("slideshows") 
-                    .where("sharedWith", "array-contains", user.email)
-                    .limit(50);
+                const sharedQuery = query(
+                    collection(db, "slideshows"), 
+                    where("sharedWith", "array-contains", user.email),
+                    limit(50)
+                );
                 
-                unsubscribeShared = sharedQuery.onSnapshot((querySnapshot) => {
+                unsubscribeShared = onSnapshot(sharedQuery, (querySnapshot) => {
                     const slideshows: SavedSlideshow[] = [];
                     querySnapshot.forEach((doc) => {
                         slideshows.push({ id: doc.id, ...doc.data() } as SavedSlideshow);
@@ -782,7 +807,7 @@ const App: React.FC = () => {
         setError(null);
 
         try {
-            const slideshowId = currentSlideshowId || db.collection('slideshows').doc().id;
+            const slideshowId = currentSlideshowId || doc(collection(db, 'slideshows')).id;
             
             const serializedMedia: SerializedMediaFile[] = await Promise.all(
                 mediaFiles.map(async (media) => {
@@ -812,9 +837,9 @@ const App: React.FC = () => {
                     const safeFileName = `${media.id}.${fileExt}`;
                     const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
                     
-                    const fileRef = storage.ref(filePath);
-                    await fileRef.put(media.file);
-                    const url = await fileRef.getDownloadURL();
+                    const fileRef = ref(storage, filePath);
+                    await uploadBytes(fileRef, media.file);
+                    const url = await getDownloadURL(fileRef);
                     
                     const baseMedia = {
                         id: media.id,
@@ -845,9 +870,9 @@ const App: React.FC = () => {
                     const safeFileName = `audio-${Date.now()}.${fileExt}`;
                     const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
                     
-                    const fileRef = storage.ref(filePath);
-                    await fileRef.put(audioFile.file);
-                    const url = await fileRef.getDownloadURL();
+                    const fileRef = ref(storage, filePath);
+                    await uploadBytes(fileRef, audioFile.file);
+                    const url = await getDownloadURL(fileRef);
                     serializedAudio = { name: audioFile.file.name, url, storagePath: filePath };
                 }
             }
@@ -858,10 +883,10 @@ const App: React.FC = () => {
                     media: serializedMedia,
                     audio: serializedAudio,
                     settings,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp() as unknown as firebase.firestore.Timestamp,
+                    timestamp: serverTimestamp() as Timestamp,
                 };
                 // Ensure we are updating the existing doc, preserving sharedWith and ownerInfo
-                await db.collection('slideshows').doc(currentSlideshowId).update(updateData);
+                await updateDoc(doc(db, 'slideshows', currentSlideshowId), updateData);
             } else { // Create new slideshow
                 const slideshowData: Omit<SavedSlideshow, 'id'> = {
                     userId: user.uid,
@@ -869,14 +894,14 @@ const App: React.FC = () => {
                     media: serializedMedia,
                     audio: serializedAudio,
                     settings,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp() as unknown as firebase.firestore.Timestamp,
+                    timestamp: serverTimestamp() as Timestamp,
                     ownerInfo: {
                         displayName: user.displayName || 'User', // Fallback to avoid undefined
                         photoURL: user.photoURL || '',       // Fallback to avoid undefined
                     },
                     sharedWith: [],
                 };
-                await db.collection('slideshows').doc(slideshowId).set(slideshowData);
+                await setDoc(doc(db, 'slideshows', slideshowId), slideshowData);
                 setCurrentSlideshowId(slideshowId);
             }
 
@@ -958,10 +983,10 @@ const App: React.FC = () => {
             if (slideshow.audio) filePaths.push(slideshow.audio.storagePath);
             
             await Promise.all(filePaths.map(path => 
-                storage.ref(path).delete().catch(err => console.warn("Asset deletion failed:", path, err))
+                deleteObject(ref(storage, path)).catch(err => console.warn("Asset deletion failed:", path, err))
             ));
             
-            await db.collection('slideshows').doc(slideshow.id).delete();
+            await deleteDoc(doc(db, 'slideshows', slideshow.id));
 
             if (currentSlideshowId === slideshow.id) {
                 resetWorkspace();
@@ -1007,8 +1032,8 @@ const App: React.FC = () => {
         setIsSharing(true);
         setError(null);
         try {
-            const slideshowRef = db.collection('slideshows').doc(slideshowToShare.id);
-            await slideshowRef.update({ sharedWith: firebase.firestore.FieldValue.arrayUnion(emailToAdd) });
+            const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
+            await updateDoc(slideshowRef, { sharedWith: arrayUnion(emailToAdd) });
             setSlideshowToShare(prev => ({
                 ...prev!,
                 sharedWith: [...(prev!.sharedWith || []), emailToAdd]
@@ -1028,8 +1053,8 @@ const App: React.FC = () => {
         setIsSharing(true);
         setError(null);
         try {
-            const slideshowRef = db.collection('slideshows').doc(slideshowToShare.id);
-            await slideshowRef.update({ sharedWith: firebase.firestore.FieldValue.arrayRemove(emailToRemove) });
+            const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
+            await updateDoc(slideshowRef, { sharedWith: arrayRemove(emailToRemove) });
              setSlideshowToShare(prev => ({
                 ...prev!,
                 sharedWith: (prev!.sharedWith || []).filter(e => e !== emailToRemove)
@@ -1115,7 +1140,7 @@ const App: React.FC = () => {
                                     <div>
                                         <h4 className="text-gray-900 font-bold mb-1 text-lg">Video Playback Note</h4>
                                         <p className="text-gray-600 text-sm leading-relaxed">
-                                            If videos do not appear on some mobile devices (especially iOS), it is often due to strict browser security policies regarding autoplay. We strive for maximum compatibility, but some settings are controlled by your device manufacturer.
+                                            If videos do not appear on some devices (particularly iOS or some Windows PCs), it is often due to strict browser security policies regarding autoplay. We strive for maximum compatibility, but some settings are controlled by your device manufacturer.
                                         </p>
                                     </div>
                                 </div>
@@ -1605,7 +1630,7 @@ const App: React.FC = () => {
 
                             <h3 className="text-xl font-semibold text-white pt-2 border-t border-gray-700">Troubleshooting Video Playback</h3>
                             <p>
-                                If you notice that images load but videos do not appear on certain devices (particularly iPhones or iPads), this is usually caused by <strong>strict browser policies</strong> that block autoplaying media to save battery or data.
+                                If you notice that images load but videos do not appear on certain devices (particularly iPhones, iPads, or some Windows PCs), this is usually caused by <strong>strict browser policies</strong> that block autoplaying media to save battery or data.
                             </p>
                             <p>
                                 This is a common restriction on mobile browsers. We have added specific configurations to minimize this, but if videos remain hidden, try interacting with the page (tapping) or ensuring your device is not in "Low Power Mode".
