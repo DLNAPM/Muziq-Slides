@@ -332,6 +332,32 @@ const App: React.FC = () => {
                 setSharedSlideshows([]);
             }
         });
+        
+        // Handle redirect result (fallback for mobile/ITP issues)
+        auth.getRedirectResult().then((result) => {
+            if (result.user) {
+                // Successful redirect login
+                // onAuthStateChanged will handle state update, this is mainly for error clearing/logging
+                setError(null);
+            }
+        }).catch((err: any) => {
+             // Fix: Suppress "operation-not-supported" error on mount.
+            // This happens in environments (like some IFrames or restricted browsers) where redirect isn't possible.
+            // We shouldn't show an error to the user just for visiting the page.
+            if (err.code === 'auth/operation-not-supported-in-this-environment') {
+                return;
+            }
+
+            console.error("Redirect Login Error:", err);
+            
+            // Provide a user-friendly message for the specific iOS state error
+            if (err.message && (err.message.includes("missing initial state") || err.message.includes("storage-partitioned"))) {
+                setError("Login failed due to browser privacy settings. Please enable cookies or try using a different browser.");
+            } else {
+                setError("Failed to sign in via redirect. " + err.message);
+            }
+        });
+
         return unsubscribeAuth;
     }, []);
     
@@ -415,9 +441,24 @@ const App: React.FC = () => {
             // Using default persistence (LOCAL) to avoid issues with explicit persistence setting
             // Use compat signInWithPopup (auth.signInWithPopup)
             await auth.signInWithPopup(provider);
-        } catch (error) {
+        } catch (error: any) {
             console.error("Authentication error:", error);
-            setError("Failed to sign in. If you see a 'blocked' error, please check browser popup settings.");
+            // If popup fails (likely on mobile or due to blockers), fallback to redirect
+            if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user' || error.message.includes('missing initial state')) {
+                console.log("Popup failed, attempting redirect fallback...");
+                try {
+                    await auth.signInWithRedirect(provider);
+                } catch (redirectError: any) {
+                    console.error("Redirect fallback error:", redirectError);
+                    if (redirectError.code === 'auth/operation-not-supported-in-this-environment') {
+                        setError("This browser environment does not support Google Login. Please try opening the app in a regular browser tab.");
+                    } else {
+                        setError("Failed to start login. Please check browser settings.");
+                    }
+                }
+            } else {
+                setError("Failed to sign in. If you see a 'blocked' error, please check browser popup settings.");
+            }
         }
     };
 
@@ -1140,7 +1181,7 @@ const App: React.FC = () => {
                                     <div>
                                         <h4 className="text-gray-900 font-bold mb-1 text-lg">Video Playback Note</h4>
                                         <p className="text-gray-600 text-sm leading-relaxed">
-                                            If videos do not appear on some devices (particularly iOS or some Windows PCs), it is often due to strict browser security policies regarding autoplay. We strive for maximum compatibility, but some settings are controlled by your device manufacturer.
+                                            If videos do not appear on some devices (particularly iOS, iPads, or some Windows PCs), it is often due to strict browser security policies regarding autoplay. We strive for maximum compatibility, but some settings are controlled by your device manufacturer.
                                         </p>
                                     </div>
                                 </div>
