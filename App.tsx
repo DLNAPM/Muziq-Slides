@@ -443,8 +443,9 @@ const App: React.FC = () => {
         if (!user || !currentSlideshowObj) return true; // Default to true if new slideshow
         if (currentSlideshowObj.userId === user.uid) return true; // Owner
         
-        // Check shared permissions
-        const userPerm = currentSlideshowObj.sharedPermissions?.find(p => p.email === user.email);
+        // Check shared permissions (Case insensitive check for robustness)
+        const userEmail = user.email?.toLowerCase();
+        const userPerm = currentSlideshowObj.sharedPermissions?.find(p => p.email.toLowerCase() === userEmail);
         return userPerm?.role === 'update';
     }, [user, currentSlideshowObj]);
 
@@ -574,6 +575,7 @@ const App: React.FC = () => {
 
     // --- DRAG AND DROP HANDLERS ---
     const handleDragStart = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+        if (!canEdit) return; // Disable drag start if view only
         setDraggedItemIndex(index);
         e.dataTransfer.effectAllowed = 'move';
         // setData is required for Firefox to initiate drag
@@ -592,7 +594,7 @@ const App: React.FC = () => {
     };
 
     const handleDrop = (dropIndex: number) => {
-        if (draggedItemIndex === null || draggedItemIndex === dropIndex) {
+        if (draggedItemIndex === null || draggedItemIndex === dropIndex || !canEdit) {
             setDraggedItemIndex(null);
             setDragOverIndex(null);
             return;
@@ -1332,21 +1334,22 @@ const App: React.FC = () => {
                            {/* Uploader */}
                             <div className="bg-gray-800/50 p-6 rounded-lg">
                                 <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">1. Upload Media</h3>
-                                <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-gray-800 transition-colors">
+                                <div onClick={() => canEdit && fileInputRef.current?.click()} className={`border-2 border-dashed border-gray-600 rounded-lg p-8 text-center transition-colors ${!canEdit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-brand-purple hover:bg-gray-800'}`}>
                                     <UploadIcon className="w-12 h-12 mx-auto text-gray-500" />
                                     <p className="mt-2 text-gray-400">Click to upload images/videos</p>
                                     <p className="text-xs text-gray-500">Max 20 files</p>
                                 </div>
-                                <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*" className="hidden" />
+                                <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*" className="hidden" disabled={!canEdit} />
                                 <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 gap-4">
                                     {mediaFiles.map((media, index) => (
                                         <div 
                                             key={media.id} 
-                                            className={`flex flex-col gap-1 transition-all duration-200 cursor-grab active:cursor-grabbing
+                                            className={`flex flex-col gap-1 transition-all duration-200
                                                 ${draggedItemIndex === index ? 'opacity-30 scale-95' : 'opacity-100'}
                                                 ${dragOverIndex === index ? 'bg-brand-purple/20 rounded-lg' : ''}
+                                                ${canEdit ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}
                                             `}
-                                            draggable
+                                            draggable={canEdit}
                                             onDragStart={(e) => handleDragStart(e, index)}
                                             onDragOver={(e) => handleDragOver(e, index)}
                                             onDragLeave={handleDragLeave}
@@ -1372,12 +1375,16 @@ const App: React.FC = () => {
                                                         style={{ transform: `rotate(${media.rotation}deg)` }} 
                                                     />
                                                 )}
-                                                <button onClick={() => handleDeleteMedia(media.id)} className="absolute top-1 right-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                                    <XIcon className="w-4 h-4" />
-                                                </button>
-                                                 <button onClick={(e) => handleRotateMedia(media.id, e)} className="absolute top-1 left-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity z-10" title="Rotate">
-                                                    <RotateIcon className="w-4 h-4" />
-                                                </button>
+                                                {canEdit && (
+                                                    <>
+                                                        <button onClick={() => handleDeleteMedia(media.id)} className="absolute top-1 right-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                                            <XIcon className="w-4 h-4" />
+                                                        </button>
+                                                        <button onClick={(e) => handleRotateMedia(media.id, e)} className="absolute top-1 left-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity z-10" title="Rotate">
+                                                            <RotateIcon className="w-4 h-4" />
+                                                        </button>
+                                                    </>
+                                                )}
                                             </div>
                                             {media.type === 'image' && (
                                                 <div className="relative w-full">
@@ -1387,10 +1394,11 @@ const App: React.FC = () => {
                                                         onChange={(e) => handleCaptionChange(media.id, e.target.value)}
                                                         placeholder="Caption..."
                                                         maxLength={80}
-                                                        className="w-full bg-gray-700 text-white text-xs rounded p-1 border border-transparent focus:outline-none focus:ring-1 focus:ring-brand-purple pr-6"
+                                                        className={`w-full bg-gray-700 text-white text-xs rounded p-1 border border-transparent focus:outline-none focus:ring-1 focus:ring-brand-purple pr-6 ${!canEdit ? 'opacity-70' : ''}`}
                                                         onClick={(e) => e.stopPropagation()}
+                                                        disabled={!canEdit}
                                                     />
-                                                    {settings.smartCaptionsEnabled && (
+                                                    {settings.smartCaptionsEnabled && canEdit && (
                                                         <button
                                                             onClick={() => handleGenerateCaption(media)}
                                                             disabled={generatingCaptionId === media.id}
@@ -1414,11 +1422,11 @@ const App: React.FC = () => {
                             {/* Music Picker */}
                             <div className="bg-gray-800/50 p-6 rounded-lg">
                                 <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">2. Add Music</h3>
-                                 <div onClick={() => audioInputRef.current?.click()} className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-gray-800 transition-colors">
+                                 <div onClick={() => canEdit && audioInputRef.current?.click()} className={`border-2 border-dashed border-gray-600 rounded-lg p-8 text-center transition-colors ${!canEdit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-brand-purple hover:bg-gray-800'}`}>
                                     <MusicIcon className="w-12 h-12 mx-auto text-gray-500" />
                                     <p className="mt-2 text-gray-400">{audioFile ? audioFile.name : 'Click to select an audio file'}</p>
                                 </div>
-                                <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*" className="hidden" />
+                                <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*" className="hidden" disabled={!canEdit} />
                                 {audioFile && audioSrc && (
                                     <audio ref={audioRef} src={audioSrc} loop className="w-full mt-4" controls />
                                 )}
@@ -1429,38 +1437,38 @@ const App: React.FC = () => {
                                 <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 flex justify-between">
                                     3. Settings
                                 </h3>
-                                <div className="space-y-4">
+                                <div className={`space-y-4 ${!canEdit ? 'opacity-70 pointer-events-none' : ''}`}>
                                     <div>
                                         <label htmlFor="interval" className="block mb-2 text-sm font-medium text-gray-300">Slide Duration: {settings.interval}s</label>
-                                        <input id="interval" type="range" min="1" max="30" value={settings.interval} onChange={(e) => setSettings(s => ({ ...s, interval: parseInt(e.target.value) }))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" />
+                                        <input id="interval" type="range" min="1" max="30" value={settings.interval} onChange={(e) => setSettings(s => ({ ...s, interval: parseInt(e.target.value) }))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" disabled={!canEdit} />
                                     </div>
                                     <div>
                                         <label htmlFor="slideStyle" className="block mb-2 text-sm font-medium text-gray-300">Slide Style</label>
-                                        <select id="slideStyle" value={settings.slideStyle} onChange={(e) => setSettings(s => ({...s, slideStyle: e.target.value}))} className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5">
+                                        <select id="slideStyle" value={settings.slideStyle} onChange={(e) => setSettings(s => ({...s, slideStyle: e.target.value}))} className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5" disabled={!canEdit}>
                                             {SLIDE_STYLES.map(style => <option key={style.id} value={style.id}>{style.name}</option>)}
                                         </select>
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <label htmlFor="showClock" className="text-sm font-medium text-gray-300">Show Clock in Preview</label>
-                                        <button onClick={() => setSettings(s => ({...s, showClock: !s.showClock}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showClock ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                        <button onClick={() => setSettings(s => ({...s, showClock: !s.showClock}))} disabled={!canEdit} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showClock ? 'bg-brand-purple' : 'bg-gray-600'}`}>
                                             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.showClock ? 'translate-x-6' : 'translate-x-1'}`}/>
                                         </button>
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <label htmlFor="repeatSlideshow" className="text-sm font-medium text-gray-300">Repeat Slideshow</label>
-                                        <button onClick={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.repeatSlideshow ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                        <button onClick={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} disabled={!canEdit} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.repeatSlideshow ? 'bg-brand-purple' : 'bg-gray-600'}`}>
                                             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.repeatSlideshow ? 'translate-x-6' : 'translate-x-1'}`}/>
                                         </button>
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <label htmlFor="showCaptions" className="text-sm font-medium text-gray-300">Show Captions</label>
-                                        <button onClick={() => setSettings(s => ({...s, showCaptions: !s.showCaptions}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showCaptions ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                        <button onClick={() => setSettings(s => ({...s, showCaptions: !s.showCaptions}))} disabled={!canEdit} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showCaptions ? 'bg-brand-purple' : 'bg-gray-600'}`}>
                                             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.showCaptions ? 'translate-x-6' : 'translate-x-1'}`}/>
                                         </button>
                                     </div>
                                      <div className="flex items-center justify-between pt-2 border-t border-gray-700/50">
                                         <label htmlFor="smartCaptions" className="text-sm font-medium text-gray-300">Enable Smart Captions (AI)</label>
-                                        <button onClick={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.smartCaptionsEnabled ? 'bg-brand-purple' : 'bg-gray-600'}`}>
+                                        <button onClick={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} disabled={!canEdit} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.smartCaptionsEnabled ? 'bg-brand-purple' : 'bg-gray-600'}`}>
                                             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.smartCaptionsEnabled ? 'translate-x-6' : 'translate-x-1'}`}/>
                                         </button>
                                     </div>
@@ -1513,7 +1521,7 @@ const App: React.FC = () => {
                                     5. Save, Share & Manage
                                 </h3>
                                 <div className="flex gap-4 mb-4">
-                                     <input type="text" value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Enter slideshow name" className="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5" />
+                                     <input type="text" value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Enter slideshow name" className="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5" disabled={!canEdit} />
                                      <button 
                                         onClick={handleSaveSlideshow} 
                                         disabled={isSaving || mediaFiles.length === 0 || !canEdit} 
