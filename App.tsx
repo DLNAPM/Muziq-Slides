@@ -102,6 +102,11 @@ interface SerializedAudioFile {
     storagePath: string;
 }
 
+interface SharedPermission {
+    email: string;
+    role: 'view' | 'update';
+}
+
 interface SavedSlideshow {
     id: string; 
     userId: string;
@@ -116,6 +121,7 @@ interface SavedSlideshow {
         photoURL: string | null;
     };
     sharedWith?: string[]; // Array of user emails
+    sharedPermissions?: SharedPermission[];
 }
 
 // --- HELPER FUNCTIONS ---
@@ -286,6 +292,7 @@ const App: React.FC = () => {
     const [isShareModalOpen, setIsShareModalOpen] = useState(false);
     const [slideshowToShare, setSlideshowToShare] = useState<SavedSlideshow | null>(null);
     const [shareEmail, setShareEmail] = useState('');
+    const [shareRole, setShareRole] = useState<'view' | 'update'>('view');
     const [isSharing, setIsSharing] = useState(false);
 
     // AI Caption state
@@ -427,6 +434,19 @@ const App: React.FC = () => {
         const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
         return unique.sort((a, b) => (b.timestamp?.toMillis() ?? 0) - (a.timestamp?.toMillis() ?? 0));
     }, [ownedSlideshows, sharedSlideshows]);
+
+    const currentSlideshowObj = useMemo(() => {
+        return allSlideshows.find(s => s.id === currentSlideshowId);
+    }, [allSlideshows, currentSlideshowId]);
+
+    const canEdit = useMemo(() => {
+        if (!user || !currentSlideshowObj) return true; // Default to true if new slideshow
+        if (currentSlideshowObj.userId === user.uid) return true; // Owner
+        
+        // Check shared permissions
+        const userPerm = currentSlideshowObj.sharedPermissions?.find(p => p.email === user.email);
+        return userPerm?.role === 'update';
+    }, [user, currentSlideshowObj]);
 
     const handleLogin = async () => {
         // Use compat GoogleAuthProvider
@@ -835,6 +855,10 @@ const App: React.FC = () => {
             setError("You must be signed in to save a slideshow.");
             return;
         }
+        if (!canEdit) {
+            setError("You do not have permission to update this slideshow (View Only).");
+            return;
+        }
         if (!slideshowName.trim()) {
             setError("Please enter a name for your slideshow.");
             return;
@@ -941,6 +965,7 @@ const App: React.FC = () => {
                         photoURL: user.photoURL || '',       // Fallback to avoid undefined
                     },
                     sharedWith: [],
+                    sharedPermissions: [],
                 };
                 await setDoc(doc(db, 'slideshows', slideshowId), slideshowData);
                 setCurrentSlideshowId(slideshowId);
@@ -1048,6 +1073,8 @@ const App: React.FC = () => {
     
     const handleOpenShareModal = (slideshow: SavedSlideshow) => {
         setSlideshowToShare(slideshow);
+        setShareEmail('');
+        setShareRole('view');
         setIsShareModalOpen(true);
     };
 
@@ -1074,11 +1101,25 @@ const App: React.FC = () => {
         setError(null);
         try {
             const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
-            await updateDoc(slideshowRef, { sharedWith: arrayUnion(emailToAdd) });
+            const newPermission: SharedPermission = { email: emailToAdd, role: shareRole };
+
+            // We need to update both the array of emails (for querying) and the permissions array (for logic)
+            // But first, let's remove any existing entry for this user to avoid duplicates in permissions
+            const currentPerms = slideshowToShare.sharedPermissions?.filter(p => p.email !== emailToAdd) || [];
+            currentPerms.push(newPermission);
+
+            await updateDoc(slideshowRef, { 
+                sharedWith: arrayUnion(emailToAdd),
+                sharedPermissions: currentPerms
+            });
+            
+            // Update local state to reflect changes immediately in the modal
             setSlideshowToShare(prev => ({
                 ...prev!,
-                sharedWith: [...(prev!.sharedWith || []), emailToAdd]
+                sharedWith: [...new Set([...(prev!.sharedWith || []), emailToAdd])],
+                sharedPermissions: currentPerms
             }));
+            
             setShareEmail('');
         } catch (err) {
             console.error("Error sharing slideshow:", err);
@@ -1095,10 +1136,18 @@ const App: React.FC = () => {
         setError(null);
         try {
             const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
-            await updateDoc(slideshowRef, { sharedWith: arrayRemove(emailToRemove) });
+            
+            const currentPerms = slideshowToShare.sharedPermissions?.filter(p => p.email !== emailToRemove) || [];
+
+            await updateDoc(slideshowRef, { 
+                sharedWith: arrayRemove(emailToRemove),
+                sharedPermissions: currentPerms
+            });
+
              setSlideshowToShare(prev => ({
                 ...prev!,
-                sharedWith: (prev!.sharedWith || []).filter(e => e !== emailToRemove)
+                sharedWith: (prev!.sharedWith || []).filter(e => e !== emailToRemove),
+                sharedPermissions: currentPerms
             }));
         } catch (err) {
             console.error("Error removing share:", err);
@@ -1106,6 +1155,36 @@ const App: React.FC = () => {
         } finally {
             setIsSharing(false);
         }
+    };
+    
+    const handleUpdatePermission = async (emailToUpdate: string, newRole: 'view' | 'update') => {
+         if (!slideshowToShare) return;
+         setIsSharing(true);
+         try {
+             const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
+             const currentPerms = [...(slideshowToShare.sharedPermissions || [])];
+             const idx = currentPerms.findIndex(p => p.email === emailToUpdate);
+             
+             if (idx >= 0) {
+                 currentPerms[idx].role = newRole;
+             } else {
+                 // Legacy user case
+                 currentPerms.push({ email: emailToUpdate, role: newRole });
+             }
+             
+             await updateDoc(slideshowRef, { sharedPermissions: currentPerms });
+             
+             setSlideshowToShare(prev => ({
+                 ...prev!,
+                 sharedPermissions: currentPerms
+             }));
+             
+         } catch (err) {
+             console.error("Error updating permission:", err);
+             setError("Failed to update permission.");
+         } finally {
+             setIsSharing(false);
+         }
     };
 
 
@@ -1435,7 +1514,12 @@ const App: React.FC = () => {
                                 </h3>
                                 <div className="flex gap-4 mb-4">
                                      <input type="text" value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Enter slideshow name" className="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5" />
-                                     <button onClick={handleSaveSlideshow} disabled={isSaving || mediaFiles.length === 0} className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors disabled:bg-gray-500">
+                                     <button 
+                                        onClick={handleSaveSlideshow} 
+                                        disabled={isSaving || mediaFiles.length === 0 || !canEdit} 
+                                        className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed"
+                                        title={!canEdit ? "View Only - Contact owner for edit access" : "Save Slideshow"}
+                                     >
                                         <SaveIcon className="w-5 h-5" />
                                         {currentSlideshowId ? 'Update' : 'Save'}
                                      </button>
@@ -1446,33 +1530,42 @@ const App: React.FC = () => {
                                     <>
                                         <h4 className="text-lg font-semibold mt-6 mb-2">My Slideshows</h4>
                                         <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                                            {isLoading ? <p>Loading slideshows...</p> : allSlideshows.length > 0 ? allSlideshows.map(s => (
-                                                <div key={s.id} className="flex justify-between items-center bg-gray-700/50 p-2 rounded-lg gap-2">
-                                                    <div className="flex items-center gap-3 min-w-0">
-                                                         {s.userId !== user.uid && s.ownerInfo?.photoURL && (
-                                                            <img src={s.ownerInfo.photoURL} alt={s.ownerInfo.displayName ?? 'Owner'} className="w-8 h-8 rounded-full flex-shrink-0" title={`Shared by ${s.ownerInfo.displayName}`} />
-                                                         )}
-                                                        <div className="truncate">
-                                                            <p className="truncate font-semibold flex items-center gap-2">
-                                                                {s.name}
-                                                                {s.userId !== user.uid && <span className="text-[10px] bg-blue-900 text-blue-200 px-1.5 py-0.5 rounded uppercase tracking-wide">Shared</span>}
-                                                            </p>
-                                                             {s.userId !== user.uid && s.ownerInfo?.displayName && (
-                                                                <p className="text-xs text-gray-400 truncate">By {s.ownerInfo.displayName}</p>
+                                            {isLoading ? <p>Loading slideshows...</p> : allSlideshows.length > 0 ? allSlideshows.map(s => {
+                                                // Determine permission for this specific slideshow in the list
+                                                const isOwner = s.userId === user.uid;
+                                                const myPerm = !isOwner ? s.sharedPermissions?.find(p => p.email === user.email) : null;
+                                                const roleLabel = isOwner ? 'Owner' : (myPerm?.role === 'update' ? 'Editor' : 'Viewer');
+
+                                                return (
+                                                    <div key={s.id} className="flex justify-between items-center bg-gray-700/50 p-2 rounded-lg gap-2">
+                                                        <div className="flex items-center gap-3 min-w-0">
+                                                            {s.userId !== user.uid && s.ownerInfo?.photoURL && (
+                                                                <img src={s.ownerInfo.photoURL} alt={s.ownerInfo.displayName ?? 'Owner'} className="w-8 h-8 rounded-full flex-shrink-0" title={`Shared by ${s.ownerInfo.displayName}`} />
+                                                            )}
+                                                            <div className="truncate">
+                                                                <p className="truncate font-semibold flex items-center gap-2">
+                                                                    {s.name}
+                                                                    <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide ${isOwner ? 'hidden' : 'bg-blue-900 text-blue-200'}`}>
+                                                                        {roleLabel}
+                                                                    </span>
+                                                                </p>
+                                                                {s.userId !== user.uid && s.ownerInfo?.displayName && (
+                                                                    <p className="text-xs text-gray-400 truncate">By {s.ownerInfo.displayName}</p>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex gap-2 flex-shrink-0">
+                                                            <button onClick={() => handleLoadSlideshow(s)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded-md text-sm">Load</button>
+                                                            {isOwner && (
+                                                                <>
+                                                                    <button onClick={() => handleOpenShareModal(s)} className="bg-green-600 hover:bg-green-700 text-white font-bold p-2 rounded-md" title="Share"><ShareIcon className="w-4 h-4"/></button>
+                                                                    <button onClick={() => handleDeleteSlideshow(s)} className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded-md" title="Delete"><TrashIcon className="w-4 h-4"/></button>
+                                                                </>
                                                             )}
                                                         </div>
                                                     </div>
-                                                    <div className="flex gap-2 flex-shrink-0">
-                                                        <button onClick={() => handleLoadSlideshow(s)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded-md text-sm">Load</button>
-                                                        {s.userId === user.uid && (
-                                                            <>
-                                                                <button onClick={() => handleOpenShareModal(s)} className="bg-green-600 hover:bg-green-700 text-white font-bold p-2 rounded-md" title="Share"><ShareIcon className="w-4 h-4"/></button>
-                                                                <button onClick={() => handleDeleteSlideshow(s)} className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded-md" title="Delete"><TrashIcon className="w-4 h-4"/></button>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            )) : <p className="text-gray-400">No saved slideshows yet.</p>}
+                                                );
+                                            }) : <p className="text-gray-400">No saved slideshows yet.</p>}
                                         </div>
                                     </>
                                 )}
@@ -1595,13 +1688,13 @@ const App: React.FC = () => {
              {/* Share Modal */}
             {isShareModalOpen && slideshowToShare && (
                 <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center animate-fade-in p-4" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
-                    <div className="bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 relative">
+                    <div className="bg-gray-800 rounded-lg shadow-xl max-w-lg w-full p-6 relative">
                         <button onClick={handleCloseShareModal} className="absolute top-4 right-4 text-gray-400 hover:text-white" aria-label="Close share menu">
                             <XIcon className="w-6 h-6" />
                         </button>
                         <h2 id="share-modal-title" className="text-xl font-bold text-brand-purple mb-4">Share "{slideshowToShare.name}"</h2>
                         <div className="space-y-4">
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 items-center">
                                 <input
                                     type="email"
                                     value={shareEmail}
@@ -1610,6 +1703,14 @@ const App: React.FC = () => {
                                     className="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5"
                                     aria-label="Email to share with"
                                 />
+                                <select 
+                                    value={shareRole}
+                                    onChange={(e) => setShareRole(e.target.value as 'view' | 'update')}
+                                    className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block p-2.5"
+                                >
+                                    <option value="view">View</option>
+                                    <option value="update">Update</option>
+                                </select>
                                 <button onClick={handleAddShare} disabled={isSharing || !shareEmail} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-500 flex-shrink-0">
                                     {isSharing ? 'Adding...' : 'Add'}
                                 </button>
@@ -1617,27 +1718,36 @@ const App: React.FC = () => {
                             <div>
                                 <div className="flex justify-between items-center mb-2">
                                     <h3 className="text-lg font-semibold">Shared with:</h3>
-                                    {slideshowToShare.sharedWith && slideshowToShare.sharedWith.length > 0 && slideshowToShare.id === currentSlideshowId && (
-                                        <button
-                                            onClick={() => handleSaveSlideshow()}
-                                            disabled={isSaving}
-                                            className="text-xs bg-brand-purple hover:bg-purple-700 text-white font-bold py-1 px-3 rounded transition-colors disabled:opacity-50"
-                                            title="Save and push current changes to all shared users"
-                                        >
-                                            Update Share(s)
-                                        </button>
-                                    )}
                                 </div>
                                 <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
                                     {(slideshowToShare.sharedWith ?? []).length > 0 ? (
-                                        slideshowToShare.sharedWith!.map(email => (
-                                            <div key={email} className="flex justify-between items-center bg-gray-700/50 p-2 rounded">
-                                                <span className="text-sm truncate">{email}</span>
-                                                <button onClick={() => handleRemoveShare(email)} disabled={isSharing} className="text-red-400 hover:text-red-300 p-1 disabled:opacity-50" aria-label={`Remove ${email}`}>
-                                                    <TrashIcon className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        ))
+                                        slideshowToShare.sharedWith!.map(email => {
+                                            const perm = slideshowToShare.sharedPermissions?.find(p => p.email === email);
+                                            const role = perm?.role || 'view'; // Default to 'view' if legacy
+
+                                            return (
+                                                <div key={email} className="flex justify-between items-center bg-gray-700/50 p-2 rounded">
+                                                    <div className="flex flex-col">
+                                                        <span className="text-sm truncate">{email}</span>
+                                                        <span className="text-[10px] text-gray-400 uppercase">{role}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <select
+                                                            value={role}
+                                                            onChange={(e) => handleUpdatePermission(email, e.target.value as 'view' | 'update')}
+                                                            disabled={isSharing}
+                                                            className="bg-gray-600 border border-gray-500 text-white text-xs rounded p-1 focus:ring-brand-purple focus:border-brand-purple"
+                                                        >
+                                                            <option value="view">View</option>
+                                                            <option value="update">Update</option>
+                                                        </select>
+                                                        <button onClick={() => handleRemoveShare(email)} disabled={isSharing} className="text-red-400 hover:text-red-300 p-1 disabled:opacity-50" aria-label={`Remove ${email}`}>
+                                                            <TrashIcon className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })
                                     ) : <p className="text-gray-400 text-sm italic">Not shared with anyone yet.</p>}
                                 </div>
                             </div>
