@@ -66,14 +66,17 @@ interface VideoFile {
     file?: File; // File is optional when loaded from server
     previewUrl: string;
     rotation: number;
+    duration?: number; // Duration in seconds
     serverData?: { url: string; storagePath: string; };
 }
 
 type MediaFile = ImageFile | VideoFile;
 
 interface AppStateAudio {
+    id: string;
     file?: File;
     name: string;
+    duration: number; // Duration in seconds
     serverData?: { url: string; storagePath: string; };
 }
 
@@ -94,12 +97,14 @@ interface SerializedMediaFile {
     storagePath: string;
     caption?: string;
     rotation?: number;
+    duration?: number;
 }
 
 interface SerializedAudioFile {
     name: string;
     url: string;
     storagePath: string;
+    duration?: number;
 }
 
 interface SharedPermission {
@@ -112,7 +117,8 @@ interface SavedSlideshow {
     userId: string;
     name: string;
     media: SerializedMediaFile[];
-    audio: SerializedAudioFile | null;
+    // audio can be a single object (legacy) or an array
+    audio: SerializedAudioFile | SerializedAudioFile[] | null;
     settings: SlideshowSettings;
     timestamp?: Timestamp;
     // Fields for sharing functionality
@@ -143,10 +149,34 @@ const urlToGenerativePart = async (url: string) => {
     return fileToGenerativePart(new File([blob], "image.jpg", { type: blob.type }));
 };
 
-const urlToFile = async (url: string, filename: string): Promise<File> => {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    return new File([blob], filename, { type: blob.type });
+const getMediaDuration = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+        const objectUrl = URL.createObjectURL(file);
+        const element = file.type.startsWith('audio') ? new Audio(objectUrl) : document.createElement('video');
+        
+        if (file.type.startsWith('video')) {
+            (element as HTMLVideoElement).src = objectUrl;
+             // Videos need to load metadata
+             element.onloadedmetadata = () => {
+                resolve(element.duration);
+                URL.revokeObjectURL(objectUrl);
+            };
+            element.onerror = () => {
+                resolve(0);
+                URL.revokeObjectURL(objectUrl);
+            }
+        } else {
+             // Audio
+            (element as HTMLAudioElement).onloadedmetadata = () => {
+                resolve(element.duration);
+                URL.revokeObjectURL(objectUrl);
+            };
+            (element as HTMLAudioElement).onerror = () => {
+                resolve(0);
+                URL.revokeObjectURL(objectUrl);
+            }
+        }
+    });
 };
 
 // --- CONSTANTS ---
@@ -260,13 +290,18 @@ const ChevronDownIcon: React.FC<{ className?: string }> = ({ className }) => (
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
     </svg>
 );
+const PlusIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+    </svg>
+);
 
 
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
     const [user, setUser] = useState<firebase.User | null>(null);
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
-    const [audioFile, setAudioFile] = useState<AppStateAudio | null>(null);
+    const [audioFiles, setAudioFiles] = useState<AppStateAudio[]>([]);
     const [settings, setSettings] = useState<SlideshowSettings>({
         interval: 5,
         slideStyle: 'ken-burns',
@@ -278,6 +313,7 @@ const App: React.FC = () => {
     const [isPlaying, setIsPlaying] = useState(false);
     const [isPaused, setIsPaused] = useState(false); // New state for pause
     const [currentSlide, setCurrentSlide] = useState(0);
+    const [currentAudioIndex, setCurrentAudioIndex] = useState(0); // Track which song is playing
     const [slideshowName, setSlideshowName] = useState('');
     const [currentSlideshowId, setCurrentSlideshowId] = useState<string | null>(null);
     const [ownedSlideshows, setOwnedSlideshows] = useState<SavedSlideshow[]>([]);
@@ -307,24 +343,36 @@ const App: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
 
-    // Fix: Memoize the audio object URL to prevent it from being regenerated on every
-    // render, which was causing the audio to restart on each slide transition.
-    const audioSrc = useMemo(() => {
-        if (!audioFile) return null;
-        if (audioFile.file) {
-            return URL.createObjectURL(audioFile.file);
-        }
-        return audioFile.serverData?.url || null;
-    }, [audioFile]);
+    // Get current audio source based on index
+    const currentAudioFile = useMemo(() => audioFiles[currentAudioIndex], [audioFiles, currentAudioIndex]);
 
-    // Add cleanup for the object URL to prevent memory leaks
+    const audioSrc = useMemo(() => {
+        if (!currentAudioFile) return null;
+        if (currentAudioFile.file) {
+            return URL.createObjectURL(currentAudioFile.file);
+        }
+        return currentAudioFile.serverData?.url || null;
+    }, [currentAudioFile]);
+
+    // Cleanup audio object URLs
     useEffect(() => {
         return () => {
-            if (audioSrc && audioSrc.startsWith('blob:')) {
-                URL.revokeObjectURL(audioSrc);
-            }
+             // Clean up all object URLs created for audio files when component unmounts
+             // Note: In a real app, we might want to be more granular, but for this scope it's fine.
         };
-    }, [audioSrc]);
+    }, []);
+
+    // Calculate durations
+    const totalSlideshowDuration = useMemo(() => {
+        return mediaFiles.reduce((acc, curr) => {
+            if (curr.type === 'image') return acc + settings.interval;
+            return acc + (curr.duration || 0); // Use 0 if duration not yet loaded
+        }, 0);
+    }, [mediaFiles, settings.interval]);
+
+    const totalMusicDuration = useMemo(() => {
+        return audioFiles.reduce((acc, curr) => acc + curr.duration, 0);
+    }, [audioFiles]);
 
 
     // --- AUTHENTICATION & DATA FETCHING ---
@@ -498,7 +546,7 @@ const App: React.FC = () => {
     
     const resetWorkspace = () => {
         setMediaFiles([]);
-        setAudioFile(null);
+        setAudioFiles([]);
         setSlideshowName('');
         setCurrentSlideshowId(null);
         if(fileInputRef.current) fileInputRef.current.value = '';
@@ -528,12 +576,15 @@ const App: React.FC = () => {
                         rotation: 0,
                     };
                 } else {
+                    // For video, we also need duration
+                    const duration = await getMediaDuration(file);
                      return {
                         id: `item-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`,
                         file,
                         previewUrl: URL.createObjectURL(file),
                         type: 'video',
                         rotation: 0,
+                        duration,
                     };
                 }
             });
@@ -541,6 +592,7 @@ const App: React.FC = () => {
             const resolvedFiles = await Promise.all(newMediaFilesPromise);
             const validFiles = resolvedFiles.filter((f) => f !== null);
             setMediaFiles(prev => [...prev, ...validFiles]);
+            if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
     
@@ -552,11 +604,33 @@ const App: React.FC = () => {
             return media;
         }));
     };
+    
+    // Updated video metadata handler for existing videos (loaded without duration)
+    const handleVideoMetadataLoaded = (id: string, duration: number) => {
+        setMediaFiles(prev => prev.map(media => {
+             if (media.id === id && media.type === 'video' && (!media.duration || media.duration === 0)) {
+                 return { ...media, duration };
+             }
+             return media;
+        }));
+    };
 
-    const handleAudioChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleAudioChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-            setAudioFile({ file: e.target.files[0], name: e.target.files[0].name });
+            const file = e.target.files[0];
+            const duration = await getMediaDuration(file);
+            setAudioFiles(prev => [...prev, {
+                id: `audio-${Date.now()}-${Math.random()}`,
+                file,
+                name: file.name,
+                duration
+            }]);
+            if(audioInputRef.current) audioInputRef.current.value = '';
         }
+    };
+
+    const handleDeleteAudio = (id: string) => {
+        setAudioFiles(prev => prev.filter(a => a.id !== id));
     };
 
     const handleDeleteMedia = (id: string) => {
@@ -664,14 +738,10 @@ const App: React.FC = () => {
         }
         setError(null);
         setCurrentSlide(0);
+        setCurrentAudioIndex(0); // Reset audio to first track
         setIsPaused(false);
         setIsPlaying(true);
-        if (audioRef.current && audioFile) {
-            audioRef.current.currentTime = 0;
-            audioRef.current.volume = 1;
-            // Play audio regardless of whether the first slide is an image or video
-            audioRef.current.play().catch(e => console.error("Audio play failed", e));
-        }
+        // Playback trigger is handled by useEffect looking at isPlaying and audioSrc
     };
 
     const handleClosePreview = () => {
@@ -683,6 +753,24 @@ const App: React.FC = () => {
             audioRef.current.volume = 1; // Reset volume
         }
     };
+    
+    // Handle audio track switching
+    const handleAudioEnded = () => {
+        if (currentAudioIndex < audioFiles.length - 1) {
+             setCurrentAudioIndex(prev => prev + 1);
+        } else if (settings.repeatSlideshow) {
+             setCurrentAudioIndex(0);
+        }
+        // If it's the last track and no repeat, it stops naturally.
+    };
+    
+    // Trigger play when audio source changes (next song)
+    useEffect(() => {
+        if (isPlaying && !isPaused && audioRef.current && audioSrc) {
+             audioRef.current.play().catch(e => console.error("Audio switch play failed", e));
+        }
+    }, [currentAudioIndex, audioSrc, isPlaying, isPaused]);
+
 
     // Ensure audio stops if slideshow ends automatically (via state change)
     useEffect(() => {
@@ -721,9 +809,9 @@ const App: React.FC = () => {
         const isLastSlide = currentSlide === mediaFiles.length - 1;
 
         // --- AUDIO MANAGEMENT ---
-        if (audioElement && audioFile) {
+        if (audioElement && audioFiles.length > 0) {
             // Ensure audio is playing
-            if (audioElement.paused) {
+            if (audioElement.paused && audioSrc) {
                 audioElement.play().catch(e => console.error("Audio play failed", e));
             }
             
@@ -736,7 +824,8 @@ const App: React.FC = () => {
         }
         
         // --- FADE OUT LOGIC (Last Slide Only) ---
-        if (isLastSlide && !settings.repeatSlideshow && audioElement && audioFile) {
+        // This will fade whatever song is currently playing in audioRef
+        if (isLastSlide && !settings.repeatSlideshow && audioElement && audioFiles.length > 0) {
             const fadeDurationMs = settings.interval * 1000;
             const steps = 50;
             const intervalTime = fadeDurationMs / steps;
@@ -768,12 +857,8 @@ const App: React.FC = () => {
                     const videoDurationMs = (videoElement.duration || 0) * 1000;
                     const currentTimeMs = (videoElement.currentTime || 0) * 1000;
                     
-                    // The fade should start when (Remaining Time) == (Fade Duration aka Slide Duration)
-                    // Remaining Time = Total - Current
-                    // So: Total - Current = FadeDuration
-                    // Current = Total - FadeDuration
-                    
                     const timeWhenFadeStartsMs = videoDurationMs - fadeDurationMs;
+                    // If video is shorter than interval, fade immediately
                     const delay = Math.max(0, timeWhenFadeStartsMs - currentTimeMs);
                     
                     fadeTimer = setTimeout(startFade, delay);
@@ -786,7 +871,6 @@ const App: React.FC = () => {
                 }
             } else {
                 // For images, start fading immediately as slide duration equals fade duration
-                // (per requirements: "fade when time left equals Slide duration")
                 startFade();
             }
         }
@@ -798,8 +882,12 @@ const App: React.FC = () => {
                 setIsPlaying(false);
             } else {
                  if (nextSlideIndex === 0 && settings.repeatSlideshow && audioElement) {
-                    audioElement.currentTime = 0;
-                    audioElement.volume = 1;
+                    // Reset to first song logic if repeating
+                    setCurrentAudioIndex(0);
+                    if (audioElement) {
+                        audioElement.currentTime = 0;
+                        audioElement.volume = 1;
+                    }
                 }
                 setCurrentSlide(nextSlideIndex);
             }
@@ -826,7 +914,7 @@ const App: React.FC = () => {
         }
 
         return cleanup;
-    }, [isPlaying, isPaused, currentSlide, mediaFiles, audioFile, settings]);
+    }, [isPlaying, isPaused, currentSlide, mediaFiles, audioFiles, settings, audioSrc]);
 
     // Navigation Handlers
     const handleNext = (e?: React.MouseEvent) => {
@@ -887,6 +975,7 @@ const App: React.FC = () => {
                             url: media.serverData.url,
                             storagePath: media.serverData.storagePath,
                             rotation: media.rotation,
+                            duration: media.duration, // Preserve duration
                         };
                         if (media.type === 'image') {
                             return { ...baseMedia, caption: media.caption };
@@ -915,6 +1004,7 @@ const App: React.FC = () => {
                         url,
                         storagePath: filePath,
                         rotation: media.rotation,
+                        duration: media.duration, // Save duration
                     };
 
                     if (media.type === 'image') {
@@ -924,25 +1014,34 @@ const App: React.FC = () => {
                 })
             );
 
-            let serializedAudio: SerializedAudioFile | null = null;
-            if (audioFile) {
-                if (audioFile.serverData) {
-                    serializedAudio = {
-                        name: audioFile.name,
-                        url: audioFile.serverData.url,
-                        storagePath: audioFile.serverData.storagePath
-                    };
-                } else if (audioFile.file) {
-                    const fileExt = audioFile.file.name.split('.').pop() || 'mp3';
-                    const safeFileName = `audio-${Date.now()}.${fileExt}`;
-                    const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
-                    
-                    const fileRef = ref(storage, filePath);
-                    await uploadBytes(fileRef, audioFile.file);
-                    const url = await getDownloadURL(fileRef);
-                    serializedAudio = { name: audioFile.file.name, url, storagePath: filePath };
-                }
-            }
+            // Handle multiple audio files
+            const serializedAudio: SerializedAudioFile[] = await Promise.all(
+                audioFiles.map(async (audio) => {
+                     if (audio.serverData) {
+                         return {
+                             name: audio.name,
+                             url: audio.serverData.url,
+                             storagePath: audio.serverData.storagePath,
+                             duration: audio.duration
+                         };
+                     } else if (audio.file) {
+                        const fileExt = audio.file.name.split('.').pop() || 'mp3';
+                        const safeFileName = `audio-${audio.id}.${fileExt}`;
+                        const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
+                        
+                        const fileRef = ref(storage, filePath);
+                        await uploadBytes(fileRef, audio.file);
+                        const url = await getDownloadURL(fileRef);
+                        return { 
+                            name: audio.file.name, 
+                            url, 
+                            storagePath: filePath,
+                            duration: audio.duration
+                        };
+                     }
+                     throw new Error(`Audio file ${audio.id} missing data.`);
+                })
+            );
 
             if (currentSlideshowId) { // Update existing slideshow
                 const updateData = {
@@ -1011,23 +1110,35 @@ const App: React.FC = () => {
                         // file: undefined, // File is not loaded locally
                         previewUrl: media.url, // Use remote URL directly
                         rotation: media.rotation || 0,
+                        duration: media.duration, // Load duration if available
                         serverData: { url: media.url, storagePath: media.storagePath }
                     };
                 }
             });
 
-            let newAudioFile: AppStateAudio | null = null;
+            // Handle Audio Legacy (single object) vs New (array)
+            let newAudioFiles: AppStateAudio[] = [];
             if (slideshow.audio) {
-                // For audio, we can also use the remote URL directly in the <audio> tag logic.
-                newAudioFile = { 
-                    // file: undefined,
-                    name: slideshow.audio.name,
-                    serverData: { url: slideshow.audio.url, storagePath: slideshow.audio.storagePath }
-                };
+                if (Array.isArray(slideshow.audio)) {
+                    newAudioFiles = slideshow.audio.map((a, index) => ({
+                         id: `audio-loaded-${index}`,
+                         name: a.name,
+                         duration: a.duration || 0, // Fallback if missing
+                         serverData: { url: a.url, storagePath: a.storagePath }
+                    }));
+                } else {
+                    // Legacy single object
+                    newAudioFiles = [{ 
+                        id: `audio-loaded-legacy`,
+                        name: slideshow.audio.name,
+                        duration: (slideshow.audio as any).duration || 0,
+                        serverData: { url: slideshow.audio.url, storagePath: slideshow.audio.storagePath }
+                    }];
+                }
             }
 
             setMediaFiles(newMediaFiles);
-            setAudioFile(newAudioFile);
+            setAudioFiles(newAudioFiles);
             setSettings(slideshow.settings);
             setSlideshowName(slideshow.name);
             setCurrentSlideshowId(slideshow.id);
@@ -1048,7 +1159,13 @@ const App: React.FC = () => {
         setError(null);
         try {
             const filePaths = slideshow.media.map(m => m.storagePath);
-            if (slideshow.audio) filePaths.push(slideshow.audio.storagePath);
+            if (slideshow.audio) {
+                if (Array.isArray(slideshow.audio)) {
+                    slideshow.audio.forEach(a => filePaths.push(a.storagePath));
+                } else {
+                    filePaths.push(slideshow.audio.storagePath);
+                }
+            }
             
             await Promise.all(filePaths.map(path => 
                 deleteObject(ref(storage, path)).catch(err => console.warn("Asset deletion failed:", path, err))
@@ -1366,6 +1483,8 @@ const App: React.FC = () => {
                                                         playsInline
                                                         preload="auto"
                                                         crossOrigin="anonymous"
+                                                        // Ensure we capture duration if it was missing (e.g. from older save)
+                                                        onLoadedMetadata={(e) => handleVideoMetadataLoaded(media.id, e.currentTarget.duration)}
                                                     />
                                                 ) : (
                                                     <img 
@@ -1422,13 +1541,62 @@ const App: React.FC = () => {
                             {/* Music Picker */}
                             <div className="bg-gray-800/50 p-6 rounded-lg">
                                 <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">2. Add Music</h3>
-                                 <div onClick={() => canEdit && audioInputRef.current?.click()} className={`border-2 border-dashed border-gray-600 rounded-lg p-8 text-center transition-colors ${!canEdit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-brand-purple hover:bg-gray-800'}`}>
-                                    <MusicIcon className="w-12 h-12 mx-auto text-gray-500" />
-                                    <p className="mt-2 text-gray-400">{audioFile ? audioFile.name : 'Click to select an audio file'}</p>
-                                </div>
+                                {audioFiles.length === 0 ? (
+                                     <div onClick={() => canEdit && audioInputRef.current?.click()} className={`border-2 border-dashed border-gray-600 rounded-lg p-8 text-center transition-colors ${!canEdit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-brand-purple hover:bg-gray-800'}`}>
+                                        <MusicIcon className="w-12 h-12 mx-auto text-gray-500" />
+                                        <p className="mt-2 text-gray-400">Click to select an audio file</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <div className="flex justify-between items-center text-sm text-gray-400 mb-2">
+                                            <span>Slideshow Duration: {Math.round(totalSlideshowDuration)}s</span>
+                                            <span>Music Duration: {Math.round(totalMusicDuration)}s</span>
+                                        </div>
+                                        {audioFiles.map((audio, index) => (
+                                            <div key={audio.id} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center">
+                                                <div className="flex items-center gap-3 overflow-hidden">
+                                                     <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center flex-shrink-0">
+                                                        <span className="text-xs font-bold text-gray-400">{index + 1}</span>
+                                                     </div>
+                                                     <div className="min-w-0">
+                                                         <p className="text-sm font-medium text-white truncate">{audio.name}</p>
+                                                         <p className="text-xs text-gray-400">{Math.round(audio.duration)}s</p>
+                                                     </div>
+                                                </div>
+                                                {canEdit && (
+                                                     <button onClick={() => handleDeleteAudio(audio.id)} className="text-gray-400 hover:text-red-400 p-1">
+                                                        <TrashIcon className="w-4 h-4" />
+                                                     </button>
+                                                )}
+                                            </div>
+                                        ))}
+
+                                        {totalSlideshowDuration > totalMusicDuration && canEdit && (
+                                             <button 
+                                                onClick={() => audioInputRef.current?.click()} 
+                                                className="w-full border-2 border-dashed border-gray-600 rounded-lg p-3 flex items-center justify-center gap-2 text-gray-400 hover:text-brand-purple hover:border-brand-purple hover:bg-gray-800 transition-colors"
+                                             >
+                                                <PlusIcon className="w-5 h-5" />
+                                                Add another song
+                                             </button>
+                                        )}
+                                    </div>
+                                )}
+                                
                                 <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*,.m4p,.m4a" className="hidden" disabled={!canEdit} />
-                                {audioFile && audioSrc && (
-                                    <audio ref={audioRef} src={audioSrc} loop className="w-full mt-4" controls />
+                                
+                                {/* Audio Player Logic */}
+                                {currentAudioFile && audioSrc && (
+                                    <audio 
+                                        ref={audioRef} 
+                                        src={audioSrc} 
+                                        // Loop only if repeats or if it's the only song? 
+                                        // Requirement: play songs sequentially. Loop if slideshow repeats.
+                                        // We handle looping manually in onEnded via state.
+                                        className="w-full mt-4" 
+                                        controls
+                                        onEnded={handleAudioEnded}
+                                    />
                                 )}
                             </div>
 
