@@ -1426,7 +1426,7 @@ const App: React.FC = () => {
                                     <MusicIcon className="w-12 h-12 mx-auto text-gray-500" />
                                     <p className="mt-2 text-gray-400">{audioFile ? audioFile.name : 'Click to select an audio file'}</p>
                                 </div>
-                                <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*" className="hidden" disabled={!canEdit} />
+                                <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*,.m4p,.m4a" className="hidden" disabled={!canEdit} />
                                 {audioFile && audioSrc && (
                                     <audio ref={audioRef} src={audioSrc} loop className="w-full mt-4" controls />
                                 )}
