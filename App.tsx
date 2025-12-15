@@ -154,26 +154,35 @@ const getMediaDuration = (file: File): Promise<number> => {
         const objectUrl = URL.createObjectURL(file);
         const element = file.type.startsWith('audio') ? new Audio(objectUrl) : document.createElement('video');
         
+        const cleanup = () => {
+             URL.revokeObjectURL(objectUrl);
+        };
+
         if (file.type.startsWith('video')) {
-            (element as HTMLVideoElement).src = objectUrl;
+            const videoEl = element as HTMLVideoElement;
+            videoEl.preload = 'metadata';
+            videoEl.src = objectUrl;
              // Videos need to load metadata
-             element.onloadedmetadata = () => {
-                resolve(element.duration);
-                URL.revokeObjectURL(objectUrl);
+             videoEl.onloadedmetadata = () => {
+                const duration = videoEl.duration;
+                resolve(Number.isFinite(duration) ? duration : 0);
+                cleanup();
             };
-            element.onerror = () => {
+            videoEl.onerror = () => {
                 resolve(0);
-                URL.revokeObjectURL(objectUrl);
+                cleanup();
             }
         } else {
              // Audio
-            (element as HTMLAudioElement).onloadedmetadata = () => {
-                resolve(element.duration);
-                URL.revokeObjectURL(objectUrl);
+            const audioEl = element as HTMLAudioElement;
+            audioEl.onloadedmetadata = () => {
+                 const duration = audioEl.duration;
+                resolve(Number.isFinite(duration) ? duration : 0);
+                cleanup();
             };
-            (element as HTMLAudioElement).onerror = () => {
+            audioEl.onerror = () => {
                 resolve(0);
-                URL.revokeObjectURL(objectUrl);
+                cleanup();
             }
         }
     });
@@ -966,63 +975,57 @@ const App: React.FC = () => {
             
             const serializedMedia: SerializedMediaFile[] = await Promise.all(
                 mediaFiles.map(async (media) => {
-                    // Check if file is already on server (for existing/shared media)
-                    if (media.serverData) {
-                         const baseMedia = {
-                            id: media.id,
-                            type: media.type,
-                            name: media.file?.name || media.id, // Fallback name if file is missing
-                            url: media.serverData.url,
-                            storagePath: media.serverData.storagePath,
-                            rotation: media.rotation,
-                            duration: media.duration, // Preserve duration
-                        };
-                        if (media.type === 'image') {
-                            return { ...baseMedia, caption: media.caption };
-                        }
-                        return baseMedia;
-                    }
+                    // Create base object with common properties
+                    const baseMedia: any = {
+                        id: media.id,
+                        type: media.type,
+                        name: media.file?.name || media.id, 
+                        rotation: media.rotation,
+                    };
 
-                    // New file - upload it
-                    if (!media.file) {
+                    if (media.serverData) {
+                        baseMedia.url = media.serverData.url;
+                        baseMedia.storagePath = media.serverData.storagePath;
+                    } else if (media.file) {
+                        const fileExt = media.file.name.split('.').pop() || 'bin';
+                        const safeFileName = `${media.id}.${fileExt}`;
+                        const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
+                        
+                        const fileRef = ref(storage, filePath);
+                        await uploadBytes(fileRef, media.file);
+                        const url = await getDownloadURL(fileRef);
+                        
+                        baseMedia.url = url;
+                        baseMedia.storagePath = filePath;
+                        baseMedia.name = media.file.name;
+                    } else {
                         throw new Error(`Media file ${media.id} is missing data for upload.`);
                     }
 
-                    // SANITIZE: Use a safe filename for storage to avoid 'unauthorized' errors with long/special char names
-                    const fileExt = media.file.name.split('.').pop() || 'bin';
-                    const safeFileName = `${media.id}.${fileExt}`;
-                    const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
-                    
-                    const fileRef = ref(storage, filePath);
-                    await uploadBytes(fileRef, media.file);
-                    const url = await getDownloadURL(fileRef);
-                    
-                    const baseMedia = {
-                        id: media.id,
-                        type: media.type,
-                        name: media.file.name,
-                        url,
-                        storagePath: filePath,
-                        rotation: media.rotation,
-                        duration: media.duration, // Save duration
-                    };
-
+                    // Handle type-specific optional fields to prevent undefined
                     if (media.type === 'image') {
-                        return { ...baseMedia, caption: media.caption };
+                        baseMedia.caption = (media as ImageFile).caption || '';
+                        // Explicitly do not add 'duration' for images
+                    } else if (media.type === 'video') {
+                        const dur = (media as VideoFile).duration;
+                        // Ensure duration is a valid finite number, default to 0
+                        baseMedia.duration = (typeof dur === 'number' && Number.isFinite(dur)) ? dur : 0;
                     }
-                    return baseMedia;
+
+                    return baseMedia as SerializedMediaFile;
                 })
             );
 
             // Handle multiple audio files
             const serializedAudio: SerializedAudioFile[] = await Promise.all(
                 audioFiles.map(async (audio) => {
+                     let audioData: any = {};
+                     
                      if (audio.serverData) {
-                         return {
+                         audioData = {
                              name: audio.name,
                              url: audio.serverData.url,
                              storagePath: audio.serverData.storagePath,
-                             duration: audio.duration
                          };
                      } else if (audio.file) {
                         const fileExt = audio.file.name.split('.').pop() || 'mp3';
@@ -1032,14 +1035,20 @@ const App: React.FC = () => {
                         const fileRef = ref(storage, filePath);
                         await uploadBytes(fileRef, audio.file);
                         const url = await getDownloadURL(fileRef);
-                        return { 
+                        audioData = { 
                             name: audio.file.name, 
                             url, 
                             storagePath: filePath,
-                            duration: audio.duration
                         };
+                     } else {
+                         throw new Error(`Audio file ${audio.id} missing data.`);
                      }
-                     throw new Error(`Audio file ${audio.id} missing data.`);
+
+                     // Sanitize audio duration
+                     const dur = audio.duration;
+                     audioData.duration = (typeof dur === 'number' && Number.isFinite(dur)) ? dur : 0;
+                     
+                     return audioData as SerializedAudioFile;
                 })
             );
 
@@ -1123,15 +1132,16 @@ const App: React.FC = () => {
                     newAudioFiles = slideshow.audio.map((a, index) => ({
                          id: `audio-loaded-${index}`,
                          name: a.name,
-                         duration: a.duration || 0, // Fallback if missing
+                         duration: (typeof a.duration === 'number' && Number.isFinite(a.duration)) ? a.duration : 0, 
                          serverData: { url: a.url, storagePath: a.storagePath }
                     }));
                 } else {
                     // Legacy single object
+                    const legacyDur = (slideshow.audio as any).duration;
                     newAudioFiles = [{ 
                         id: `audio-loaded-legacy`,
                         name: slideshow.audio.name,
-                        duration: (slideshow.audio as any).duration || 0,
+                        duration: (typeof legacyDur === 'number' && Number.isFinite(legacyDur)) ? legacyDur : 0,
                         serverData: { url: slideshow.audio.url, storagePath: slideshow.audio.storagePath }
                     }];
                 }
