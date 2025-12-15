@@ -320,16 +320,16 @@ const App: React.FC = () => {
         showCaptions: true,
     });
     const [isPlaying, setIsPlaying] = useState(false);
-    const [isPaused, setIsPaused] = useState(false); // New state for pause
+    const [isPaused, setIsPaused] = useState(false);
     const [currentSlide, setCurrentSlide] = useState(0);
-    const [currentAudioIndex, setCurrentAudioIndex] = useState(0); // Track which song is playing
+    const [currentAudioIndex, setCurrentAudioIndex] = useState(0); 
     const [slideshowName, setSlideshowName] = useState('');
     const [currentSlideshowId, setCurrentSlideshowId] = useState<string | null>(null);
     const [ownedSlideshows, setOwnedSlideshows] = useState<SavedSlideshow[]>([]);
     const [sharedSlideshows, setSharedSlideshows] = useState<SavedSlideshow[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
-    const [isProcessing, setIsProcessing] = useState(false); // For loading/deleting
+    const [isProcessing, setIsProcessing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
     
@@ -346,6 +346,9 @@ const App: React.FC = () => {
     // Drag and Drop state
     const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
     const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+    // Visual Fade Out State
+    const [isFadingOut, setIsFadingOut] = useState(false);
 
     const audioRef = useRef<HTMLAudioElement>(null);
     const videoPreviewRef = useRef<HTMLVideoElement>(null);
@@ -367,7 +370,6 @@ const App: React.FC = () => {
     useEffect(() => {
         return () => {
              // Clean up all object URLs created for audio files when component unmounts
-             // Note: In a real app, we might want to be more granular, but for this scope it's fine.
         };
     }, []);
 
@@ -400,21 +402,14 @@ const App: React.FC = () => {
         // Handle redirect result (fallback for mobile/ITP issues)
         auth.getRedirectResult().then((result) => {
             if (result.user) {
-                // Successful redirect login
-                // onAuthStateChanged will handle state update, this is mainly for error clearing/logging
                 setError(null);
             }
         }).catch((err: any) => {
-             // Fix: Suppress "operation-not-supported" error on mount.
-            // This happens in environments (like some IFrames or restricted browsers) where redirect isn't possible.
-            // We shouldn't show an error to the user just for visiting the page.
             if (err.code === 'auth/operation-not-supported-in-this-environment') {
                 return;
             }
-
             console.error("Redirect Login Error:", err);
             
-            // Provide a user-friendly message for the specific iOS state error
             if (err.message && (err.message.includes("missing initial state") || err.message.includes("storage-partitioned"))) {
                 setError("Login failed due to browser privacy settings. Please enable cookies or try using a different browser.");
             } else {
@@ -455,7 +450,6 @@ const App: React.FC = () => {
             });
 
             // Listener for slideshows shared with the user
-            // Only set up shared listener if user has an email
             let unsubscribeShared = () => {};
             if (user.email) {
                 const sharedQuery = query(
@@ -471,7 +465,6 @@ const App: React.FC = () => {
                     });
                     setSharedSlideshows(slideshows);
                 }, (err) => {
-                    // Log error but don't block the UI for owned slideshows
                     console.error("Error fetching shared slideshows:", err);
                 });
             }
@@ -507,21 +500,15 @@ const App: React.FC = () => {
     }, [user, currentSlideshowObj]);
 
     const handleLogin = async () => {
-        // Use compat GoogleAuthProvider
         const provider = new firebase.auth.GoogleAuthProvider();
-        
-        // Force the account selection prompt to allow switching accounts
         provider.setCustomParameters({
             prompt: 'select_account'
         });
 
         try {
-            // Using default persistence (LOCAL) to avoid issues with explicit persistence setting
-            // Use compat signInWithPopup (auth.signInWithPopup)
             await auth.signInWithPopup(provider);
         } catch (error: any) {
             console.error("Authentication error:", error);
-            // If popup fails (likely on mobile or due to blockers), fallback to redirect
             if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user' || error.message.includes('missing initial state')) {
                 console.log("Popup failed, attempting redirect fallback...");
                 try {
@@ -542,7 +529,6 @@ const App: React.FC = () => {
 
     const handleLogout = async () => {
         try {
-            // Use compat signOut (auth.signOut)
             await auth.signOut();
             resetWorkspace();
             setOwnedSlideshows([]);
@@ -572,8 +558,6 @@ const App: React.FC = () => {
             
             if (files.length === 0) return;
 
-            // FIX: Explicitly type `file` as `File` in the map callback to resolve a
-            // potential type inference issue where it was being treated as `unknown`.
             const newMediaFilesPromise = files.map(async (file: File): Promise<MediaFile> => {
                  if (file.type.startsWith('image/')) {
                     return {
@@ -750,12 +734,14 @@ const App: React.FC = () => {
         setCurrentAudioIndex(0); // Reset audio to first track
         setIsPaused(false);
         setIsPlaying(true);
+        setIsFadingOut(false);
         // Playback trigger is handled by useEffect looking at isPlaying and audioSrc
     };
 
     const handleClosePreview = () => {
         setIsPlaying(false);
         setIsPaused(false);
+        setIsFadingOut(false);
         if (audioRef.current) {
             audioRef.current.pause();
             audioRef.current.currentTime = 0;
@@ -798,6 +784,9 @@ const App: React.FC = () => {
         const videoElement = videoPreviewRef.current;
         const audioElement = audioRef.current;
 
+        // Reset visual fade out state when slide changes
+        setIsFadingOut(false);
+
         const cleanup = () => {
             if (slideTimer) clearTimeout(slideTimer);
             if (fadeInterval) clearInterval(fadeInterval);
@@ -833,30 +822,36 @@ const App: React.FC = () => {
         }
         
         // --- FADE OUT LOGIC (Last Slide Only) ---
-        // This will fade whatever song is currently playing in audioRef
-        if (isLastSlide && !settings.repeatSlideshow && audioElement && audioFiles.length > 0) {
+        // This will fade whatever song is currently playing in audioRef AND trigger visual fade
+        if (isLastSlide && !settings.repeatSlideshow) {
             const fadeDurationMs = settings.interval * 1000;
             const steps = 50;
             const intervalTime = fadeDurationMs / steps;
             const decrement = 1 / steps;
             
             const startFade = () => {
-                // Clear any existing interval just in case
-                if (fadeInterval) clearInterval(fadeInterval);
-                
-                // Set initial volume explicitly to 1 before starting fade
-                if(audioElement) audioElement.volume = 1;
-
-                fadeInterval = setInterval(() => {
-                    if (!audioElement) return;
-                    let newVol = audioElement.volume - decrement;
-                    if (newVol < 0) newVol = 0;
-                    audioElement.volume = newVol;
+                // Audio Fade
+                if (audioElement && audioFiles.length > 0) {
+                    // Clear any existing interval just in case
+                    if (fadeInterval) clearInterval(fadeInterval);
                     
-                    if (newVol <= 0) {
-                        clearInterval(fadeInterval);
-                    }
-                }, intervalTime);
+                    // Only reset volume to 1 if we are not already quiet (resuming fade)
+                    if(audioElement.volume > 0.9) audioElement.volume = 1;
+
+                    fadeInterval = setInterval(() => {
+                        if (!audioElement) return;
+                        let newVol = audioElement.volume - decrement;
+                        if (newVol < 0) newVol = 0;
+                        audioElement.volume = newVol;
+                        
+                        if (newVol <= 0) {
+                            clearInterval(fadeInterval);
+                        }
+                    }, intervalTime);
+                }
+
+                // Visual Fade Trigger
+                setIsFadingOut(true);
             };
 
             if (currentMedia.type === 'video' && videoElement) {
@@ -1821,6 +1816,15 @@ const App: React.FC = () => {
                                 )}
                             </div>
                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30 pointer-events-none" />
+
+                            {/* Visual Fade Overlay */}
+                            <div 
+                                className="absolute inset-0 bg-black pointer-events-none transition-opacity ease-linear z-40"
+                                style={{ 
+                                    opacity: isFadingOut ? 1 : 0, 
+                                    transitionDuration: `${settings.interval}s` 
+                                }}
+                            />
                         </div>
                     )}
 
