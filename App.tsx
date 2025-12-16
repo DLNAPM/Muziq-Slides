@@ -918,7 +918,7 @@ const App: React.FC = () => {
         }
 
         return cleanup;
-    }, [isPlaying, isPaused, currentSlide, mediaFiles, audioFiles, settings, audioSrc]);
+    }, [isPlaying, isPaused, currentSlide, mediaFiles, settings]); // Removed audioFiles and audioSrc dependencies to prevent slide timer reset
 
     // Navigation Handlers
     const handleNext = (e?: React.MouseEvent) => {
