@@ -85,6 +85,7 @@ interface AppStateAudio {
     startTime: number;
     fadeIn: number;
     fadeOut: number;
+    previewUrl: string; // Stable preview URL
     serverData?: { url: string; storagePath: string; };
 }
 
@@ -262,6 +263,18 @@ const App: React.FC = () => {
     const audioInputRef = useRef<HTMLInputElement>(null);
     const playbackTimerRef = useRef<any>(null);
 
+    // Cleanup object URLs to prevent memory leaks
+    useEffect(() => {
+        return () => {
+            mediaFiles.forEach(m => {
+                if (m.previewUrl.startsWith('blob:')) URL.revokeObjectURL(m.previewUrl);
+            });
+            audioFiles.forEach(a => {
+                if (a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl);
+            });
+        };
+    }, [mediaFiles.length, audioFiles.length]);
+
     const mediaWithTimestamps = useMemo(() => {
         let currentPos = 0;
         return mediaFiles.map(m => {
@@ -314,6 +327,10 @@ const App: React.FC = () => {
     }, [settings.autoFadeEnabled, settings.autoFadeInterval, audioFiles.length]);
 
     const resetWorkspace = useCallback(() => {
+        // Revoke URLs before clearing
+        mediaFiles.forEach(m => { if (m.previewUrl.startsWith('blob:')) URL.revokeObjectURL(m.previewUrl); });
+        audioFiles.forEach(a => { if (a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl); });
+
         setMediaFiles([]);
         setAudioFiles([]);
         setSlideshowName('');
@@ -322,7 +339,7 @@ const App: React.FC = () => {
         setCurrentSlide(0);
         setIsPlaying(false);
         setElapsedTime(0);
-    }, []);
+    }, [mediaFiles, audioFiles]);
 
     const userPermission = useMemo(() => {
         if (!user || !currentSlideshowId) return 'owner';
@@ -511,7 +528,17 @@ const App: React.FC = () => {
         if (!e.target.files?.[0]) return;
         const file = e.target.files[0];
         const duration = await getMediaDuration(file);
-        setAudioFiles(p => [...p, { id: `a-${Date.now()}`, file, name: file.name, duration, startTime: 0, fadeIn: 1, fadeOut: 1 }]);
+        const previewUrl = URL.createObjectURL(file); // Create once
+        setAudioFiles(p => [...p, { 
+            id: `a-${Date.now()}`, 
+            file, 
+            name: file.name, 
+            duration, 
+            startTime: 0, 
+            fadeIn: 1, 
+            fadeOut: 1,
+            previewUrl 
+        }]);
     };
 
     const moveMedia = (index: number, direction: 'left' | 'right') => {
@@ -531,7 +558,6 @@ const App: React.FC = () => {
             
             const serMedia = [];
             for (const m of mediaFiles) {
-                // Ensure no undefined values are passed to Firestore
                 const b: any = { 
                     id: m.id || `m-${Math.random().toString(36).substr(2, 9)}`, 
                     type: m.type, 
@@ -553,7 +579,6 @@ const App: React.FC = () => {
                     b.url = m.serverData.url; 
                     b.storagePath = m.serverData.storagePath;
                 } else {
-                    // Fallback to avoid undefined url/path
                     b.url = "";
                     b.storagePath = "";
                 }
@@ -594,7 +619,6 @@ const App: React.FC = () => {
                 ...collaborators.map(c => c.email.toLowerCase())
             ]));
 
-            // Final data object construction with strict undefined checks
             const saveData = {
                 userId: existing?.userId || user.uid,
                 userEmail: existing?.userEmail || user.email,
@@ -610,7 +634,6 @@ const App: React.FC = () => {
             };
 
             await setDoc(doc(db, 'slideshows', id), saveData, { merge: true });
-            
             setCurrentSlideshowId(id);
         } catch (e: any) { 
             console.error("Save Error:", e);
@@ -624,6 +647,9 @@ const App: React.FC = () => {
         setIsPlaying(false);
         setCurrentSlide(0);
         setElapsedTime(0);
+
+        // Cleanup previous object URLs
+        audioFiles.forEach(a => { if (a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl); });
 
         setMediaFiles((s.media || []).map(m => ({ 
             id: m.id, 
@@ -645,6 +671,7 @@ const App: React.FC = () => {
             startTime: a.startTime || 0, 
             fadeIn: a.fadeIn || 1, 
             fadeOut: a.fadeOut || 1, 
+            previewUrl: a.url, // For server files, previewUrl is the server url
             serverData: { url: a.url, storagePath: a.storagePath } 
         })));
 
@@ -754,9 +781,7 @@ const App: React.FC = () => {
         }
     };
 
-    // Intelligent Ducking Calculation
     const getDuckingFactor = useCallback((time: number) => {
-        // REQUIREMENT: If muteVideos is enabled, DO NOT decrease background music volume (no ducking)
         if (settings.muteVideos) return 1.0;
 
         const FADE_TIME = 0.8;
@@ -1115,7 +1140,6 @@ const App: React.FC = () => {
                     </header>
 
                     <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 pr-2 pb-20">
-                        {/* AI AUTO-FADE SECTION */}
                         <div className="bg-brand-purple/10 p-6 rounded-3xl border border-brand-purple/40 shadow-xl animate-fade-in">
                             <div className="flex justify-between items-center mb-6">
                                 <div className="flex items-center gap-3">
@@ -1150,7 +1174,6 @@ const App: React.FC = () => {
                             )}
                         </div>
 
-                        {/* Timeline Ruler */}
                         <div className="bg-gray-950/50 rounded-3xl p-6 border border-gray-800/50 shadow-2xl relative">
                             <div className="absolute top-0 left-[180px] right-6 h-6 border-b border-gray-800 flex justify-between px-1">
                                 {Array.from({ length: Math.ceil(Math.max(totalSlideshowDuration, 0) / 5) + 1 }).map((_, i) => (
@@ -1311,7 +1334,6 @@ const App: React.FC = () => {
                                 </div>
                             )}
 
-                            {/* REFINED PLAYBACK CONTROLS */}
                             <div className="absolute bottom-0 left-0 right-0 p-8 pb-12 bg-gradient-to-t from-black/80 to-transparent transition-opacity duration-500 opacity-0 group-hover/theater:opacity-100 flex flex-col gap-6">
                                 <div className="flex items-center gap-6">
                                     <span className="text-xs font-mono text-white/60 tracking-widest">{formatDuration(elapsedTime)}</span>
@@ -1344,13 +1366,12 @@ const App: React.FC = () => {
                         
                         let vol = 1.0;
                         if (isActive) {
-                            if (currentInClipTime < a.fadeIn) {
+                            if (a.fadeIn > 0 && currentInClipTime < a.fadeIn) {
                                 vol = currentInClipTime / a.fadeIn;
-                            } else if (currentInClipTime > (a.duration - a.fadeOut)) {
+                            } else if (a.fadeOut > 0 && currentInClipTime > (a.duration - a.fadeOut)) {
                                 vol = (a.duration - currentInClipTime) / a.fadeOut;
                             }
                             
-                            // APPLY DUCKING: Only if settings.muteVideos is FALSE
                             const duckFactor = getDuckingFactor(elapsedTime);
                             vol *= duckFactor;
                         }
@@ -1358,9 +1379,9 @@ const App: React.FC = () => {
                         return (
                             <AudioPlayer 
                                 key={a.id} 
-                                src={a.serverData?.url || (a.file ? URL.createObjectURL(a.file) : '')} 
+                                src={a.previewUrl} 
                                 active={isActive} 
-                                volume={vol} 
+                                volume={Math.max(0, Math.min(1, vol))} 
                                 startTimeInFile={currentInClipTime}
                             />
                         );
@@ -1390,14 +1411,20 @@ const AudioPlayer: React.FC<{ src: string, active: boolean, volume: number, star
         if (active) {
             if (!hasStarted) {
                 audioRef.current.currentTime = Math.max(0, startTimeInFile);
-                audioRef.current.play().catch(e => console.error("Audio block", e));
+                const playPromise = audioRef.current.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(e => {
+                        // Handle browser autoplay policies
+                        console.debug("Autoplay blocked or audio interrupted", e);
+                    });
+                }
                 setHasStarted(true);
             }
             const drift = Math.abs(audioRef.current.currentTime - startTimeInFile);
-            if (drift > 0.1) {
+            if (drift > 0.15) {
                 audioRef.current.currentTime = startTimeInFile;
             }
-            audioRef.current.volume = Math.max(0, Math.min(1, volume));
+            audioRef.current.volume = volume;
         } else {
             if (hasStarted) {
                 audioRef.current.pause();
