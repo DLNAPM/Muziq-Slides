@@ -197,6 +197,9 @@ const urlToBase64 = async (url: string): Promise<string> => {
 const UploadIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>;
 const MusicIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-13c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" /></svg>;
 const PlayIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+const PauseIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+const RewindIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" /></svg>;
+const FastForwardIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.933 12.8a1 1 0 000-1.6l-5.334-4A1 1 0 005 8v8a1 1 0 001.6.8l5.334-4zM19.933 12.8a1 1 0 000-1.6l-5.334-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.334-4z" /></svg>;
 const XIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
 const PlusIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>;
 const TrashIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>;
@@ -285,7 +288,6 @@ const App: React.FC = () => {
                 runningStart = track.duration;
             } else {
                 // Position this track so it overlaps the previous one by 'interval'
-                // The overlap occurs at the END of the previous track.
                 const startPos = runningStart - interval;
                 track.startTime = Math.max(0, startPos);
                 track.fadeIn = interval;
@@ -664,6 +666,9 @@ const App: React.FC = () => {
         setIsPlaying(true);
     };
 
+    const skipForward = () => setElapsedTime(prev => Math.min(prev + 5, totalSlideshowDuration));
+    const skipBackward = () => setElapsedTime(prev => Math.max(prev - 5, 0));
+
     const handleShareSlideshow = async () => {
         if (!shareSlideshowTarget || !shareEmail) return;
         const normalizedEmail = shareEmail.trim().toLowerCase();
@@ -777,7 +782,7 @@ const App: React.FC = () => {
                     {user ? (
                         <div className="flex gap-2">
                             <button onClick={handleLogin} className="bg-gray-800 text-white py-2 px-4 rounded-lg text-sm font-bold shadow-sm transition-all hover:bg-gray-700 border border-gray-700">Switch Account</button>
-                            <button onClick={() => signOut(auth)} className="bg-gray-200 text-gray-900 py-2 px-6 rounded-lg text-sm font-bold shadow-sm transition-all hover:bg-gray-300">Logout</button>
+                            <button onClick={() => signOut(auth)} className="bg-brand-purple text-white py-2 px-6 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Logout</button>
                         </div>
                     ) : (
                         <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-6 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Sign In</button>
@@ -1015,7 +1020,7 @@ const App: React.FC = () => {
                     </header>
 
                     <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 pr-2 pb-20">
-                        {/* NEW: AI AUTO-FADE SECTION */}
+                        {/* AI AUTO-FADE SECTION */}
                         <div className="bg-brand-purple/10 p-6 rounded-3xl border border-brand-purple/40 shadow-xl animate-fade-in">
                             <div className="flex justify-between items-center mb-6">
                                 <div className="flex items-center gap-3">
@@ -1053,7 +1058,7 @@ const App: React.FC = () => {
                         {/* Timeline Ruler */}
                         <div className="bg-gray-950/50 rounded-3xl p-6 border border-gray-800/50 shadow-2xl relative">
                             <div className="absolute top-0 left-[180px] right-6 h-6 border-b border-gray-800 flex justify-between px-1">
-                                {Array.from({ length: Math.ceil(totalSlideshowDuration / 5) + 1 }).map((_, i) => (
+                                {Array.from({ length: Math.ceil(Math.max(totalSlideshowDuration, totalSlideshowDuration) / 5) + 1 }).map((_, i) => (
                                     <span key={i} className="text-[8px] text-gray-600 font-black">{i * 5}s</span>
                                 ))}
                             </div>
@@ -1172,8 +1177,9 @@ const App: React.FC = () => {
             )}
 
             {isPlaying && (
-                <div className="fixed inset-0 bg-black z-[100] flex items-center justify-center animate-fade-in">
+                <div className="fixed inset-0 bg-black z-[100] flex flex-col items-center justify-center animate-fade-in group/theater">
                     <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white bg-black/40 hover:bg-red-600/90 p-4 rounded-full z-[110] backdrop-blur-xl transition-all border border-white/10 shadow-2xl"><XIcon className="w-10 h-10"/></button>
+                    
                     {mediaWithTimestamps[currentSlide] && (
                         <div className="w-full h-full relative flex items-center justify-center overflow-hidden">
                             <div key={mediaWithTimestamps[currentSlide].id} className={`w-full h-full absolute flex items-center justify-center transition-all duration-[1500ms] animate-${settings.slideStyle}`}>
@@ -1197,15 +1203,36 @@ const App: React.FC = () => {
                             </div>
                             
                             {(settings.showCaptions && ((mediaWithTimestamps[currentSlide] as any).caption || (mediaWithTimestamps[currentSlide] as any).aiCaption)) && (
-                                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-black/30 backdrop-blur-lg px-10 py-4 rounded-xl border border-white/5 text-center w-[92%] max-w-6xl animate-fade-in shadow-2xl z-50">
+                                <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/30 backdrop-blur-lg px-10 py-4 rounded-xl border border-white/5 text-center w-[92%] max-w-6xl animate-fade-in shadow-2xl z-50">
                                     <p className="text-white text-lg md:text-xl font-semibold tracking-wide leading-relaxed drop-shadow-md italic">
                                         {(mediaWithTimestamps[currentSlide] as any).caption || (mediaWithTimestamps[currentSlide] as any).aiCaption}
                                     </p>
                                 </div>
                             )}
 
-                            <div className="absolute bottom-4 left-4 right-4 h-1 bg-white/10 rounded-full overflow-hidden">
-                                <div className="h-full bg-brand-purple transition-all" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }}/>
+                            {/* REFINED PLAYBACK CONTROLS */}
+                            <div className="absolute bottom-0 left-0 right-0 p-8 pb-12 bg-gradient-to-t from-black/80 to-transparent transition-opacity duration-500 opacity-0 group-hover/theater:opacity-100 flex flex-col gap-6">
+                                <div className="flex items-center gap-6">
+                                    <span className="text-xs font-mono text-white/60 tracking-widest">{formatDuration(elapsedTime)}</span>
+                                    <div className="flex-1 relative flex items-center group/seekbar">
+                                        <input 
+                                            type="range" 
+                                            min="0" 
+                                            max={totalSlideshowDuration} 
+                                            step="0.1" 
+                                            value={elapsedTime} 
+                                            onChange={(e) => setElapsedTime(parseFloat(e.target.value))}
+                                            className="w-full h-1 bg-white/20 rounded-full appearance-none cursor-pointer accent-brand-purple relative z-10"
+                                        />
+                                        <div className="absolute top-0 left-0 h-1 bg-brand-purple rounded-full pointer-events-none" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }} />
+                                    </div>
+                                    <span className="text-xs font-mono text-white/60 tracking-widest">{formatDuration(totalSlideshowDuration)}</span>
+                                </div>
+                                <div className="flex items-center justify-center gap-12">
+                                    <button onClick={skipBackward} className="text-white/60 hover:text-white transition-all transform hover:scale-125 active:scale-90"><RewindIcon className="w-10 h-10"/></button>
+                                    <button onClick={() => setIsPlaying(false)} className="bg-white text-black p-5 rounded-full hover:scale-110 active:scale-95 transition-all shadow-2xl"><PauseIcon className="w-8 h-8"/></button>
+                                    <button onClick={skipForward} className="text-white/60 hover:text-white transition-all transform hover:scale-125 active:scale-90"><FastForwardIcon className="w-10 h-10"/></button>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -1245,8 +1272,8 @@ const App: React.FC = () => {
                 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
                 .animate-fade-in { animation: fadeIn 0.8s ease-out forwards; }
                 input[type='range'] { -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
-                input[type='range']::-webkit-slider-runnable-track { background: #374151; height: 0.25rem; border-radius: 0.5rem; }
-                input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; margin-top: -6px; background-color: #6d28d9; height: 1rem; width: 1rem; border-radius: 9999px; }
+                input[type='range']::-webkit-slider-runnable-track { background: rgba(255,255,255,0.1); height: 0.25rem; border-radius: 0.5rem; }
+                input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; margin-top: -6px; background-color: #6d28d9; height: 1rem; width: 1rem; border-radius: 9999px; box-shadow: 0 0 10px rgba(109, 40, 217, 0.5); border: 2px solid white; }
             `}</style>
         </div>
     );
@@ -1263,6 +1290,11 @@ const AudioPlayer: React.FC<{ src: string, active: boolean, volume: number, star
                 audioRef.current.currentTime = Math.max(0, startTimeInFile);
                 audioRef.current.play().catch(e => console.error("Audio block", e));
                 setHasStarted(true);
+            }
+            // Continuous sync to prevent drift during seeking
+            const drift = Math.abs(audioRef.current.currentTime - startTimeInFile);
+            if (drift > 0.3) {
+                audioRef.current.currentTime = startTimeInFile;
             }
             audioRef.current.volume = Math.max(0, Math.min(1, volume));
         } else {
