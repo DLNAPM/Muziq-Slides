@@ -201,6 +201,8 @@ const SettingsIcon = ({ className }: { className?: string }) => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
   </svg>
 );
+const ChevronLeftIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>;
+const ChevronRightIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>;
 
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
@@ -296,7 +298,6 @@ const App: React.FC = () => {
         setIsFetchingData(true);
         const slideshowsRef = collection(db, "slideshows");
 
-        // Dual Lookup logic for maximum reliability
         const qOwned = query(slideshowsRef, where("userId", "==", stableUserUid));
         const unsubOwned = onSnapshot(qOwned, 
             (snap) => {
@@ -439,6 +440,14 @@ const App: React.FC = () => {
         const file = e.target.files[0];
         const duration = await getMediaDuration(file);
         setAudioFiles(p => [...p, { id: `a-${Date.now()}`, file, name: file.name, duration, startTime: 0, fadeIn: 1, fadeOut: 1 }]);
+    };
+
+    const moveMedia = (index: number, direction: 'left' | 'right') => {
+        const newMedia = [...mediaFiles];
+        const targetIndex = direction === 'left' ? index - 1 : index + 1;
+        if (targetIndex < 0 || targetIndex >= newMedia.length) return;
+        [newMedia[index], newMedia[targetIndex]] = [newMedia[targetIndex], newMedia[index]];
+        setMediaFiles(newMedia);
     };
 
     const handleSave = async () => {
@@ -617,7 +626,7 @@ const App: React.FC = () => {
                 <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center backdrop-blur-sm">
                     <div className="text-center p-8 bg-gray-900/80 rounded-[2rem] border border-gray-800 shadow-2xl">
                         <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-brand-purple mx-auto"></div>
-                        <p className="text-white text-xl mt-6 font-black tracking-tight uppercase">Processing...</p>
+                        <p className="text-white text-xl mt-6 font-black tracking-tight uppercase">Processing Media...</p>
                     </div>
                 </div>
             )}
@@ -656,15 +665,16 @@ const App: React.FC = () => {
                         )}
 
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
-                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><UploadIcon className="w-5 h-5 text-brand-purple"/> 1. Upload Media</h3>
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><UploadIcon className="w-5 h-5 text-brand-purple"/> 1. Upload & Organize</h3>
                             <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-700 rounded-[1.5rem] p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-brand-purple/5 transition-all group">
                                 <UploadIcon className="w-12 h-12 mx-auto text-gray-500 mb-2 group-hover:scale-110 transition-transform group-hover:text-brand-purple"/>
-                                <p className="text-sm text-gray-400 font-bold">Click to upload photos or videos (Max 20)</p>
+                                <p className="text-sm text-gray-400 font-bold">Upload Photos or Videos (Max 20)</p>
                             </div>
                             <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*" className="hidden" />
+                            
                             <div className="mt-4 grid grid-cols-4 gap-3">
-                                {mediaFiles.map(m => (
-                                    <div key={m.id} className="aspect-square bg-black rounded-2xl overflow-hidden relative group border border-gray-700">
+                                {mediaFiles.map((m, idx) => (
+                                    <div key={m.id} className="aspect-square bg-black rounded-2xl overflow-hidden relative group border border-gray-700 shadow-lg">
                                         {m.type === 'image' ? (
                                             <img src={m.previewUrl} className="w-full h-full object-cover transition-transform group-hover:scale-110" alt="preview" />
                                         ) : (
@@ -675,7 +685,17 @@ const App: React.FC = () => {
                                                 </div>
                                             </div>
                                         )}
-                                        <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="absolute top-2 right-2 bg-red-600/90 p-1.5 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity"><XIcon className="w-3 h-3 text-white"/></button>
+                                        {/* Reorganize & Delete Controls */}
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
+                                            <div className="flex justify-end">
+                                                <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="bg-red-600/90 p-1 rounded-lg hover:bg-red-500 transition-colors"><XIcon className="w-4 h-4 text-white"/></button>
+                                            </div>
+                                            <div className="flex justify-between items-center gap-1">
+                                                <button onClick={() => moveMedia(idx, 'left')} disabled={idx === 0} className="bg-white/20 p-1.5 rounded-lg backdrop-blur-md hover:bg-white/40 disabled:opacity-20"><ChevronLeftIcon className="w-4 h-4 text-white"/></button>
+                                                <span className="text-[10px] font-black text-white bg-brand-purple/60 px-2 py-0.5 rounded-full">{idx + 1}</span>
+                                                <button onClick={() => moveMedia(idx, 'right')} disabled={idx === mediaFiles.length - 1} className="bg-white/20 p-1.5 rounded-lg backdrop-blur-md hover:bg-white/40 disabled:opacity-20"><ChevronRightIcon className="w-4 h-4 text-white"/></button>
+                                            </div>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -683,39 +703,92 @@ const App: React.FC = () => {
 
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
                             <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><MusicIcon className="w-5 h-5 text-brand-purple"/> 2. Add Music</h3>
-                            <button onClick={() => audioInputRef.current?.click()} className="w-full bg-gray-700/30 hover:bg-gray-700/50 py-4 rounded-2xl font-black text-sm flex justify-center gap-2 border border-gray-600/50 transition-all uppercase tracking-widest"><PlusIcon className="w-5 h-5"/> Add Audio</button>
+                            <button onClick={() => audioInputRef.current?.click()} className="w-full bg-gray-700/30 hover:bg-gray-700/50 py-4 rounded-2xl font-black text-sm flex justify-center gap-2 border border-gray-600/50 transition-all uppercase tracking-widest"><PlusIcon className="w-5 h-5"/> Add Audio Track</button>
                             <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*" className="hidden" />
                             <div className="mt-4 space-y-2">
                                 {audioFiles.map(a => <div key={a.id} className="bg-gray-900/40 p-5 rounded-2xl flex justify-between items-center text-sm font-medium border border-gray-700/50 group"><span>{a.name} <span className="text-gray-500 font-bold ml-2">({formatDuration(a.duration)})</span></span><button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))}><TrashIcon className="w-5 h-5 text-red-400 opacity-0 group-hover:opacity-100 transition-all"/></button></div>)}
+                            </div>
+                        </section>
+
+                        <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><SettingsIcon className="w-5 h-5 text-brand-purple"/> 3. Slideshow Settings</h3>
+                            <div className="space-y-6">
+                                {/* Slide Duration */}
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-center">
+                                        <label className="text-xs text-gray-500 font-black uppercase tracking-widest">Slide Duration (Seconds)</label>
+                                        <span className="text-brand-purple font-black text-sm">{settings.interval}s</span>
+                                    </div>
+                                    <input type="range" min="1" max="30" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
+                                </div>
+                                
+                                {/* Transition Style */}
+                                <div className="space-y-3">
+                                    <label className="text-xs text-gray-500 font-black uppercase tracking-widest block">Transition Style</label>
+                                    <select 
+                                        value={settings.slideStyle} 
+                                        onChange={e => setSettings(s => ({...s, slideStyle: e.target.value}))}
+                                        className="w-full bg-gray-900/50 border border-gray-700/50 rounded-2xl px-5 py-3 text-sm text-white font-bold focus:ring-2 focus:ring-brand-purple outline-none appearance-none cursor-pointer transition-all"
+                                    >
+                                        <option value="ken-burns">Ken Burns (Pan & Zoom)</option>
+                                        <option value="fade-in">Classic Fade</option>
+                                        <option value="slide-from-right">Side Slide</option>
+                                        <option value="slide-from-bottom">Bottom Entry</option>
+                                        <option value="zoom-in">Focus Zoom</option>
+                                        <option value="zoom-out">Deep Pull</option>
+                                    </select>
+                                </div>
+
+                                {/* Toggles */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <label className="flex items-center gap-3 cursor-pointer group bg-gray-900/20 p-4 rounded-2xl border border-gray-800 hover:border-brand-purple/50 transition-all">
+                                        <input type="checkbox" className="w-4 h-4 accent-brand-purple" checked={settings.repeatSlideshow} onChange={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} />
+                                        <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Loop Slideshow</span>
+                                    </label>
+                                    <label className="flex items-center gap-3 cursor-pointer group bg-gray-900/20 p-4 rounded-2xl border border-gray-800 hover:border-brand-purple/50 transition-all">
+                                        <input type="checkbox" className="w-4 h-4 accent-brand-purple" checked={settings.smartCaptionsEnabled} onChange={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} />
+                                        <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Smart Captions</span>
+                                    </label>
+                                </div>
                             </div>
                         </section>
                     </div>
 
                     <div className="space-y-6">
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
-                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><PlayIcon className="w-5 h-5 text-brand-purple"/> 3. Run Preview</h3>
-                            <div className="aspect-video bg-black rounded-[2rem] relative flex items-center justify-center overflow-hidden border border-gray-700/50 shadow-2xl">
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><PlayIcon className="w-5 h-5 text-brand-purple"/> 4. Preview Theater</h3>
+                            <div className="aspect-video bg-black rounded-[2rem] relative flex items-center justify-center overflow-hidden border border-gray-700/50 shadow-2xl group">
                                 {mediaFiles.length > 0 ? (
-                                    <button onClick={startPlayback} className="flex items-center justify-center bg-brand-purple p-8 rounded-full shadow-2xl hover:scale-110 transition-all"><PlayIcon className="w-16 h-16 text-white"/></button>
-                                ) : <p className="text-gray-600 font-black uppercase tracking-[0.2em] italic">No Assets Added</p>}
+                                    <>
+                                        <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+                                            {mediaFiles[0].type === 'image' ? (
+                                                <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-2xl opacity-20" alt="bg" />
+                                            ) : (
+                                                <video src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-2xl opacity-20" muted />
+                                            )}
+                                        </div>
+                                        <button onClick={startPlayback} className="relative z-10 flex items-center justify-center bg-brand-purple p-8 rounded-full shadow-2xl hover:scale-110 active:scale-95 transition-all"><PlayIcon className="w-16 h-16 text-white"/></button>
+                                        <div className="absolute bottom-4 left-4 text-[10px] font-black uppercase tracking-[0.2em] text-white/40">{mediaFiles.length} Assets Loaded</div>
+                                    </>
+                                ) : <p className="text-gray-600 font-black uppercase tracking-[0.2em] italic">No Media Assets</p>}
                             </div>
                         </section>
 
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
-                            <h3 className="text-lg font-bold mb-4 text-white uppercase tracking-tighter">4. Project Gallery</h3>
+                            <h3 className="text-lg font-bold mb-4 text-white uppercase tracking-tighter">5. Project Archive</h3>
                             <div className="flex gap-2 mb-6">
-                                <input value={slideshowName} onChange={e => setSlideshowName(e.target.value)} placeholder="Project Name..." className="flex-1 bg-gray-900/40 rounded-2xl px-5 py-4 border border-gray-700/50 outline-none focus:ring-2 focus:ring-brand-purple font-bold text-white shadow-inner" />
+                                <input value={slideshowName} onChange={e => setSlideshowName(e.target.value)} placeholder="Name your project..." className="flex-1 bg-gray-900/40 rounded-2xl px-5 py-4 border border-gray-700/50 outline-none focus:ring-2 focus:ring-brand-purple font-bold text-white shadow-inner" />
                                 <button 
                                     onClick={handleSave} 
                                     disabled={isSaving || !canEdit} 
                                     className={`px-8 rounded-2xl font-black text-sm uppercase tracking-widest transition-all ${canEdit ? 'bg-brand-purple hover:bg-purple-700 shadow-brand-purple/20' : 'bg-gray-700 opacity-50'}`}>
-                                    {isSaving ? 'Saving...' : 'Save Cloud'}
+                                    {isSaving ? 'Saving...' : 'Save'}
                                 </button>
                             </div>
                             
-                            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                                 {isFetchingData ? (
-                                    <div className="py-12 text-center text-gray-500 uppercase text-[10px] tracking-widest">Syncing...</div>
+                                    <div className="py-12 text-center text-gray-500 uppercase text-[10px] tracking-widest">Fetching Gallery...</div>
                                 ) : allSlideshows.length > 0 ? allSlideshows.map(s => (
                                     <div key={s.id} className={`bg-gray-900/30 p-5 rounded-[1.5rem] flex justify-between items-center group border transition-all ${currentSlideshowId === s.id ? 'border-brand-purple bg-brand-purple/10' : 'border-gray-800/50 hover:border-gray-600'}`}>
                                         <div className="flex-1 min-w-0">
@@ -733,7 +806,7 @@ const App: React.FC = () => {
                                         </div>
                                     </div>
                                 )) : (
-                                    <div className="text-center py-12 text-gray-600 font-black text-xs uppercase tracking-widest">Gallery Empty</div>
+                                    <div className="text-center py-12 text-gray-600 font-black text-xs uppercase tracking-widest border border-dashed border-gray-800 rounded-3xl">Archive Empty</div>
                                 )}
                             </div>
                         </section>
@@ -753,7 +826,7 @@ const App: React.FC = () => {
                                 <input 
                                     value={shareEmail} 
                                     onChange={e => setShareEmail(e.target.value)} 
-                                    placeholder="user@example.com" 
+                                    placeholder="email@example.com" 
                                     className="flex-1 bg-gray-950 border border-gray-800 rounded-2xl px-5 py-4 text-sm font-bold text-white shadow-inner" 
                                 />
                                 <button onClick={handleShareSlideshow} className="bg-brand-purple text-white px-5 py-4 rounded-2xl hover:bg-purple-700 active:scale-90"><PlusIcon className="w-6 h-6"/></button>
@@ -780,9 +853,9 @@ const App: React.FC = () => {
 
             {isPlaying && (
                 <div className="fixed inset-0 bg-black z-[100] flex items-center justify-center animate-fade-in">
-                    <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white bg-black/40 hover:bg-red-600/90 p-4 rounded-full z-[110] backdrop-blur-xl transition-all border border-white/10"><XIcon className="w-10 h-10"/></button>
+                    <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white bg-black/40 hover:bg-red-600/90 p-4 rounded-full z-[110] backdrop-blur-xl transition-all border border-white/10 shadow-2xl"><XIcon className="w-10 h-10"/></button>
                     {mediaFiles[currentSlide] && (
-                        <div className="w-full h-full relative flex items-center justify-center">
+                        <div className="w-full h-full relative flex items-center justify-center overflow-hidden">
                             <div key={mediaFiles[currentSlide].id} className={`w-full h-full absolute flex items-center justify-center transition-all duration-[1500ms] animate-${settings.slideStyle}`}>
                                 {mediaFiles[currentSlide].type === 'image' ? (
                                     <img src={mediaFiles[currentSlide].previewUrl} className="w-full h-full object-contain" alt="slide" />
@@ -790,13 +863,21 @@ const App: React.FC = () => {
                                     <video 
                                         ref={videoPreviewRef} 
                                         src={mediaFiles[currentSlide].previewUrl} 
-                                        className="w-full h-full object-contain" 
+                                        className="w-full h-full object-contain shadow-2xl" 
                                         autoPlay 
                                         muted={false} 
                                         onEnded={handleNextSlide} 
                                     />
                                 )}
                             </div>
+                            {/* AI Caption Overlay */}
+                            {(settings.showCaptions && ((mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption)) && (
+                                <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur-xl px-12 py-6 rounded-[2rem] border border-white/10 text-center max-w-[80%] animate-fade-in shadow-2xl">
+                                    <p className="text-white text-xl md:text-2xl font-bold tracking-tight italic">
+                                        {(mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption}
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     )}
                     {audioSrc && (
