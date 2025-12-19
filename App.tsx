@@ -94,6 +94,8 @@ interface SlideshowSettings {
     smartCaptionsEnabled: boolean;
     repeatSlideshow: boolean;
     showCaptions: boolean;
+    autoFadeEnabled: boolean;
+    autoFadeInterval: number; // 3, 5, or 7
 }
 
 interface SerializedMediaFile {
@@ -198,7 +200,6 @@ const PlayIcon = ({ className }: { className?: string }) => <svg xmlns="http://w
 const XIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
 const PlusIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>;
 const TrashIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>;
-const AdjustmentIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>;
 const ShareIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>;
 const DuplicateIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>;
 const SparklesIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>;
@@ -218,7 +219,14 @@ const App: React.FC = () => {
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
     const [audioFiles, setAudioFiles] = useState<AppStateAudio[]>([]);
     const [settings, setSettings] = useState<SlideshowSettings>({
-        interval: 5, slideStyle: 'ken-burns', showClock: true, smartCaptionsEnabled: false, repeatSlideshow: false, showCaptions: true,
+        interval: 5, 
+        slideStyle: 'ken-burns', 
+        showClock: true, 
+        smartCaptionsEnabled: false, 
+        repeatSlideshow: false, 
+        showCaptions: true,
+        autoFadeEnabled: false,
+        autoFadeInterval: 5,
     });
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentSlide, setCurrentSlide] = useState(0);
@@ -258,6 +266,42 @@ const App: React.FC = () => {
     const totalSlideshowDuration = useMemo(() => {
         return mediaWithTimestamps.length > 0 ? mediaWithTimestamps[mediaWithTimestamps.length - 1].timelineEnd : 0;
     }, [mediaWithTimestamps]);
+
+    // AI AUTO-FADE ENGINE RECALCULATION
+    useEffect(() => {
+        if (!settings.autoFadeEnabled || audioFiles.length === 0) return;
+
+        const updatedAudio = [...audioFiles];
+        let runningStart = 0;
+
+        for (let i = 0; i < updatedAudio.length; i++) {
+            const track = updatedAudio[i];
+            const interval = settings.autoFadeInterval;
+
+            if (i === 0) {
+                track.startTime = 0;
+                track.fadeIn = 1; // Start track usually has a tiny fade or none
+                track.fadeOut = updatedAudio.length > 1 ? interval : 1;
+                runningStart = track.duration;
+            } else {
+                // Position this track so it overlaps the previous one by 'interval'
+                // The overlap occurs at the END of the previous track.
+                const startPos = runningStart - interval;
+                track.startTime = Math.max(0, startPos);
+                track.fadeIn = interval;
+                track.fadeOut = (i === updatedAudio.length - 1) ? 1 : interval;
+                runningStart = track.startTime + track.duration;
+            }
+        }
+
+        // Only trigger update if state changed
+        const isDifferent = JSON.stringify(updatedAudio.map(a => ({ s: a.startTime, fi: a.fadeIn, fo: a.fadeOut }))) !== 
+                          JSON.stringify(audioFiles.map(a => ({ s: a.startTime, fi: a.fadeIn, fo: a.fadeOut })));
+        
+        if (isDifferent) {
+            setAudioFiles(updatedAudio);
+        }
+    }, [settings.autoFadeEnabled, settings.autoFadeInterval, audioFiles.length]);
 
     const resetWorkspace = useCallback(() => {
         setMediaFiles([]);
@@ -575,7 +619,7 @@ const App: React.FC = () => {
         setIsProcessing(true);
         try {
             const cloneName = `Copy of ${s.name}`;
-            const newDocRef = await addDoc(collection(db, 'slideshows'), {
+            await addDoc(collection(db, 'slideshows'), {
                 userId: user.uid,
                 userEmail: user.email,
                 name: cloneName,
@@ -971,6 +1015,42 @@ const App: React.FC = () => {
                     </header>
 
                     <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 pr-2 pb-20">
+                        {/* NEW: AI AUTO-FADE SECTION */}
+                        <div className="bg-brand-purple/10 p-6 rounded-3xl border border-brand-purple/40 shadow-xl animate-fade-in">
+                            <div className="flex justify-between items-center mb-6">
+                                <div className="flex items-center gap-3">
+                                    <SparklesIcon className="w-6 h-6 text-brand-purple" />
+                                    <div>
+                                        <h3 className="text-lg font-black uppercase tracking-tighter">AI Auto-Fade Engine</h3>
+                                        <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Intelligent Track Chaining & Crossfading</p>
+                                    </div>
+                                </div>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" className="sr-only peer" checked={settings.autoFadeEnabled} onChange={() => setSettings(s => ({...s, autoFadeEnabled: !s.autoFadeEnabled}))} />
+                                    <div className="w-14 h-7 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-brand-purple"></div>
+                                </label>
+                            </div>
+
+                            {settings.autoFadeEnabled && (
+                                <div className="flex items-center gap-4 animate-fade-in">
+                                    <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Overlap Interval:</span>
+                                    <div className="flex bg-gray-900 p-1 rounded-2xl border border-gray-800">
+                                        {[3, 5, 7].map(interval => (
+                                            <button 
+                                                key={interval}
+                                                onClick={() => setSettings(s => ({...s, autoFadeInterval: interval}))}
+                                                className={`px-6 py-2 rounded-xl text-xs font-black transition-all ${settings.autoFadeInterval === interval ? 'bg-brand-purple text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}
+                                            >
+                                                {interval}s
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="ml-auto text-[9px] text-brand-purple font-bold bg-brand-purple/10 px-3 py-1 rounded-lg border border-brand-purple/20">AI MANAGED MODE ACTIVE</div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Timeline Ruler */}
                         <div className="bg-gray-950/50 rounded-3xl p-6 border border-gray-800/50 shadow-2xl relative">
                             <div className="absolute top-0 left-[180px] right-6 h-6 border-b border-gray-800 flex justify-between px-1">
                                 {Array.from({ length: Math.ceil(totalSlideshowDuration / 5) + 1 }).map((_, i) => (
@@ -996,30 +1076,6 @@ const App: React.FC = () => {
                                                     <span className="text-[8px] font-black text-white/40 uppercase whitespace-nowrap">{m.type} #{idx+1}</span>
                                                     <span className="text-[8px] font-bold text-white/20 whitespace-nowrap">{formatDuration(m.timelineEnd - m.timelineStart)}</span>
                                                 </div>
-                                                {m.type === 'video' && (
-                                                    <div className="absolute bottom-1 left-1 flex gap-1 opacity-0 group-hover/clip:opacity-100 transition-opacity pointer-events-auto">
-                                                        <button 
-                                                            onClick={() => {
-                                                                const updated = [...mediaFiles];
-                                                                (updated[idx] as VideoFile).duckBGM = !(updated[idx] as VideoFile).duckBGM;
-                                                                setMediaFiles(updated);
-                                                            }}
-                                                            className={`text-[7px] px-1 rounded font-black uppercase tracking-tighter ${(m as VideoFile).duckBGM ? 'bg-brand-purple text-white' : 'bg-gray-800 text-gray-400'}`}
-                                                        >
-                                                            Duck BGM: {(m as VideoFile).duckBGM ? 'ON' : 'OFF'}
-                                                        </button>
-                                                        <input 
-                                                            type="range" min="0" max="1" step="0.1" 
-                                                            value={(m as VideoFile).volume}
-                                                            onChange={e => {
-                                                                const updated = [...mediaFiles];
-                                                                (updated[idx] as VideoFile).volume = parseFloat(e.target.value);
-                                                                setMediaFiles(updated);
-                                                            }}
-                                                            className="w-10 accent-brand-purple h-2"
-                                                        />
-                                                    </div>
-                                                )}
                                             </div>
                                         ))}
                                     </div>
@@ -1051,14 +1107,15 @@ const App: React.FC = () => {
                                                     <div className="space-y-1 flex-1">
                                                         <label className="text-[7px] text-gray-500 font-black uppercase tracking-widest">Start Time Offset ({a.startTime}s)</label>
                                                         <input 
-                                                            type="range" min="0" max={totalSlideshowDuration} step="1" 
+                                                            type="range" min="0" max={Math.max(totalSlideshowDuration, a.startTime + a.duration)} step="1" 
                                                             value={a.startTime} 
+                                                            disabled={settings.autoFadeEnabled}
                                                             onChange={e => {
                                                                 const updated = [...audioFiles];
                                                                 updated[idx].startTime = parseInt(e.target.value);
                                                                 setAudioFiles(updated);
                                                             }}
-                                                            className="w-full h-1 accent-blue-500" 
+                                                            className={`w-full h-1 accent-blue-500 ${settings.autoFadeEnabled ? 'opacity-20 cursor-not-allowed' : ''}`} 
                                                         />
                                                     </div>
                                                     <div className="space-y-1">
@@ -1066,12 +1123,13 @@ const App: React.FC = () => {
                                                         <input 
                                                             type="number" min="0" max="10" 
                                                             value={a.fadeIn} 
+                                                            disabled={settings.autoFadeEnabled}
                                                             onChange={e => {
                                                                 const updated = [...audioFiles];
                                                                 updated[idx].fadeIn = parseFloat(e.target.value);
                                                                 setAudioFiles(updated);
                                                             }}
-                                                            className="w-12 bg-gray-950 text-white text-[9px] font-bold p-1 rounded border border-gray-800"
+                                                            className={`w-12 bg-gray-950 text-white text-[9px] font-bold p-1 rounded border border-gray-800 ${settings.autoFadeEnabled ? 'opacity-30' : ''}`}
                                                         />
                                                     </div>
                                                     <div className="space-y-1">
@@ -1079,26 +1137,26 @@ const App: React.FC = () => {
                                                         <input 
                                                             type="number" min="0" max="10" 
                                                             value={a.fadeOut} 
+                                                            disabled={settings.autoFadeEnabled}
                                                             onChange={e => {
                                                                 const updated = [...audioFiles];
                                                                 updated[idx].fadeOut = parseFloat(e.target.value);
                                                                 setAudioFiles(updated);
                                                             }}
-                                                            className="w-12 bg-gray-950 text-white text-[9px] font-bold p-1 rounded border border-gray-800"
+                                                            className={`w-12 bg-gray-950 text-white text-[9px] font-bold p-1 rounded border border-gray-800 ${settings.autoFadeEnabled ? 'opacity-30' : ''}`}
                                                         />
                                                     </div>
                                                     <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="self-end pb-1"><TrashIcon className="w-4 h-4 text-red-500 hover:scale-110 transition-transform"/></button>
                                                 </div>
                                             </div>
                                         ))}
-                                        {audioFiles.length === 0 && <div className="h-full flex items-center justify-center text-[10px] font-black uppercase text-gray-700 tracking-[0.3em]">Drop Music Tracks Above</div>}
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <footer className="shrink-0 bg-gray-950 p-6 rounded-t-[2.5rem] border-t border-gray-800 flex justify-between items-center shadow-inner">
+                    <footer className="shrink-0 bg-gray-950 p-6 rounded-t-[2.5rem] border-t border-gray-800 flex justify-between items-center shadow-inner mt-auto">
                         <div className="flex items-center gap-6">
                             <div className="flex flex-col">
                                 <span className="text-[10px] text-gray-500 font-black uppercase tracking-widest">Total Master Length</span>
