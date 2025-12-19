@@ -277,34 +277,38 @@ const App: React.FC = () => {
     useEffect(() => {
         if (!settings.autoFadeEnabled || audioFiles.length === 0) return;
 
-        const updatedAudio = [...audioFiles];
         let runningStart = 0;
-
-        for (let i = 0; i < updatedAudio.length; i++) {
-            const track = updatedAudio[i];
+        let changed = false;
+        
+        // Map over existing tracks to calculate managed positions
+        const recalculated = audioFiles.map((track, i) => {
             const interval = settings.autoFadeInterval;
+            let targetStart = 0;
+            let targetFadeIn = 0.5;
+            let targetFadeOut = 0.5;
 
             if (i === 0) {
-                track.startTime = 0;
-                track.fadeIn = 1; // Start track usually has a tiny fade or none
-                track.fadeOut = updatedAudio.length > 1 ? interval : 1;
+                targetStart = 0;
+                targetFadeIn = 0.5;
+                targetFadeOut = audioFiles.length > 1 ? (interval || 0.5) : 1;
                 runningStart = track.duration;
             } else {
-                // Position this track so it overlaps the previous one by 'interval'
-                const startPos = runningStart - interval;
-                track.startTime = Math.max(0, startPos);
-                track.fadeIn = interval || 0.5; // Ensure at least a tiny fade even if interval is 0 for smooth start
-                track.fadeOut = (i === updatedAudio.length - 1) ? 1 : (interval || 0.5);
-                runningStart = track.startTime + track.duration;
+                // Crossfade overlap: start = previous_end - overlap
+                targetStart = Math.max(0, runningStart - interval);
+                targetFadeIn = interval || 0.5;
+                targetFadeOut = (i === audioFiles.length - 1) ? 1 : (interval || 0.5);
+                runningStart = targetStart + track.duration;
             }
-        }
 
-        // Only trigger update if state changed
-        const isDifferent = JSON.stringify(updatedAudio.map(a => ({ s: a.startTime, fi: a.fadeIn, fo: a.fadeOut }))) !== 
-                          JSON.stringify(audioFiles.map(a => ({ s: a.startTime, fi: a.fadeIn, fo: a.fadeOut })));
-        
-        if (isDifferent) {
-            setAudioFiles(updatedAudio);
+            if (track.startTime !== targetStart || track.fadeIn !== targetFadeIn || track.fadeOut !== targetFadeOut) {
+                changed = true;
+                return { ...track, startTime: targetStart, fadeIn: targetFadeIn, fadeOut: targetFadeOut };
+            }
+            return track;
+        });
+
+        if (changed) {
+            setAudioFiles(recalculated);
         }
     }, [settings.autoFadeEnabled, settings.autoFadeInterval, audioFiles.length]);
 
@@ -1212,7 +1216,6 @@ const App: React.FC = () => {
                                         muted={settings.muteVideos} 
                                         onLoadedMetadata={e => {
                                             const video = e.target as HTMLVideoElement;
-                                            // Ensure video respects mute settings
                                             video.volume = settings.muteVideos ? 0 : ((mediaWithTimestamps[currentSlide] as VideoFile).volume || 1.0);
                                             video.muted = settings.muteVideos;
                                             const offset = elapsedTime - mediaWithTimestamps[currentSlide].timelineStart;
@@ -1311,15 +1314,17 @@ const AudioPlayer: React.FC<{ src: string, active: boolean, volume: number, star
                 audioRef.current.play().catch(e => console.error("Audio block", e));
                 setHasStarted(true);
             }
-            // Continuous sync to prevent drift during seeking
+            // Tight sync to prevent drift during seeking or interval switches
             const drift = Math.abs(audioRef.current.currentTime - startTimeInFile);
-            if (drift > 0.3) {
+            if (drift > 0.1) {
                 audioRef.current.currentTime = startTimeInFile;
             }
             audioRef.current.volume = Math.max(0, Math.min(1, volume));
         } else {
-            audioRef.current.pause();
-            setHasStarted(false);
+            if (hasStarted) {
+                audioRef.current.pause();
+                setHasStarted(false);
+            }
         }
     }, [active, hasStarted, volume, startTimeInFile]);
 
