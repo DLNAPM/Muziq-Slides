@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp } from 'firebase/app';
@@ -382,7 +383,8 @@ const App: React.FC = () => {
     const generateSmartCaptions = async () => {
         if (!settings.smartCaptionsEnabled) return;
         setIsProcessing(true);
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+        // Fix: Use the API key directly from process.env as per guidelines
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         
         try {
             const updatedMedia = await Promise.all(mediaFiles.map(async (m) => {
@@ -395,14 +397,15 @@ const App: React.FC = () => {
                     }
 
                     if (base64Data) {
+                        // Fix: Update content structure to match standard SDK usage and use .text property
                         const response = await ai.models.generateContent({
                             model: 'gemini-3-flash-preview',
-                            contents: [{
+                            contents: {
                                 parts: [
                                     { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
                                     { text: "Describe this image in a short, poetic caption for a family slideshow. Max 10 words. Don't use quotes." }
                                 ]
-                            }]
+                            }
                         });
                         return { ...m, aiCaption: response.text?.trim() };
                     }
@@ -430,16 +433,26 @@ const App: React.FC = () => {
 
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files) return;
-        const files = Array.from(e.target.files).slice(0, 20 - mediaFiles.length);
-        const resolved = await Promise.all(files.map(async (f: File) => {
+        // Fix: Cast Array.from(e.target.files) to File[] to fix 'unknown' type errors for property 'type', 'name' and in getMediaDuration/createObjectURL calls.
+        const files = (Array.from(e.target.files) as File[]).slice(0, 20 - mediaFiles.length);
+        const resolved: MediaFile[] = [];
+        
+        for (const f of files) {
             const isImg = f.type.startsWith('image/');
             const dur = isImg ? 0 : await getMediaDuration(f);
-            return {
+            
+            // Rejection logic for videos exceeding the 45s limit
+            if (!isImg && dur > 45) {
+                setError(`Video "${f.name}" is too long. Maximum allowed duration is 45 seconds.`);
+                continue;
+            }
+
+            resolved.push({
                 id: `m-${Math.random().toString(36).substr(2, 9)}`,
                 file: f, previewUrl: URL.createObjectURL(f), type: isImg ? 'image' : 'video',
                 rotation: 0, caption: '', duration: dur, volume: 1.0, duckBGM: true
-            } as MediaFile;
-        }));
+            } as MediaFile);
+        }
         setMediaFiles(p => [...p, ...resolved]);
     };
 
@@ -701,7 +714,7 @@ const App: React.FC = () => {
                     {user ? (
                         <div className="flex gap-2">
                             <button onClick={handleLogin} className="bg-gray-800 text-white py-2 px-4 rounded-lg text-sm font-bold shadow-sm transition-all hover:bg-gray-700 border border-gray-700">Switch Account</button>
-                            <button onClick={() => signOut(auth)} className="bg-gray-200 text-gray-900 py-2 px-6 rounded-lg text-sm font-bold shadow-sm transition-all hover:bg-gray-300">Logout</button>
+                            <button onClick={() => signOut(auth)} className="bg-gray-200 text-gray-900 py-2 px-6 rounded-lg text-sm font-bold shadow-sm transition-all hover:bg-300">Logout</button>
                         </div>
                     ) : (
                         <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-6 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Sign In</button>
@@ -780,7 +793,7 @@ const App: React.FC = () => {
                                         <label className="text-xs text-gray-500 font-black uppercase tracking-widest">Slide Duration (Seconds)</label>
                                         <span className="text-brand-purple font-black text-sm">{settings.interval}s</span>
                                     </div>
-                                    <input type="range" min="1" max="30" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
+                                    <input type="range" min="1" max="45" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
                                 </div>
                                 
                                 {/* Transition Style */}
