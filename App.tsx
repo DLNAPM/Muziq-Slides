@@ -395,12 +395,53 @@ const App: React.FC = () => {
 
                         <section className="bg-gray-800/40 p-6 rounded-3xl border border-gray-700/50 shadow-xl">
                             <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white"><SettingsIcon className="w-5 h-5 text-brand-purple"/> 3. Settings</h3>
-                            <div className="space-y-4">
-                                <div className="flex justify-between items-center">
-                                    <label className="text-sm text-gray-400">Photo Interval</label>
-                                    <span className="text-brand-purple font-bold">{settings.interval}s</span>
+                            <div className="space-y-6">
+                                {/* Slide Duration */}
+                                <div className="space-y-2">
+                                    <div className="flex justify-between items-center">
+                                        <label className="text-sm text-gray-400">Slide Duration (Seconds)</label>
+                                        <span className="text-brand-purple font-bold">{settings.interval}s</span>
+                                    </div>
+                                    <input type="range" min="1" max="30" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
                                 </div>
-                                <input type="range" min="1" max="30" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
+
+                                {/* Transition Style */}
+                                <div className="space-y-2">
+                                    <label className="text-sm text-gray-400 block">Transition Style</label>
+                                    <select 
+                                        value={settings.slideStyle} 
+                                        onChange={e => setSettings(s => ({...s, slideStyle: e.target.value}))}
+                                        className="w-full bg-gray-700/50 border border-gray-600/50 rounded-xl px-4 py-2 text-sm text-white focus:ring-1 focus:ring-brand-purple outline-none appearance-none cursor-pointer"
+                                    >
+                                        <option value="ken-burns">Ken Burns (Pan & Zoom)</option>
+                                        <option value="fade-in">Fade In</option>
+                                        <option value="slide-from-right">Slide from Right</option>
+                                        <option value="slide-from-bottom">Slide from Bottom</option>
+                                        <option value="zoom-in">Zoom In</option>
+                                        <option value="zoom-out">Zoom Out</option>
+                                    </select>
+                                </div>
+
+                                {/* Toggles */}
+                                <div className="grid grid-cols-2 gap-4 pt-2">
+                                    <label className="flex items-center gap-3 cursor-pointer group">
+                                        <div className="relative">
+                                            <input type="checkbox" className="sr-only" checked={settings.repeatSlideshow} onChange={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} />
+                                            <div className={`w-10 h-5 rounded-full transition-colors ${settings.repeatSlideshow ? 'bg-brand-purple' : 'bg-gray-700'}`}></div>
+                                            <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${settings.repeatSlideshow ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                                        </div>
+                                        <span className="text-xs text-gray-400 group-hover:text-gray-200 transition-colors">Loop Slideshow</span>
+                                    </label>
+
+                                    <label className="flex items-center gap-3 cursor-pointer group">
+                                        <div className="relative">
+                                            <input type="checkbox" className="sr-only" checked={settings.smartCaptionsEnabled} onChange={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} />
+                                            <div className={`w-10 h-5 rounded-full transition-colors ${settings.smartCaptionsEnabled ? 'bg-brand-purple' : 'bg-gray-700'}`}></div>
+                                            <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${settings.smartCaptionsEnabled ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                                        </div>
+                                        <span className="text-xs text-gray-400 group-hover:text-gray-200 transition-colors">Smart Captions</span>
+                                    </label>
+                                </div>
                             </div>
                         </section>
                     </div>
