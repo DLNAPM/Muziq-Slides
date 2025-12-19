@@ -721,6 +721,9 @@ const App: React.FC = () => {
 
     // Intelligent Ducking Calculation
     const getDuckingFactor = useCallback((time: number) => {
+        // REQUIREMENT: If muteVideos is enabled, DO NOT decrease background music volume (no ducking)
+        if (settings.muteVideos) return 1.0;
+
         const FADE_TIME = 0.8;
         const DUCK_LEVEL = 0.15;
         
@@ -757,7 +760,7 @@ const App: React.FC = () => {
         }
 
         return duckFactor;
-    }, [mediaWithTimestamps]);
+    }, [mediaWithTimestamps, settings.muteVideos]);
 
     if (isLoading) return (
         <div className="min-h-screen bg-brand-dark flex items-center justify-center">
@@ -1209,7 +1212,9 @@ const App: React.FC = () => {
                                         muted={settings.muteVideos} 
                                         onLoadedMetadata={e => {
                                             const video = e.target as HTMLVideoElement;
+                                            // Ensure video respects mute settings
                                             video.volume = settings.muteVideos ? 0 : ((mediaWithTimestamps[currentSlide] as VideoFile).volume || 1.0);
+                                            video.muted = settings.muteVideos;
                                             const offset = elapsedTime - mediaWithTimestamps[currentSlide].timelineStart;
                                             if (offset > 0) video.currentTime = offset;
                                         }}
