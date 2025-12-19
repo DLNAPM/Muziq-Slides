@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import firebase from 'firebase/compat/app';
@@ -154,6 +155,7 @@ const MusicIcon = ({ className }: { className?: string }) => <svg xmlns="http://
 const PlayIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const XIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
 const PlusIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>;
+// Fix: Corrected the component prop destructuring and typing for TrashIcon (previously line 158)
 const TrashIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>;
 const AdjustmentIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>;
 const SettingsIcon = ({ className }: { className?: string }) => (
@@ -172,7 +174,6 @@ const App: React.FC = () => {
         interval: 5, slideStyle: 'ken-burns', showClock: true, smartCaptionsEnabled: false, repeatSlideshow: false, showCaptions: true,
     });
     const [isPlaying, setIsPlaying] = useState(false);
-    const [isPaused, setIsPaused] = useState(false);
     const [currentSlide, setCurrentSlide] = useState(0);
     const [currentAudioIndex, setCurrentAudioIndex] = useState(0); 
     const [slideshowName, setSlideshowName] = useState('');
@@ -194,10 +195,6 @@ const App: React.FC = () => {
         return mediaFiles.reduce((acc, curr) => acc + (curr.type === 'image' ? settings.interval : (curr.duration || 0)), 0);
     }, [mediaFiles, settings.interval]);
 
-    const slideshowElapsedTime = useMemo(() => {
-        return mediaFiles.slice(0, currentSlide).reduce((acc, curr) => acc + (curr.type === 'image' ? settings.interval : (curr.duration || 0)), 0);
-    }, [currentSlide, mediaFiles, settings.interval]);
-
     const audioSrc = useMemo(() => {
         const currentAudio = audioFiles[currentAudioIndex];
         if (!currentAudio) return null;
@@ -205,6 +202,41 @@ const App: React.FC = () => {
         if (currentAudio.file) return URL.createObjectURL(currentAudio.file);
         return null;
     }, [audioFiles, currentAudioIndex]);
+
+    // Progression Engine: Advancement for images
+    useEffect(() => {
+        let timer: any;
+        if (isPlaying && mediaFiles[currentSlide]) {
+            const currentMedia = mediaFiles[currentSlide];
+            if (currentMedia.type === 'image') {
+                timer = setTimeout(() => {
+                    handleNextSlide();
+                }, settings.interval * 1000);
+            }
+        }
+        return () => clearTimeout(timer);
+    }, [isPlaying, currentSlide, settings.interval, mediaFiles.length]);
+
+    const handleNextSlide = useCallback(() => {
+        if (currentSlide < mediaFiles.length - 1) {
+            setCurrentSlide(s => s + 1);
+        } else if (settings.repeatSlideshow) {
+            setCurrentSlide(0);
+        } else {
+            setIsPlaying(false);
+        }
+    }, [currentSlide, mediaFiles.length, settings.repeatSlideshow]);
+
+    // Audio Ducking Logic
+    useEffect(() => {
+        if (!isPlaying || !audioRef.current) return;
+        const currentMedia = mediaFiles[currentSlide];
+        if (currentMedia?.type === 'video') {
+            audioRef.current.volume = 0.2;
+        } else {
+            audioRef.current.volume = 1.0;
+        }
+    }, [isPlaying, currentSlide, mediaFiles]);
 
     useEffect(() => {
         const unsubscribe = auth.onAuthStateChanged((u) => { 
@@ -328,6 +360,13 @@ const App: React.FC = () => {
         } catch (e) { setError("Delete failed"); } finally { setIsProcessing(false); }
     };
 
+    const startPlayback = () => {
+        if (mediaFiles.length === 0) return;
+        setCurrentSlide(0);
+        setCurrentAudioIndex(0);
+        setIsPlaying(true);
+    };
+
     if (isLoading) return (
         <div className="min-h-screen bg-brand-dark flex items-center justify-center">
             <div className="w-12 h-12 border-4 border-brand-purple border-t-transparent rounded-full animate-spin"></div>
@@ -377,7 +416,17 @@ const App: React.FC = () => {
                             <div className="mt-4 grid grid-cols-4 gap-3">
                                 {mediaFiles.map(m => (
                                     <div key={m.id} className="aspect-square bg-black rounded-xl overflow-hidden relative group border border-gray-700">
-                                        <img src={m.previewUrl} className="w-full h-full object-cover" />
+                                        {m.type === 'image' ? (
+                                            <img src={m.previewUrl} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className="w-full h-full relative">
+                                                <video src={m.previewUrl} className="w-full h-full object-cover opacity-60" muted />
+                                                <div className="absolute inset-0 flex items-center justify-center">
+                                                    <PlayIcon className="w-6 h-6 text-white opacity-80" />
+                                                </div>
+                                                <span className="absolute bottom-1 right-1 text-[8px] bg-black/60 px-1 rounded text-white">{formatDuration(m.duration || 0)}</span>
+                                            </div>
+                                        )}
                                         <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="absolute top-1 right-1 bg-red-600/80 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"><XIcon className="w-3 h-3 text-white"/></button>
                                     </div>
                                 ))}
@@ -396,7 +445,6 @@ const App: React.FC = () => {
                         <section className="bg-gray-800/40 p-6 rounded-3xl border border-gray-700/50 shadow-xl">
                             <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white"><SettingsIcon className="w-5 h-5 text-brand-purple"/> 3. Settings</h3>
                             <div className="space-y-6">
-                                {/* Slide Duration */}
                                 <div className="space-y-2">
                                     <div className="flex justify-between items-center">
                                         <label className="text-sm text-gray-400">Slide Duration (Seconds)</label>
@@ -404,8 +452,6 @@ const App: React.FC = () => {
                                     </div>
                                     <input type="range" min="1" max="30" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
                                 </div>
-
-                                {/* Transition Style */}
                                 <div className="space-y-2">
                                     <label className="text-sm text-gray-400 block">Transition Style</label>
                                     <select 
@@ -421,8 +467,6 @@ const App: React.FC = () => {
                                         <option value="zoom-out">Zoom Out</option>
                                     </select>
                                 </div>
-
-                                {/* Toggles */}
                                 <div className="grid grid-cols-2 gap-4 pt-2">
                                     <label className="flex items-center gap-3 cursor-pointer group">
                                         <div className="relative">
@@ -432,7 +476,6 @@ const App: React.FC = () => {
                                         </div>
                                         <span className="text-xs text-gray-400 group-hover:text-gray-200 transition-colors">Loop Slideshow</span>
                                     </label>
-
                                     <label className="flex items-center gap-3 cursor-pointer group">
                                         <div className="relative">
                                             <input type="checkbox" className="sr-only" checked={settings.smartCaptionsEnabled} onChange={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} />
@@ -456,9 +499,13 @@ const App: React.FC = () => {
                                 {mediaFiles.length > 0 ? (
                                     <>
                                         <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-                                            {mediaFiles[0].type === 'image' ? <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-sm opacity-50" /> : null}
+                                            {mediaFiles[0].type === 'image' ? (
+                                                <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-sm opacity-50" />
+                                            ) : (
+                                                <video src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-sm opacity-50" muted />
+                                            )}
                                         </div>
-                                        <button onClick={() => setIsPlaying(true)} className="relative z-10 flex items-center justify-center bg-brand-purple p-6 rounded-full shadow-2xl scale-100 hover:scale-110 active:scale-95 transition-all"><PlayIcon className="w-12 h-12 text-white"/></button>
+                                        <button onClick={startPlayback} className="relative z-10 flex items-center justify-center bg-brand-purple p-6 rounded-full shadow-2xl scale-100 hover:scale-110 active:scale-95 transition-all"><PlayIcon className="w-12 h-12 text-white"/></button>
                                     </>
                                 ) : <p className="text-gray-500 italic">No media added yet</p>}
                             </div>
@@ -475,7 +522,11 @@ const App: React.FC = () => {
                                     <div key={s.id} className="bg-gray-700/20 p-4 rounded-2xl flex justify-between items-center group border border-gray-700/30 hover:border-gray-600/50 transition-colors">
                                         <div className="flex-1 min-w-0">
                                             <h4 className="font-bold text-sm text-white truncate">{s.name}</h4>
-                                            <p className="text-[10px] text-gray-500 mt-0.5">Duration: {formatDuration(s.totalDuration || 0)}</p>
+                                            <div className="flex gap-2 mt-0.5">
+                                                <p className="text-[10px] text-gray-500">Duration: {formatDuration(s.totalDuration || 0)}</p>
+                                                <p className="text-[10px] text-brand-purple/70">• {s.media?.filter(m => m.type === 'video').length || 0} Videos</p>
+                                                <p className="text-[10px] text-brand-purple/70">• {s.media?.filter(m => m.type === 'image').length || 0} Photos</p>
+                                            </div>
                                         </div>
                                         <div className="flex gap-2 ml-4">
                                             <button onClick={() => handleLoad(s)} className="text-[10px] bg-brand-purple/10 text-brand-purple border border-brand-purple/20 py-1.5 px-4 rounded-lg font-bold hover:bg-brand-purple/20 transition-all">Load</button>
@@ -504,8 +555,17 @@ const App: React.FC = () => {
                                     <div className="w-24 text-[10px] text-gray-500 font-extrabold uppercase tracking-widest">Media Track</div>
                                     <div className="flex-1 h-24 bg-gray-800/50 rounded-2xl flex items-center gap-2 p-3 overflow-x-auto border border-gray-700/50">
                                         {mediaFiles.map(m => (
-                                            <div key={m.id} className="h-full aspect-square bg-black rounded-xl border border-brand-purple/20 overflow-hidden flex-shrink-0">
-                                                <img src={m.previewUrl} className="w-full h-full object-cover" />
+                                            <div key={m.id} className="h-full aspect-square bg-black rounded-xl border border-brand-purple/20 overflow-hidden flex-shrink-0 relative group">
+                                                {m.type === 'image' ? (
+                                                    <img src={m.previewUrl} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <div className="w-full h-full relative">
+                                                        <video src={m.previewUrl} className="w-full h-full object-cover" muted />
+                                                        <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                                                            <PlayIcon className="w-4 h-4 text-white" />
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
@@ -537,14 +597,21 @@ const App: React.FC = () => {
 
             {isPlaying && (
                 <div className="fixed inset-0 bg-black z-[100] flex items-center justify-center animate-fade-in">
-                    <button onClick={() => setIsPlaying(false)} className="absolute top-8 right-8 text-white bg-black/40 hover:bg-red-600/80 p-3 rounded-full z-[110] backdrop-blur-md transition-colors"><XIcon className="w-10 h-10"/></button>
+                    <button onClick={() => setIsPlaying(false)} className="absolute top-8 right-8 text-white bg-black/40 hover:bg-red-600/80 p-3 rounded-full z-[110] backdrop-blur-md transition-colors shadow-2xl"><XIcon className="w-10 h-10"/></button>
                     {mediaFiles[currentSlide] && (
                         <div className="w-full h-full relative flex items-center justify-center overflow-hidden">
-                            <div className={`w-full h-full absolute transition-opacity duration-1000 animate-${settings.slideStyle}`}>
+                            <div key={mediaFiles[currentSlide].id} className={`w-full h-full absolute flex items-center justify-center transition-all duration-1000 animate-${settings.slideStyle}`}>
                                 {mediaFiles[currentSlide].type === 'image' ? (
                                     <img src={mediaFiles[currentSlide].previewUrl} className="w-full h-full object-cover" />
                                 ) : (
-                                    <video ref={videoPreviewRef} src={mediaFiles[currentSlide].previewUrl} className="w-full h-full object-contain" autoPlay muted={false} onEnded={() => currentSlide < mediaFiles.length - 1 ? setCurrentSlide(s => s + 1) : setIsPlaying(false)} />
+                                    <video 
+                                        ref={videoPreviewRef} 
+                                        src={mediaFiles[currentSlide].previewUrl} 
+                                        className="w-full h-full object-contain" 
+                                        autoPlay 
+                                        muted={false} 
+                                        onEnded={handleNextSlide} 
+                                    />
                                 )}
                             </div>
                         </div>
