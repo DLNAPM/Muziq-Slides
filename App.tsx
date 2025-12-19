@@ -1,7 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
+import { initializeApp } from 'firebase/app';
+import { 
+    getAuth, 
+    onAuthStateChanged, 
+    GoogleAuthProvider, 
+    signInWithPopup, 
+    signOut, 
+    User 
+} from 'firebase/auth';
 import {
     getFirestore,
     collection,
@@ -13,6 +20,7 @@ import {
     where,
     onSnapshot,
     deleteDoc,
+    orderBy,
 } from 'firebase/firestore';
 import {
     getStorage,
@@ -32,11 +40,11 @@ const firebaseConfig = {
   measurementId: "G-SKRCL4J4GD"
 };
 
-// --- FIREBASE INITIALIZATION ---
-const app = firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = getFirestore(app as any);
-const storage = getStorage(app as any);
+// --- FIREBASE INITIALIZATION (MODULAR) ---
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
 
 // --- TYPE DEFINITIONS ---
 interface Collaborator {
@@ -117,11 +125,11 @@ interface SavedSlideshow {
     media: SerializedMediaFile[];
     audio: SerializedAudioFile[];
     settings: SlideshowSettings;
-    timestamp?: Timestamp; 
-    createdAt?: Timestamp; 
+    timestamp?: any; 
+    createdAt?: any; 
     totalDuration?: number;
     collaborators?: Collaborator[];
-    collaboratorEmails?: string[]; // Added for reliable querying
+    collaboratorEmails?: string[];
 }
 
 // --- HELPER FUNCTIONS ---
@@ -151,10 +159,14 @@ const formatDuration = (seconds: number) => {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
-const getMillis = (val: any) => {
-    if (val && typeof val.toMillis === 'function') return val.toMillis();
+const getMillis = (val: any): number => {
+    if (!val) return 0;
+    // Handle serverTimestamp sentinel or Firestore Timestamp
+    if (typeof val.toMillis === 'function') return val.toMillis();
     if (val instanceof Date) return val.getTime();
-    return 0;
+    if (typeof val === 'number') return val;
+    // If it's the pending server timestamp, return current time for sorting
+    return Date.now(); 
 };
 
 const fileToBase64 = (file: File): Promise<string> => {
@@ -196,7 +208,7 @@ const SettingsIcon = ({ className }: { className?: string }) => (
 
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
-    const [user, setUser] = useState<firebase.User | null>(null);
+    const [user, setUser] = useState<User | null>(null);
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
     const [audioFiles, setAudioFiles] = useState<AppStateAudio[]>([]);
     const [settings, setSettings] = useState<SlideshowSettings>({
@@ -327,43 +339,69 @@ const App: React.FC = () => {
     }, [isPlaying, currentSlide, mediaFiles]);
 
     useEffect(() => {
-        const unsubscribe = auth.onAuthStateChanged((u) => { 
+        const unsubscribe = onAuthStateChanged(auth, (u) => { 
             setUser(u); 
             setIsLoading(false); 
         });
         return unsubscribe;
     }, []);
 
+    // REAL-TIME DATABASE LISTENERS
     useEffect(() => {
-        if (!user || !user.email) return;
+        if (!user || !user.email) {
+            setOwnedSlideshows([]);
+            setSharedWithMeSlideshows([]);
+            return;
+        }
         
-        const qOwned = query(collection(db, "slideshows"), where("userId", "==", user.uid));
-        const unsubOwned = onSnapshot(qOwned, (snap) => {
-            setOwnedSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
-        });
+        const slideshowsRef = collection(db, "slideshows");
+        const email = user.email.toLowerCase();
 
-        // Use simplified email array for reliable sharing query
-        const qShared = query(collection(db, "slideshows"), where("collaboratorEmails", "array-contains", user.email));
-        const unsubShared = onSnapshot(qShared, (snap) => {
-            setSharedWithMeSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
-        });
+        // Query 1: Owned by me
+        const qOwned = query(slideshowsRef, where("userId", "==", user.uid));
+        const unsubOwned = onSnapshot(qOwned, 
+            (snap) => {
+                setOwnedSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
+                setError(null);
+            },
+            (err) => {
+                console.error("Owned Fetch Error", err);
+                setError("Failed to sync your projects. Check your connection.");
+            }
+        );
+
+        // Query 2: Shared with me
+        const qShared = query(slideshowsRef, where("collaboratorEmails", "array-contains", email));
+        const unsubShared = onSnapshot(qShared, 
+            (snap) => {
+                setSharedWithMeSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
+            },
+            (err) => {
+                console.error("Shared Fetch Error", err);
+            }
+        );
 
         return () => { unsubOwned(); unsubShared(); };
     }, [user]);
 
     const allSlideshows = useMemo(() => {
         const combined = [...ownedSlideshows, ...sharedWithMeSlideshows];
+        // Use a map to handle overlaps (though rare with this schema)
         const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
         return unique.sort((a, b) => {
-            const tA = getMillis(a.createdAt) || getMillis(a.timestamp) || 0;
-            const tB = getMillis(b.createdAt) || getMillis(b.timestamp) || 0;
+            const tA = getMillis(a.timestamp) || getMillis(a.createdAt) || 0;
+            const tB = getMillis(b.timestamp) || getMillis(b.createdAt) || 0;
             return tB - tA;
         });
     }, [ownedSlideshows, sharedWithMeSlideshows]);
 
     const handleLogin = async () => {
-        const provider = new firebase.auth.GoogleAuthProvider();
-        try { await auth.signInWithPopup(provider); } catch (e) { setError("Login failed"); }
+        const provider = new GoogleAuthProvider();
+        try { 
+            await signInWithPopup(auth, provider); 
+        } catch (e: any) { 
+            setError("Login failed: " + e.message); 
+        }
     };
 
     const resetWorkspace = () => {
@@ -396,11 +434,15 @@ const App: React.FC = () => {
     };
 
     const handleSave = async () => {
-        if (!user || !mediaFiles.length || !canEdit) return;
+        if (!user || !mediaFiles.length || !canEdit || !user.email) return;
         setIsSaving(true);
+        setError(null);
         try {
             const id = currentSlideshowId || doc(collection(db, 'slideshows')).id;
-            const serMedia = await Promise.all(mediaFiles.map(async m => {
+            
+            // Sequential upload to avoid hitting storage limits or causing race conditions
+            const serMedia = [];
+            for (const m of mediaFiles) {
                 const b: any = { id: m.id, type: m.type, name: m.id, rotation: m.rotation, caption: (m as any).caption, aiCaption: (m as any).aiCaption, duration: (m as any).duration };
                 if (!m.serverData && m.file) {
                     const path = `users/${user.uid}/${id}/${m.id}`;
@@ -408,11 +450,14 @@ const App: React.FC = () => {
                     b.url = await getDownloadURL(ref(storage, path));
                     b.storagePath = path;
                 } else {
-                    b.url = m.serverData?.url; b.storagePath = m.serverData?.storagePath;
+                    b.url = m.serverData?.url; 
+                    b.storagePath = m.serverData?.storagePath;
                 }
-                return b;
-            }));
-            const serAudio = await Promise.all(audioFiles.map(async a => {
+                serMedia.push(b);
+            }
+
+            const serAudio = [];
+            for (const a of audioFiles) {
                 const b: any = { name: a.name, duration: a.duration, startTime: a.startTime, fadeIn: a.fadeIn, fadeOut: a.fadeOut };
                 if (!a.serverData && a.file) {
                     const path = `users/${user.uid}/${id}/a-${a.id}`;
@@ -420,20 +465,25 @@ const App: React.FC = () => {
                     b.url = await getDownloadURL(ref(storage, path));
                     b.storagePath = path;
                 } else {
-                    b.url = a.serverData?.url; b.storagePath = a.serverData?.storagePath;
+                    b.url = a.serverData?.url; 
+                    b.storagePath = a.serverData?.storagePath;
                 }
-                return b;
-            }));
+                serAudio.push(b);
+            }
             
-            const existing = ownedSlideshows.find(s => s.id === id) || sharedWithMeSlideshows.find(s => s.id === id);
-            
+            const existing = allSlideshows.find(s => s.id === id);
             const collaborators = existing?.collaborators || [];
-            const collaboratorEmails = collaborators.map(c => c.email);
+            
+            // Normalize collaborator emails for querying
+            const collaboratorEmails = Array.from(new Set([
+                ...(existing?.collaboratorEmails || []),
+                ...collaborators.map(c => c.email.toLowerCase())
+            ]));
 
             await setDoc(doc(db, 'slideshows', id), {
                 userId: existing?.userId || user.uid,
                 userEmail: existing?.userEmail || user.email,
-                name: slideshowName || 'Untitled', 
+                name: slideshowName || 'Untitled Slideshow', 
                 media: serMedia, 
                 audio: serAudio,
                 settings, 
@@ -445,23 +495,52 @@ const App: React.FC = () => {
             }, { merge: true });
             
             setCurrentSlideshowId(id);
-        } catch (e) { setError("Save failed"); } finally { setIsSaving(false); }
+        } catch (e: any) { 
+            console.error("Save Error", e);
+            setError("Failed to save slideshow: " + (e.message || "Unknown error")); 
+        } finally { 
+            setIsSaving(false); 
+        }
     };
 
     const handleLoad = (s: SavedSlideshow) => {
-        setMediaFiles(s.media.map(m => ({ id: m.id, type: m.type as any, previewUrl: m.url, rotation: m.rotation || 0, caption: m.caption || '', aiCaption: m.aiCaption || '', duration: m.duration || 0, serverData: { url: m.url, storagePath: m.storagePath } })));
-        setAudioFiles(s.audio.map((a, i) => ({ id: `l-${i}`, name: a.name, duration: a.duration || 0, startTime: a.startTime || 0, fadeIn: a.fadeIn || 1, fadeOut: a.fadeOut || 1, serverData: { url: a.url, storagePath: a.storagePath } })));
-        setSettings(s.settings); setSlideshowName(s.name); setCurrentSlideshowId(s.id);
+        setMediaFiles(s.media.map(m => ({ 
+            id: m.id, 
+            type: m.type as any, 
+            previewUrl: m.url, 
+            rotation: m.rotation || 0, 
+            caption: m.caption || '', 
+            aiCaption: m.aiCaption || '', 
+            duration: m.duration || 0, 
+            serverData: { url: m.url, storagePath: m.storagePath } 
+        })));
+        setAudioFiles(s.audio.map((a, i) => ({ 
+            id: `l-${i}`, 
+            name: a.name, 
+            duration: a.duration || 0, 
+            startTime: a.startTime || 0, 
+            fadeIn: a.fadeIn || 1, 
+            fadeOut: a.fadeOut || 1, 
+            serverData: { url: a.url, storagePath: a.storagePath } 
+        })));
+        setSettings(s.settings); 
+        setSlideshowName(s.name); 
+        setCurrentSlideshowId(s.id);
+        setError(null);
     };
 
     const handleDelete = async (s: SavedSlideshow) => {
         if (!user || s.userId !== user.uid) return;
-        if (!window.confirm(`Delete "${s.name}"?`)) return;
+        if (!window.confirm(`Delete "${s.name}"? This action cannot be undone.`)) return;
         setIsProcessing(true);
         try {
             await deleteDoc(doc(db, 'slideshows', s.id));
             if (currentSlideshowId === s.id) resetWorkspace();
-        } catch (e) { setError("Delete failed"); } finally { setIsProcessing(false); }
+        } catch (e: any) { 
+            setError("Delete failed: " + e.message); 
+        } finally { 
+            setIsProcessing(false); 
+        }
     };
 
     const startPlayback = async () => {
@@ -476,17 +555,24 @@ const App: React.FC = () => {
 
     const handleShareSlideshow = async () => {
         if (!shareSlideshowTarget || !shareEmail) return;
+        const normalizedEmail = shareEmail.trim().toLowerCase();
         setIsProcessing(true);
         try {
-            const updatedCollabs = [...(shareSlideshowTarget.collaborators || []), { email: shareEmail.toLowerCase(), role: shareRole }];
-            const updatedEmails = updatedCollabs.map(c => c.email);
+            const updatedCollabs = [...(shareSlideshowTarget.collaborators || []), { email: normalizedEmail, role: shareRole }];
+            const updatedEmails = Array.from(new Set([...(shareSlideshowTarget.collaboratorEmails || []), normalizedEmail]));
+            
             await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { 
                 collaborators: updatedCollabs,
                 collaboratorEmails: updatedEmails
             }, { merge: true });
+            
             setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs, collaboratorEmails: updatedEmails });
             setShareEmail('');
-        } catch (e) { setError("Share failed"); } finally { setIsProcessing(false); }
+        } catch (e: any) { 
+            setError("Share failed: " + e.message); 
+        } finally { 
+            setIsProcessing(false); 
+        }
     };
 
     const removeCollaborator = async (email: string) => {
@@ -494,13 +580,19 @@ const App: React.FC = () => {
         setIsProcessing(true);
         try {
             const updatedCollabs = (shareSlideshowTarget.collaborators || []).filter(c => c.email !== email);
-            const updatedEmails = updatedCollabs.map(c => c.email);
+            const updatedEmails = updatedCollabs.map(c => c.email.toLowerCase());
+            
             await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { 
                 collaborators: updatedCollabs,
                 collaboratorEmails: updatedEmails
             }, { merge: true });
+            
             setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs, collaboratorEmails: updatedEmails });
-        } catch (e) { setError("Remove failed"); } finally { setIsProcessing(false); }
+        } catch (e: any) { 
+            setError("Remove failed: " + e.message); 
+        } finally { 
+            setIsProcessing(false); 
+        }
     };
 
     if (isLoading) return (
@@ -515,7 +607,7 @@ const App: React.FC = () => {
                 <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center">
                     <div className="text-center">
                         <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-brand-purple mx-auto"></div>
-                        <p className="text-white text-xl mt-4">Syncing...</p>
+                        <p className="text-white text-xl mt-4 font-bold tracking-tight">Syncing Studio...</p>
                     </div>
                 </div>
             )}
@@ -524,7 +616,11 @@ const App: React.FC = () => {
                 <h1 className="text-2xl font-bold tracking-tight"><span className="text-brand-purple">Muziq</span> Slides</h1>
                 <div className="flex gap-4 items-center">
                     {user && <span className="text-xs text-gray-400 hidden sm:inline">{user.email}</span>}
-                    {user ? <button onClick={() => auth.signOut()} className="bg-gray-200 text-gray-900 py-2 px-4 rounded-lg text-sm font-bold shadow-sm transition-colors hover:bg-gray-300">Logout</button> : <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-4 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Sign In</button>}
+                    {user ? (
+                        <button onClick={() => signOut(auth)} className="bg-gray-200 text-gray-900 py-2 px-4 rounded-lg text-sm font-bold shadow-sm transition-colors hover:bg-gray-300">Logout</button>
+                    ) : (
+                        <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-4 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Sign In</button>
+                    )}
                 </div>
             </header>
 
@@ -570,6 +666,13 @@ const App: React.FC = () => {
             ) : (
                 <main className="p-4 sm:p-8 grid lg:grid-cols-2 gap-8 max-w-7xl mx-auto">
                     <div className="space-y-6">
+                        {error && (
+                            <div className="bg-red-500/20 border border-red-500/40 text-red-200 px-4 py-3 rounded-xl text-sm flex justify-between items-center animate-fade-in">
+                                <span>{error}</span>
+                                <button onClick={() => setError(null)} className="hover:text-white"><XIcon className="w-4 h-4"/></button>
+                            </div>
+                        )}
+
                         <section className="bg-gray-800/40 p-6 rounded-3xl border border-gray-700/50 shadow-xl">
                             <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white"><UploadIcon className="w-5 h-5 text-brand-purple"/> 1. Upload Media</h3>
                             <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-700 rounded-2xl p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-brand-purple/5 transition-all">
@@ -683,19 +786,19 @@ const App: React.FC = () => {
                                     onClick={handleSave} 
                                     disabled={isSaving || !canEdit} 
                                     className={`py-2 px-8 rounded-xl font-bold transition-all shadow-lg ${canEdit ? 'bg-brand-purple hover:bg-purple-700 shadow-brand-purple/20' : 'bg-gray-600 cursor-not-allowed opacity-50'}`}>
-                                    {canEdit ? 'Save' : 'View Only'}
+                                    {isSaving ? 'Saving...' : canEdit ? 'Save Changes' : 'Viewer Mode'}
                                 </button>
                             </div>
                             <div className="space-y-3 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
                                 {allSlideshows.length > 0 ? allSlideshows.map(s => (
-                                    <div key={s.id} className="bg-gray-700/20 p-4 rounded-2xl flex justify-between items-center group border border-gray-700/30 hover:border-gray-600/50 transition-all">
+                                    <div key={s.id} className={`bg-gray-700/20 p-4 rounded-2xl flex justify-between items-center group border transition-all ${currentSlideshowId === s.id ? 'border-brand-purple/50 bg-brand-purple/5' : 'border-gray-700/30 hover:border-gray-600/50'}`}>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2">
                                                 <h4 className="font-bold text-sm text-white truncate">{s.name}</h4>
                                                 {s.userId === user?.uid ? (
                                                     <span className="text-[8px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/30 uppercase font-black tracking-widest">Owner</span>
                                                 ) : (
-                                                    <span className="text-[8px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 uppercase font-black tracking-widest">{s.collaborators?.find(c => c.email === user?.email)?.role || 'Viewer'}</span>
+                                                    <span className="text-[8px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 uppercase font-black tracking-widest">{s.collaborators?.find(c => c.email.toLowerCase() === user?.email?.toLowerCase())?.role || 'Viewer'}</span>
                                                 )}
                                             </div>
                                             <div className="flex gap-2 mt-0.5">
@@ -714,7 +817,7 @@ const App: React.FC = () => {
                                             )}
                                         </div>
                                     </div>
-                                )) : <div className="text-center py-8 text-gray-600 text-sm italic font-medium">No slideshows found. Create your first one above!</div>}
+                                )) : <div className="text-center py-12 text-gray-600 text-sm italic font-medium">No projects found. Use the editor to start your first masterpiece!</div>}
                             </div>
                         </section>
                     </div>
