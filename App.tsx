@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp } from 'firebase/app';
@@ -20,6 +19,7 @@ import {
     where,
     onSnapshot,
     deleteDoc,
+    addDoc,
 } from 'firebase/firestore';
 import {
     getStorage,
@@ -200,6 +200,7 @@ const PlusIcon = ({ className }: { className?: string }) => <svg xmlns="http://w
 const TrashIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>;
 const AdjustmentIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>;
 const ShareIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>;
+const DuplicateIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>;
 const SparklesIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>;
 const SettingsIcon = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -356,7 +357,7 @@ const App: React.FC = () => {
             return;
         }
 
-        const TICK = 50; // Higher frequency for smoother audio ramps
+        const TICK = 50; 
         playbackTimerRef.current = setInterval(() => {
             setElapsedTime(prev => {
                 const next = prev + (TICK / 1000);
@@ -383,7 +384,6 @@ const App: React.FC = () => {
     const generateSmartCaptions = async () => {
         if (!settings.smartCaptionsEnabled) return;
         setIsProcessing(true);
-        // Fix: Use the API key directly from process.env as per guidelines
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         
         try {
@@ -397,7 +397,6 @@ const App: React.FC = () => {
                     }
 
                     if (base64Data) {
-                        // Fix: Update content structure to match standard SDK usage and use .text property
                         const response = await ai.models.generateContent({
                             model: 'gemini-3-flash-preview',
                             contents: {
@@ -433,7 +432,6 @@ const App: React.FC = () => {
 
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files) return;
-        // Fix: Cast Array.from(e.target.files) to File[] to fix 'unknown' type errors for property 'type', 'name' and in getMediaDuration/createObjectURL calls.
         const files = (Array.from(e.target.files) as File[]).slice(0, 20 - mediaFiles.length);
         const resolved: MediaFile[] = [];
         
@@ -441,7 +439,6 @@ const App: React.FC = () => {
             const isImg = f.type.startsWith('image/');
             const dur = isImg ? 0 : await getMediaDuration(f);
             
-            // Rejection logic for videos exceeding the 45s limit
             if (!isImg && dur > 45) {
                 setError(`Video "${f.name}" is too long. Maximum allowed duration is 45 seconds.`);
                 continue;
@@ -573,6 +570,32 @@ const App: React.FC = () => {
         setError(null);
     };
 
+    const handleClone = async (s: SavedSlideshow) => {
+        if (!user || !user.email) return;
+        setIsProcessing(true);
+        try {
+            const cloneName = `Copy of ${s.name}`;
+            const newDocRef = await addDoc(collection(db, 'slideshows'), {
+                userId: user.uid,
+                userEmail: user.email,
+                name: cloneName,
+                media: s.media,
+                audio: s.audio,
+                settings: s.settings,
+                totalDuration: s.totalDuration,
+                timestamp: serverTimestamp(),
+                createdAt: serverTimestamp(),
+                collaborators: [],
+                collaboratorEmails: [user.email.toLowerCase()]
+            });
+            setError(`Project cloned as "${cloneName}"!`);
+        } catch (e: any) {
+            setError("Cloning failed: " + e.message);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     const handleDelete = async (s: SavedSlideshow) => {
         if (!user || s.userId !== user.uid) return;
         if (!window.confirm(`Delete "${s.name}"? This cannot be undone.`)) return;
@@ -612,6 +635,7 @@ const App: React.FC = () => {
             
             setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs, collaboratorEmails: updatedEmails });
             setShareEmail('');
+            setError(`Shared with ${normalizedEmail}!`);
         } catch (e: any) { 
             setError("Sharing failed: " + e.message); 
         } finally { 
@@ -648,7 +672,6 @@ const App: React.FC = () => {
         const FADE_TIME = 0.8;
         const DUCK_LEVEL = 0.15;
         
-        // Find if the current point in time is inside a segment that should duck BGM
         const segment = mediaWithTimestamps.find(m => 
             m.type === 'video' && 
             (m as VideoFile).duckBGM && 
@@ -661,7 +684,6 @@ const App: React.FC = () => {
         const timeIn = time - segment.timelineStart;
         const timeOut = segment.timelineEnd - time;
 
-        // Check neighboring segments to determine if we should ramp or stay ducked
         const segIdx = mediaWithTimestamps.indexOf(segment);
         const prevSeg = segIdx > 0 ? mediaWithTimestamps[segIdx - 1] : null;
         const nextSeg = segIdx < mediaWithTimestamps.length - 1 ? mediaWithTimestamps[segIdx + 1] : null;
@@ -671,17 +693,14 @@ const App: React.FC = () => {
 
         let duckFactor = DUCK_LEVEL;
 
-        // Ramp down from 1.0 at segment start IF previous segment wasn't ducking
         if (!prevIsDucking && timeIn < FADE_TIME) {
             const progress = timeIn / FADE_TIME;
             duckFactor = 1.0 - (progress * (1.0 - DUCK_LEVEL));
         }
         
-        // Ramp back up to 1.0 at segment end IF next segment isn't ducking
         if (!nextIsDucking && timeOut < FADE_TIME) {
             const progress = timeOut / FADE_TIME;
             const endRamp = 1.0 - (progress * (1.0 - DUCK_LEVEL));
-            // Ensure we take the deeper ducking if fades overlap (rare but possible)
             duckFactor = Math.max(duckFactor, endRamp);
         }
 
@@ -700,7 +719,7 @@ const App: React.FC = () => {
                 <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center backdrop-blur-sm">
                     <div className="text-center p-8 bg-gray-900/80 rounded-[2rem] border border-gray-800 shadow-2xl">
                         <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-brand-purple mx-auto"></div>
-                        <p className="text-white text-xl mt-6 font-black tracking-tight uppercase">Processing Media...</p>
+                        <p className="text-white text-xl mt-6 font-black tracking-tight uppercase">Processing...</p>
                     </div>
                 </div>
             )}
@@ -714,7 +733,7 @@ const App: React.FC = () => {
                     {user ? (
                         <div className="flex gap-2">
                             <button onClick={handleLogin} className="bg-gray-800 text-white py-2 px-4 rounded-lg text-sm font-bold shadow-sm transition-all hover:bg-gray-700 border border-gray-700">Switch Account</button>
-                            <button onClick={() => signOut(auth)} className="bg-gray-200 text-gray-900 py-2 px-6 rounded-lg text-sm font-bold shadow-sm transition-all hover:bg-300">Logout</button>
+                            <button onClick={() => signOut(auth)} className="bg-gray-200 text-gray-900 py-2 px-6 rounded-lg text-sm font-bold shadow-sm transition-all hover:bg-gray-300">Logout</button>
                         </div>
                     ) : (
                         <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-6 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Sign In</button>
@@ -759,7 +778,6 @@ const App: React.FC = () => {
                                                 </div>
                                             </div>
                                         )}
-                                        {/* Reorganize & Delete Controls */}
                                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
                                             <div className="flex justify-end">
                                                 <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="bg-red-600/90 p-1 rounded-lg hover:bg-red-500 transition-colors"><XIcon className="w-4 h-4 text-white"/></button>
@@ -787,7 +805,6 @@ const App: React.FC = () => {
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
                             <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><SettingsIcon className="w-5 h-5 text-brand-purple"/> 3. Slideshow Settings</h3>
                             <div className="space-y-6">
-                                {/* Slide Duration */}
                                 <div className="space-y-3">
                                     <div className="flex justify-between items-center">
                                         <label className="text-xs text-gray-500 font-black uppercase tracking-widest">Slide Duration (Seconds)</label>
@@ -795,8 +812,6 @@ const App: React.FC = () => {
                                     </div>
                                     <input type="range" min="1" max="45" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
                                 </div>
-                                
-                                {/* Transition Style */}
                                 <div className="space-y-3">
                                     <label className="text-xs text-gray-500 font-black uppercase tracking-widest block">Transition Style</label>
                                     <select 
@@ -812,8 +827,6 @@ const App: React.FC = () => {
                                         <option value="zoom-out">Deep Pull</option>
                                     </select>
                                 </div>
-
-                                {/* Toggles */}
                                 <div className="grid grid-cols-2 gap-4">
                                     <label className="flex items-center gap-3 cursor-pointer group bg-gray-900/20 p-4 rounded-2xl border border-gray-800 hover:border-brand-purple/50 transition-all">
                                         <input type="checkbox" className="w-4 h-4 accent-brand-purple" checked={settings.repeatSlideshow} onChange={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} />
@@ -870,25 +883,27 @@ const App: React.FC = () => {
                                 </button>
                             </div>
                             
-                            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                                 {isFetchingData ? (
                                     <div className="py-12 text-center text-gray-500 uppercase text-[10px] tracking-widest">Fetching Gallery...</div>
                                 ) : allSlideshows.length > 0 ? allSlideshows.map(s => (
-                                    <div key={s.id} className={`bg-gray-900/30 p-5 rounded-[1.5rem] flex justify-between items-center group border transition-all ${currentSlideshowId === s.id ? 'border-brand-purple bg-brand-purple/10' : 'border-gray-800/50 hover:border-gray-600'}`}>
+                                    <div key={s.id} className={`bg-gray-900/30 p-5 rounded-[1.5rem] flex flex-col sm:flex-row justify-between items-start sm:items-center group border transition-all gap-4 ${currentSlideshowId === s.id ? 'border-brand-purple bg-brand-purple/10' : 'border-gray-800/50 hover:border-gray-600'}`}>
                                         <div className="flex-1 min-w-0">
                                             <h4 className="font-black text-sm text-white truncate uppercase tracking-tight">{s.name}</h4>
                                             <div className="flex gap-3 mt-1">
                                                 <p className="text-[9px] text-gray-500 font-bold uppercase">{formatDuration(s.totalDuration || 0)}</p>
                                                 <p className="text-[9px] text-gray-400 font-bold uppercase">• {s.media?.length || 0} Media</p>
-                                                <p className="text-[9px] text-blue-400 font-bold uppercase">• {s.audio?.length || 0} Audio</p>
+                                                {s.userId !== user?.uid && <p className="text-[9px] text-brand-purple font-black uppercase underline">Shared with me</p>}
                                             </div>
                                         </div>
-                                        <div className="flex gap-2 ml-4">
+                                        <div className="flex items-center gap-2 shrink-0">
                                             <button onClick={() => handleLoad(s)} className="text-[9px] bg-white text-black py-2 px-5 rounded-xl font-black uppercase tracking-widest hover:scale-105 transition-transform active:scale-95 shadow-xl">Load</button>
-                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button onClick={() => { setShareSlideshowTarget(s); setIsShareModalOpen(true); }} className="p-2 text-gray-500 hover:text-white"><ShareIcon className="w-4 h-4"/></button>
+                                            
+                                            <div className="flex items-center bg-black/40 rounded-xl border border-gray-800 p-0.5">
+                                                <button title="Clone Project" onClick={() => handleClone(s)} className="p-2 text-gray-400 hover:text-white transition-colors"><DuplicateIcon className="w-4 h-4"/></button>
+                                                <button title="Share Slideshow" onClick={() => { setShareSlideshowTarget(s); setIsShareModalOpen(true); }} className="p-2 text-gray-400 hover:text-white transition-colors"><ShareIcon className="w-4 h-4"/></button>
                                                 {s.userId === user?.uid && (
-                                                    <button onClick={() => handleDelete(s)} className="p-2 text-gray-500 hover:text-red-500"><TrashIcon className="w-4 h-4"/></button>
+                                                    <button title="Delete Project" onClick={() => handleDelete(s)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><TrashIcon className="w-4 h-4"/></button>
                                                 )}
                                             </div>
                                         </div>
@@ -902,6 +917,49 @@ const App: React.FC = () => {
                 </main>
             )}
 
+            {isShareModalOpen && shareSlideshowTarget && (
+                <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 animate-fade-in backdrop-blur-md">
+                    <div className="bg-gray-900 w-full max-w-md rounded-[2.5rem] border border-gray-800 shadow-2xl flex flex-col p-8">
+                        <div className="flex justify-between items-center mb-8">
+                            <div>
+                                <h2 className="text-xl font-black uppercase tracking-tighter">Share Project</h2>
+                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">Project: {shareSlideshowTarget.name}</p>
+                            </div>
+                            <button onClick={() => setIsShareModalOpen(false)} className="text-gray-500 hover:text-white"><XIcon className="w-8 h-8"/></button>
+                        </div>
+                        <div className="space-y-6">
+                            <div className="flex gap-2">
+                                <input 
+                                    value={shareEmail} 
+                                    onChange={e => setShareEmail(e.target.value)} 
+                                    placeholder="email@example.com" 
+                                    className="flex-1 bg-gray-950 border border-gray-800 rounded-2xl px-5 py-4 text-sm font-bold text-white shadow-inner outline-none focus:ring-1 focus:ring-brand-purple" 
+                                />
+                                <button onClick={handleShareSlideshow} className="bg-brand-purple text-white px-5 py-4 rounded-2xl hover:bg-purple-700 active:scale-90 transition-all"><PlusIcon className="w-6 h-6"/></button>
+                            </div>
+                            <div className="max-h-60 overflow-y-auto space-y-3 custom-scrollbar pr-2">
+                                <p className="text-[10px] text-gray-500 font-black uppercase tracking-widest">Collaborators</p>
+                                <div className="bg-gray-800/30 p-4 rounded-2xl border border-gray-700/50 flex justify-between items-center">
+                                    <div className="flex flex-col">
+                                        <span className="text-sm font-black text-white">{shareSlideshowTarget.userEmail || 'Owner'}</span>
+                                        <span className="text-[8px] text-gray-500 font-bold uppercase">Original Creator</span>
+                                    </div>
+                                    <span className="text-[9px] text-brand-purple font-black uppercase tracking-widest bg-brand-purple/10 px-2 py-0.5 rounded-full">Owner</span>
+                                </div>
+                                {shareSlideshowTarget.collaborators?.map(c => (
+                                    <div key={c.email} className="bg-gray-800/30 p-4 rounded-2xl border border-gray-700/50 flex justify-between items-center group">
+                                        <span className="text-sm font-black text-white">{c.email}</span>
+                                        {user?.uid === shareSlideshowTarget.userId && (
+                                            <button onClick={() => removeCollaborator(c.email)} className="text-gray-600 hover:text-red-400 transition-colors"><TrashIcon className="w-4 h-4"/></button>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {isAdvancedEditorOpen && (
                 <div className="fixed inset-0 bg-brand-dark z-[100] flex flex-col p-6 animate-fade-in overflow-hidden">
                     <header className="flex justify-between items-center mb-8 shrink-0">
@@ -913,7 +971,6 @@ const App: React.FC = () => {
                     </header>
 
                     <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 pr-2 pb-20">
-                        {/* Timeline Header - Ruler */}
                         <div className="bg-gray-950/50 rounded-3xl p-6 border border-gray-800/50 shadow-2xl relative">
                             <div className="absolute top-0 left-[180px] right-6 h-6 border-b border-gray-800 flex justify-between px-1">
                                 {Array.from({ length: Math.ceil(totalSlideshowDuration / 5) + 1 }).map((_, i) => (
@@ -922,7 +979,6 @@ const App: React.FC = () => {
                             </div>
 
                             <div className="space-y-6 mt-4">
-                                {/* Visual Tracks */}
                                 <div className="flex gap-4 group">
                                     <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
                                         <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Track 1: Visuals</span>
@@ -940,7 +996,6 @@ const App: React.FC = () => {
                                                     <span className="text-[8px] font-black text-white/40 uppercase whitespace-nowrap">{m.type} #{idx+1}</span>
                                                     <span className="text-[8px] font-bold text-white/20 whitespace-nowrap">{formatDuration(m.timelineEnd - m.timelineStart)}</span>
                                                 </div>
-                                                {/* Advanced Controls per Clip */}
                                                 {m.type === 'video' && (
                                                     <div className="absolute bottom-1 left-1 flex gap-1 opacity-0 group-hover/clip:opacity-100 transition-opacity pointer-events-auto">
                                                         <button 
@@ -970,7 +1025,6 @@ const App: React.FC = () => {
                                     </div>
                                 </div>
 
-                                {/* Audio Tracks */}
                                 <div className="flex gap-4">
                                     <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
                                         <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Track 2: Audio</span>
@@ -993,7 +1047,6 @@ const App: React.FC = () => {
                                                     <span className="text-[8px] font-bold text-blue-500/60 ml-auto whitespace-nowrap">{formatDuration(a.duration)}</span>
                                                 </div>
 
-                                                {/* Audio Control Panel */}
                                                 <div className="flex gap-4 mt-2 mb-4 bg-gray-900/40 p-3 rounded-xl border border-gray-800/30">
                                                     <div className="space-y-1 flex-1">
                                                         <label className="text-[7px] text-gray-500 font-black uppercase tracking-widest">Start Time Offset ({a.startTime}s)</label>
@@ -1078,7 +1131,6 @@ const App: React.FC = () => {
                                         onLoadedMetadata={e => {
                                             const video = e.target as HTMLVideoElement;
                                             video.volume = (mediaWithTimestamps[currentSlide] as VideoFile).volume || 1.0;
-                                            // Sync current playback time if resumed or scrubbed
                                             const offset = elapsedTime - mediaWithTimestamps[currentSlide].timelineStart;
                                             if (offset > 0) video.currentTime = offset;
                                         }}
@@ -1086,7 +1138,6 @@ const App: React.FC = () => {
                                 )}
                             </div>
                             
-                            {/* AI Caption Overlay */}
                             {(settings.showCaptions && ((mediaWithTimestamps[currentSlide] as any).caption || (mediaWithTimestamps[currentSlide] as any).aiCaption)) && (
                                 <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-black/30 backdrop-blur-lg px-10 py-4 rounded-xl border border-white/5 text-center w-[92%] max-w-6xl animate-fade-in shadow-2xl z-50">
                                     <p className="text-white text-lg md:text-xl font-semibold tracking-wide leading-relaxed drop-shadow-md italic">
@@ -1095,19 +1146,16 @@ const App: React.FC = () => {
                                 </div>
                             )}
 
-                            {/* Progress Indicator */}
                             <div className="absolute bottom-4 left-4 right-4 h-1 bg-white/10 rounded-full overflow-hidden">
                                 <div className="h-full bg-brand-purple transition-all" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }}/>
                             </div>
                         </div>
                     )}
                     
-                    {/* Synchronized Multi-Track Audio Engine with Intelligent Ducking */}
-                    {audioFiles.map((a, idx) => {
+                    {audioFiles.map((a) => {
                         const isActive = elapsedTime >= a.startTime && elapsedTime < (a.startTime + a.duration);
                         const currentInClipTime = elapsedTime - a.startTime;
                         
-                        // Track-level Volume (Fade In / Fade Out)
                         let vol = 1.0;
                         if (isActive) {
                             if (currentInClipTime < a.fadeIn) {
@@ -1116,7 +1164,6 @@ const App: React.FC = () => {
                                 vol = (a.duration - currentInClipTime) / a.fadeOut;
                             }
                             
-                            // Gradual Audio Ducking Logic
                             const duckFactor = getDuckingFactor(elapsedTime);
                             vol *= duckFactor;
                         }
@@ -1147,7 +1194,6 @@ const App: React.FC = () => {
     );
 };
 
-// Internal component for controlled Audio playback
 const AudioPlayer: React.FC<{ src: string, active: boolean, volume: number, startTimeInFile: number }> = ({ src, active, volume, startTimeInFile }) => {
     const audioRef = useRef<HTMLAudioElement>(null);
     const [hasStarted, setHasStarted] = useState(false);
@@ -1160,7 +1206,6 @@ const AudioPlayer: React.FC<{ src: string, active: boolean, volume: number, star
                 audioRef.current.play().catch(e => console.error("Audio block", e));
                 setHasStarted(true);
             }
-            // Continuous volume updates for smooth ducking ramps
             audioRef.current.volume = Math.max(0, Math.min(1, volume));
         } else {
             audioRef.current.pause();
