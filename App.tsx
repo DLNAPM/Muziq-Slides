@@ -255,6 +255,9 @@ const App: React.FC = () => {
         setSlideshowName('');
         setCurrentSlideshowId(null);
         setError(null);
+        setCurrentSlide(0);
+        setCurrentAudioIndex(0);
+        setIsPlaying(false);
     }, []);
 
     const userPermission = useMemo(() => {
@@ -519,7 +522,11 @@ const App: React.FC = () => {
     };
 
     const handleLoad = (s: SavedSlideshow) => {
-        setMediaFiles(s.media.map(m => ({ 
+        setIsPlaying(false);
+        setCurrentSlide(0);
+        setCurrentAudioIndex(0);
+
+        setMediaFiles((s.media || []).map(m => ({ 
             id: m.id, 
             type: m.type as any, 
             previewUrl: m.url, 
@@ -529,7 +536,8 @@ const App: React.FC = () => {
             duration: m.duration || 0, 
             serverData: { url: m.url, storagePath: m.storagePath } 
         })));
-        setAudioFiles(s.audio.map((a, i) => ({ 
+
+        setAudioFiles((s.audio || []).map((a, i) => ({ 
             id: `l-${i}`, 
             name: a.name, 
             duration: a.duration || 0, 
@@ -538,8 +546,9 @@ const App: React.FC = () => {
             fadeOut: a.fadeOut || 1, 
             serverData: { url: a.url, storagePath: a.storagePath } 
         })));
-        setSettings(s.settings); 
-        setSlideshowName(s.name); 
+
+        if (s.settings) setSettings(s.settings); 
+        if (s.name) setSlideshowName(s.name); 
         setCurrentSlideshowId(s.id);
         setError(null);
     };
@@ -793,7 +802,11 @@ const App: React.FC = () => {
                                     <div key={s.id} className={`bg-gray-900/30 p-5 rounded-[1.5rem] flex justify-between items-center group border transition-all ${currentSlideshowId === s.id ? 'border-brand-purple bg-brand-purple/10' : 'border-gray-800/50 hover:border-gray-600'}`}>
                                         <div className="flex-1 min-w-0">
                                             <h4 className="font-black text-sm text-white truncate uppercase tracking-tight">{s.name}</h4>
-                                            <p className="text-[9px] text-gray-500 font-bold uppercase">{formatDuration(s.totalDuration || 0)} • {s.media?.length || 0} Assets</p>
+                                            <div className="flex gap-3 mt-1">
+                                                <p className="text-[9px] text-gray-500 font-bold uppercase">{formatDuration(s.totalDuration || 0)}</p>
+                                                <p className="text-[9px] text-gray-400 font-bold uppercase">• {s.media?.length || 0} Media</p>
+                                                <p className="text-[9px] text-blue-400 font-bold uppercase">• {s.audio?.length || 0} Audio</p>
+                                            </div>
                                         </div>
                                         <div className="flex gap-2 ml-4">
                                             <button onClick={() => handleLoad(s)} className="text-[9px] bg-white text-black py-2 px-5 rounded-xl font-black uppercase tracking-widest hover:scale-105 transition-transform active:scale-95 shadow-xl">Load</button>
