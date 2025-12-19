@@ -120,7 +120,9 @@ interface SavedSlideshow {
     // audio can be a single object (legacy) or an array
     audio: SerializedAudioFile | SerializedAudioFile[] | null;
     settings: SlideshowSettings;
-    timestamp?: Timestamp;
+    timestamp?: Timestamp; // Last updated
+    createdAt?: Timestamp; // Original creation date
+    totalDuration?: number; // Cached duration in seconds
     // Fields for sharing functionality
     ownerInfo?: {
         displayName: string | null;
@@ -186,6 +188,14 @@ const getMediaDuration = (file: File): Promise<number> => {
             }
         }
     });
+};
+
+const formatDuration = (seconds: number) => {
+    if (!seconds || isNaN(seconds)) return '0s';
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    if (m === 0) return `${s}s`;
+    return `${m}m ${s}s`;
 };
 
 // --- CONSTANTS ---
@@ -482,7 +492,12 @@ const App: React.FC = () => {
     const allSlideshows = useMemo(() => {
         const combined = [...ownedSlideshows, ...sharedSlideshows];
         const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
-        return unique.sort((a, b) => (b.timestamp?.toMillis() ?? 0) - (a.timestamp?.toMillis() ?? 0));
+        // Sort by createdAt descending (Created not Updated). Fallback to timestamp for legacy docs.
+        return unique.sort((a, b) => {
+            const timeA = a.createdAt?.toMillis() ?? a.timestamp?.toMillis() ?? 0;
+            const timeB = b.createdAt?.toMillis() ?? b.timestamp?.toMillis() ?? 0;
+            return timeB - timeA;
+        });
     }, [ownedSlideshows, sharedSlideshows]);
 
     const currentSlideshowObj = useMemo(() => {
@@ -1047,12 +1062,19 @@ const App: React.FC = () => {
                 })
             );
 
+            // Calculate current total duration for caching in doc
+            const currentTotalDuration = mediaFiles.reduce((acc, curr) => {
+                if (curr.type === 'image') return acc + settings.interval;
+                return acc + (curr.duration || 0);
+            }, 0);
+
             if (currentSlideshowId) { // Update existing slideshow
                 const updateData = {
                     name: slideshowName.trim(),
                     media: serializedMedia,
                     audio: serializedAudio,
                     settings,
+                    totalDuration: currentTotalDuration,
                     timestamp: serverTimestamp() as Timestamp,
                 };
                 // Ensure we are updating the existing doc, preserving sharedWith and ownerInfo
@@ -1064,7 +1086,9 @@ const App: React.FC = () => {
                     media: serializedMedia,
                     audio: serializedAudio,
                     settings,
+                    totalDuration: currentTotalDuration,
                     timestamp: serverTimestamp() as Timestamp,
+                    createdAt: serverTimestamp() as Timestamp,
                     ownerInfo: {
                         displayName: user.displayName || 'User', // Fallback to avoid undefined
                         photoURL: user.photoURL || '',       // Fallback to avoid undefined
@@ -1730,9 +1754,14 @@ const App: React.FC = () => {
                                                                         {roleLabel}
                                                                     </span>
                                                                 </p>
-                                                                {s.userId !== user.uid && s.ownerInfo?.displayName && (
-                                                                    <p className="text-xs text-gray-400 truncate">By {s.ownerInfo.displayName}</p>
-                                                                )}
+                                                                <div className="flex items-center gap-2 text-xs text-gray-400">
+                                                                    {s.userId !== user.uid && s.ownerInfo?.displayName && (
+                                                                        <span className="truncate">By {s.ownerInfo.displayName}</span>
+                                                                    )}
+                                                                    <span className="bg-gray-800 px-1.5 rounded-sm font-medium text-gray-300">
+                                                                        {formatDuration(s.totalDuration || 0)}
+                                                                    </span>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                         <div className="flex gap-2 flex-shrink-0">
