@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import firebase from 'firebase/compat/app';
@@ -40,12 +39,18 @@ const db = getFirestore(app as any);
 const storage = getStorage(app as any);
 
 // --- TYPE DEFINITIONS ---
+interface Collaborator {
+    email: string;
+    role: 'viewer' | 'editor';
+}
+
 interface ImageFile {
   id: string;
   type: 'image';
   file?: File;
   previewUrl: string;
   caption: string;
+  aiCaption?: string;
   rotation: number;
   serverData?: { url: string; storagePath: string; };
 }
@@ -89,6 +94,7 @@ interface SerializedMediaFile {
     url: string; 
     storagePath: string;
     caption?: string;
+    aiCaption?: string;
     rotation?: number;
     duration?: number;
 }
@@ -106,6 +112,7 @@ interface SerializedAudioFile {
 interface SavedSlideshow {
     id: string; 
     userId: string;
+    userEmail?: string;
     name: string;
     media: SerializedMediaFile[];
     audio: SerializedAudioFile[];
@@ -113,7 +120,7 @@ interface SavedSlideshow {
     timestamp?: Timestamp; 
     createdAt?: Timestamp; 
     totalDuration?: number;
-    sharedWith?: string[];
+    collaborators?: Collaborator[];
 }
 
 // --- HELPER FUNCTIONS ---
@@ -149,15 +156,36 @@ const getMillis = (val: any) => {
     return 0;
 };
 
+const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+};
+
+const urlToBase64 = async (url: string): Promise<string> => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+};
+
 // --- ICON COMPONENTS ---
 const UploadIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>;
 const MusicIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-13c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" /></svg>;
 const PlayIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const XIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
 const PlusIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>;
-// Fix: Corrected the component prop destructuring and typing for TrashIcon (previously line 158)
 const TrashIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>;
 const AdjustmentIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>;
+const ShareIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>;
+const SparklesIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>;
 const SettingsIcon = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -179,12 +207,18 @@ const App: React.FC = () => {
     const [slideshowName, setSlideshowName] = useState('');
     const [currentSlideshowId, setCurrentSlideshowId] = useState<string | null>(null);
     const [ownedSlideshows, setOwnedSlideshows] = useState<SavedSlideshow[]>([]);
-    const [sharedSlideshows, setSharedSlideshows] = useState<SavedSlideshow[]>([]);
+    const [sharedWithMeSlideshows, setSharedWithMeSlideshows] = useState<SavedSlideshow[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isAdvancedEditorOpen, setIsAdvancedEditorOpen] = useState(false);
+    
+    // Sharing State
+    const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+    const [shareSlideshowTarget, setShareSlideshowTarget] = useState<SavedSlideshow | null>(null);
+    const [shareEmail, setShareEmail] = useState('');
+    const [shareRole, setShareRole] = useState<'viewer' | 'editor'>('viewer');
 
     const audioRef = useRef<HTMLAudioElement>(null);
     const videoPreviewRef = useRef<HTMLVideoElement>(null);
@@ -202,6 +236,20 @@ const App: React.FC = () => {
         if (currentAudio.file) return URL.createObjectURL(currentAudio.file);
         return null;
     }, [audioFiles, currentAudioIndex]);
+
+    const userPermission = useMemo(() => {
+        if (!user || !currentSlideshowId) return 'owner';
+        const found = ownedSlideshows.find(s => s.id === currentSlideshowId);
+        if (found) return 'owner';
+        const shared = sharedWithMeSlideshows.find(s => s.id === currentSlideshowId);
+        if (shared) {
+            const myCollab = shared.collaborators?.find(c => c.email === user.email);
+            return myCollab?.role || 'viewer';
+        }
+        return 'owner';
+    }, [user, currentSlideshowId, ownedSlideshows, sharedWithMeSlideshows]);
+
+    const canEdit = userPermission === 'owner' || userPermission === 'editor';
 
     // Progression Engine: Advancement for images
     useEffect(() => {
@@ -226,6 +274,45 @@ const App: React.FC = () => {
             setIsPlaying(false);
         }
     }, [currentSlide, mediaFiles.length, settings.repeatSlideshow]);
+
+    // AI Smart Captions Generator
+    const generateSmartCaptions = async () => {
+        if (!settings.smartCaptionsEnabled) return;
+        setIsProcessing(true);
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+        
+        try {
+            const updatedMedia = await Promise.all(mediaFiles.map(async (m) => {
+                if (m.type === 'image' && !m.caption && !m.aiCaption) {
+                    let base64Data = '';
+                    if (m.file) {
+                        base64Data = await fileToBase64(m.file);
+                    } else if (m.serverData) {
+                        base64Data = await urlToBase64(m.serverData.url);
+                    }
+
+                    if (base64Data) {
+                        const response = await ai.models.generateContent({
+                            model: 'gemini-3-flash-preview',
+                            contents: [{
+                                parts: [
+                                    { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
+                                    { text: "Describe this image in a short, poetic caption for a family slideshow. Max 10 words. Don't use quotes." }
+                                ]
+                            }]
+                        });
+                        return { ...m, aiCaption: response.text?.trim() };
+                    }
+                }
+                return m;
+            }));
+            setMediaFiles(updatedMedia as MediaFile[]);
+        } catch (e) {
+            console.error("AI Generation Error", e);
+        } finally {
+            setIsProcessing(false);
+        }
+    };
 
     // Audio Ducking Logic
     useEffect(() => {
@@ -253,23 +340,37 @@ const App: React.FC = () => {
             setOwnedSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
         });
 
-        const qShared = query(collection(db, "slideshows"), where("sharedWith", "array-contains", user.email || ""));
-        const unsubShared = onSnapshot(qShared, (snap) => {
-            setSharedSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
+        // Use array-contains for sharing with email
+        const qShared = query(collection(db, "slideshows"), where("collaborators", "array-contains", { email: user.email, role: 'viewer' }));
+        const unsubSharedViewer = onSnapshot(qShared, (snap) => {
+            setSharedWithMeSlideshows(p => {
+                const updated = snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow));
+                const filtered = p.filter(x => !snap.docs.map(d => d.id).includes(x.id));
+                return [...filtered, ...updated];
+            });
         });
 
-        return () => { unsubOwned(); unsubShared(); };
+        const qSharedEditor = query(collection(db, "slideshows"), where("collaborators", "array-contains", { email: user.email, role: 'editor' }));
+        const unsubSharedEditor = onSnapshot(qSharedEditor, (snap) => {
+             setSharedWithMeSlideshows(p => {
+                const updated = snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow));
+                const filtered = p.filter(x => !snap.docs.map(d => d.id).includes(x.id));
+                return [...filtered, ...updated];
+            });
+        });
+
+        return () => { unsubOwned(); unsubSharedViewer(); unsubSharedEditor(); };
     }, [user]);
 
     const allSlideshows = useMemo(() => {
-        const combined = [...ownedSlideshows, ...sharedSlideshows];
+        const combined = [...ownedSlideshows, ...sharedWithMeSlideshows];
         const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
         return unique.sort((a, b) => {
             const tA = getMillis(a.createdAt) || getMillis(a.timestamp) || 0;
             const tB = getMillis(b.createdAt) || getMillis(b.timestamp) || 0;
             return tB - tA;
         });
-    }, [ownedSlideshows, sharedSlideshows]);
+    }, [ownedSlideshows, sharedWithMeSlideshows]);
 
     const handleLogin = async () => {
         const provider = new firebase.auth.GoogleAuthProvider();
@@ -306,12 +407,12 @@ const App: React.FC = () => {
     };
 
     const handleSave = async () => {
-        if (!user || !mediaFiles.length) return;
+        if (!user || !mediaFiles.length || !canEdit) return;
         setIsSaving(true);
         try {
             const id = currentSlideshowId || doc(collection(db, 'slideshows')).id;
             const serMedia = await Promise.all(mediaFiles.map(async m => {
-                const b: any = { id: m.id, type: m.type, name: m.id, rotation: m.rotation, caption: (m as any).caption, duration: (m as any).duration };
+                const b: any = { id: m.id, type: m.type, name: m.id, rotation: m.rotation, caption: (m as any).caption, aiCaption: (m as any).aiCaption, duration: (m as any).duration };
                 if (!m.serverData && m.file) {
                     const path = `users/${user.uid}/${id}/${m.id}`;
                     await uploadBytes(ref(storage, path), m.file);
@@ -335,17 +436,27 @@ const App: React.FC = () => {
                 return b;
             }));
             
-            const existing = ownedSlideshows.find(s => s.id === id);
+            const existing = ownedSlideshows.find(s => s.id === id) || sharedWithMeSlideshows.find(s => s.id === id);
+            
             await setDoc(doc(db, 'slideshows', id), {
-                userId: user.uid, name: slideshowName || 'Untitled', media: serMedia, audio: serAudio,
-                settings, totalDuration: totalSlideshowDuration, timestamp: serverTimestamp(), createdAt: existing?.createdAt || serverTimestamp()
+                userId: existing?.userId || user.uid,
+                userEmail: existing?.userEmail || user.email,
+                name: slideshowName || 'Untitled', 
+                media: serMedia, 
+                audio: serAudio,
+                settings, 
+                totalDuration: totalSlideshowDuration, 
+                timestamp: serverTimestamp(), 
+                createdAt: existing?.createdAt || serverTimestamp(),
+                collaborators: existing?.collaborators || []
             }, { merge: true });
+            
             setCurrentSlideshowId(id);
         } catch (e) { setError("Save failed"); } finally { setIsSaving(false); }
     };
 
     const handleLoad = (s: SavedSlideshow) => {
-        setMediaFiles(s.media.map(m => ({ id: m.id, type: m.type as any, previewUrl: m.url, rotation: m.rotation || 0, caption: m.caption || '', duration: m.duration || 0, serverData: { url: m.url, storagePath: m.storagePath } })));
+        setMediaFiles(s.media.map(m => ({ id: m.id, type: m.type as any, previewUrl: m.url, rotation: m.rotation || 0, caption: m.caption || '', aiCaption: m.aiCaption || '', duration: m.duration || 0, serverData: { url: m.url, storagePath: m.storagePath } })));
         setAudioFiles(s.audio.map((a, i) => ({ id: `l-${i}`, name: a.name, duration: a.duration || 0, startTime: a.startTime || 0, fadeIn: a.fadeIn || 1, fadeOut: a.fadeOut || 1, serverData: { url: a.url, storagePath: a.storagePath } })));
         setSettings(s.settings); setSlideshowName(s.name); setCurrentSlideshowId(s.id);
     };
@@ -360,11 +471,35 @@ const App: React.FC = () => {
         } catch (e) { setError("Delete failed"); } finally { setIsProcessing(false); }
     };
 
-    const startPlayback = () => {
+    const startPlayback = async () => {
         if (mediaFiles.length === 0) return;
+        if (settings.smartCaptionsEnabled) {
+            await generateSmartCaptions();
+        }
         setCurrentSlide(0);
         setCurrentAudioIndex(0);
         setIsPlaying(true);
+    };
+
+    const handleShareSlideshow = async () => {
+        if (!shareSlideshowTarget || !shareEmail) return;
+        setIsProcessing(true);
+        try {
+            const updatedCollabs = [...(shareSlideshowTarget.collaborators || []), { email: shareEmail, role: shareRole }];
+            await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { collaborators: updatedCollabs }, { merge: true });
+            setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs });
+            setShareEmail('');
+        } catch (e) { setError("Share failed"); } finally { setIsProcessing(false); }
+    };
+
+    const removeCollaborator = async (email: string) => {
+        if (!shareSlideshowTarget) return;
+        setIsProcessing(true);
+        try {
+            const updatedCollabs = (shareSlideshowTarget.collaborators || []).filter(c => c.email !== email);
+            await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { collaborators: updatedCollabs }, { merge: true });
+            setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs });
+        } catch (e) { setError("Remove failed"); } finally { setIsProcessing(false); }
     };
 
     if (isLoading) return (
@@ -386,7 +521,8 @@ const App: React.FC = () => {
 
             <header className={`p-4 flex justify-between items-center border-b sticky top-0 z-40 backdrop-blur-md ${user ? 'bg-gray-900/50 border-gray-800' : 'bg-white/90 border-gray-100'}`}>
                 <h1 className="text-2xl font-bold tracking-tight"><span className="text-brand-purple">Muziq</span> Slides</h1>
-                <div className="flex gap-4">
+                <div className="flex gap-4 items-center">
+                    {user && <span className="text-xs text-gray-400 hidden sm:inline">{user.email}</span>}
                     {user ? <button onClick={() => auth.signOut()} className="bg-gray-200 text-gray-900 py-2 px-4 rounded-lg text-sm font-bold shadow-sm">Logout</button> : <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-4 rounded-lg text-sm font-bold shadow-md">Sign In</button>}
                 </div>
             </header>
@@ -397,10 +533,37 @@ const App: React.FC = () => {
                     <p className="text-xl text-gray-600 mb-10 max-w-2xl mx-auto">Create beautiful photo slideshows with your favorite music. Perfect for Roku or Amazon Fire TV screensavers.</p>
                     <button onClick={handleLogin} className="bg-brand-purple text-white py-4 px-12 rounded-full text-lg font-bold shadow-xl hover:scale-105 transition-transform">Get Started for Free</button>
                     
-                    <div className="mt-20 grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm"><UploadIcon className="w-10 h-10 mx-auto mb-4 text-brand-purple"/><h4 className="font-bold mb-2">Upload Media</h4><p className="text-sm text-gray-500">Up to 20 photos and videos in one sequence.</p></div>
-                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm"><MusicIcon className="w-10 h-10 mx-auto mb-4 text-brand-purple"/><h4 className="font-bold mb-2">Add Background Music</h4><p className="text-sm text-gray-500">Professional timeline for exact audio timing.</p></div>
-                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm"><AdjustmentIcon className="w-10 h-10 mx-auto mb-4 text-brand-purple"/><h4 className="font-bold mb-2">Smart Audio</h4><p className="text-sm text-gray-500">Auto-ducking background music for video clips.</p></div>
+                    <div className="mt-20 grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto text-left">
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                            <UploadIcon className="w-10 h-10 mb-4 text-brand-purple"/>
+                            <h4 className="font-bold text-lg mb-2">Upload Media</h4>
+                            <p className="text-sm text-gray-500 leading-relaxed">Combine up to 20 photos and high-quality video clips into a single professional sequence.</p>
+                        </div>
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                            <MusicIcon className="w-10 h-10 mb-4 text-brand-purple"/>
+                            <h4 className="font-bold text-lg mb-2">Background Music</h4>
+                            <p className="text-sm text-gray-500 leading-relaxed">Add multiple audio tracks with a professional timeline editor for precise start offsets and fades.</p>
+                        </div>
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                            <AdjustmentIcon className="w-10 h-10 mb-4 text-brand-purple"/>
+                            <h4 className="font-bold text-lg mb-2">Smart Audio Ducking</h4>
+                            <p className="text-sm text-gray-500 leading-relaxed">The app automatically lowers background music volume when a video clip with sound is playing.</p>
+                        </div>
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                            <SparklesIcon className="w-10 h-10 mb-4 text-brand-purple"/>
+                            <h4 className="font-bold text-lg mb-2">AI Smart Captions</h4>
+                            <p className="text-sm text-gray-500 leading-relaxed">Let Gemini AI analyze your photos and generate beautiful, poetic captions automatically.</p>
+                        </div>
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                            <ShareIcon className="w-10 h-10 mb-4 text-brand-purple"/>
+                            <h4 className="font-bold text-lg mb-2">Collaborative Sharing</h4>
+                            <p className="text-sm text-gray-500 leading-relaxed">Invite family and friends to view or edit your slideshows with robust permission controls.</p>
+                        </div>
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                            <SettingsIcon className="w-10 h-10 mb-4 text-brand-purple"/>
+                            <h4 className="font-bold text-lg mb-2">Cinematic Transitions</h4>
+                            <p className="text-sm text-gray-500 leading-relaxed">Choose from multiple transition styles including Ken Burns, cross-fades, and zooms for a high-end look.</p>
+                        </div>
                     </div>
                 </main>
             ) : (
@@ -515,13 +678,25 @@ const App: React.FC = () => {
                             <h3 className="text-lg font-bold mb-4 text-white">5. Save & Manage</h3>
                             <div className="flex gap-2 mb-6">
                                 <input value={slideshowName} onChange={e => setSlideshowName(e.target.value)} placeholder="Slideshow Name" className="flex-1 bg-gray-700/50 rounded-xl px-4 py-2 border border-gray-600/50 outline-none focus:ring-1 focus:ring-brand-purple placeholder:text-gray-500" />
-                                <button onClick={handleSave} disabled={isSaving} className="bg-brand-purple hover:bg-purple-700 py-2 px-8 rounded-xl font-bold disabled:opacity-50 shadow-lg shadow-brand-purple/20 transition-all">Save</button>
+                                <button 
+                                    onClick={handleSave} 
+                                    disabled={isSaving || !canEdit} 
+                                    className={`py-2 px-8 rounded-xl font-bold transition-all shadow-lg ${canEdit ? 'bg-brand-purple hover:bg-purple-700 shadow-brand-purple/20' : 'bg-gray-600 cursor-not-allowed opacity-50'}`}>
+                                    {canEdit ? 'Save' : 'View Only'}
+                                </button>
                             </div>
                             <div className="space-y-3 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
                                 {allSlideshows.length > 0 ? allSlideshows.map(s => (
                                     <div key={s.id} className="bg-gray-700/20 p-4 rounded-2xl flex justify-between items-center group border border-gray-700/30 hover:border-gray-600/50 transition-colors">
                                         <div className="flex-1 min-w-0">
-                                            <h4 className="font-bold text-sm text-white truncate">{s.name}</h4>
+                                            <div className="flex items-center gap-2">
+                                                <h4 className="font-bold text-sm text-white truncate">{s.name}</h4>
+                                                {s.userId === user?.uid ? (
+                                                    <span className="text-[8px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/30 uppercase font-black">Owner</span>
+                                                ) : (
+                                                    <span className="text-[8px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 uppercase font-black">{s.collaborators?.find(c => c.email === user?.email)?.role || 'Viewer'}</span>
+                                                )}
+                                            </div>
                                             <div className="flex gap-2 mt-0.5">
                                                 <p className="text-[10px] text-gray-500">Duration: {formatDuration(s.totalDuration || 0)}</p>
                                                 <p className="text-[10px] text-brand-purple/70">• {s.media?.filter(m => m.type === 'video').length || 0} Videos</p>
@@ -530,6 +705,9 @@ const App: React.FC = () => {
                                         </div>
                                         <div className="flex gap-2 ml-4">
                                             <button onClick={() => handleLoad(s)} className="text-[10px] bg-brand-purple/10 text-brand-purple border border-brand-purple/20 py-1.5 px-4 rounded-lg font-bold hover:bg-brand-purple/20 transition-all">Load</button>
+                                            <button 
+                                                onClick={() => { setShareSlideshowTarget(s); setIsShareModalOpen(true); }}
+                                                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-600/50 transition-all opacity-0 group-hover:opacity-100"><ShareIcon className="w-4 h-4"/></button>
                                             {s.userId === user?.uid && (
                                                 <button onClick={() => handleDelete(s)} className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-400/10 opacity-0 group-hover:opacity-100 transition-all"><TrashIcon className="w-4 h-4"/></button>
                                             )}
@@ -540,6 +718,62 @@ const App: React.FC = () => {
                         </section>
                     </div>
                 </main>
+            )}
+
+            {/* Share Modal */}
+            {isShareModalOpen && shareSlideshowTarget && (
+                <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 animate-fade-in backdrop-blur-md">
+                    <div className="bg-gray-900 w-full max-w-md rounded-3xl border border-gray-800 shadow-2xl overflow-hidden flex flex-col">
+                        <div className="p-6 border-b border-gray-800 flex justify-between items-center">
+                            <h2 className="text-xl font-bold flex items-center gap-2"><ShareIcon className="w-6 h-6 text-brand-purple"/> Share Slideshow</h2>
+                            <button onClick={() => setIsShareModalOpen(false)}><XIcon className="w-6 h-6 text-gray-500"/></button>
+                        </div>
+                        <div className="p-6 space-y-6">
+                            <div className="space-y-2">
+                                <label className="text-xs text-gray-500 font-bold uppercase tracking-wider">Add Collaborator</label>
+                                <div className="flex gap-2">
+                                    <input 
+                                        value={shareEmail} 
+                                        onChange={e => setShareEmail(e.target.value)} 
+                                        placeholder="User Email" 
+                                        className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-brand-purple" 
+                                    />
+                                    <select 
+                                        value={shareRole} 
+                                        onChange={e => setShareRole(e.target.value as any)}
+                                        className="bg-gray-800 border border-gray-700 rounded-xl px-2 py-2 text-xs outline-none focus:ring-1 focus:ring-brand-purple"
+                                    >
+                                        <option value="viewer">Viewer</option>
+                                        <option value="editor">Editor</option>
+                                    </select>
+                                    <button onClick={handleShareSlideshow} className="bg-brand-purple px-4 py-2 rounded-xl"><PlusIcon className="w-5 h-5"/></button>
+                                </div>
+                            </div>
+                            <div className="space-y-3">
+                                <label className="text-xs text-gray-500 font-bold uppercase tracking-wider">Access List</label>
+                                <div className="max-h-48 overflow-y-auto space-y-2 pr-2">
+                                    <div className="flex justify-between items-center bg-gray-800/50 p-3 rounded-xl border border-gray-700/50">
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-medium text-white truncate">{shareSlideshowTarget.userEmail || 'Owner'}</p>
+                                            <p className="text-[10px] text-gray-500">Owner</p>
+                                        </div>
+                                    </div>
+                                    {shareSlideshowTarget.collaborators?.map(c => (
+                                        <div key={c.email} className="flex justify-between items-center bg-gray-800/50 p-3 rounded-xl border border-gray-700/50 group">
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-white truncate">{c.email}</p>
+                                                <p className="text-[10px] text-brand-purple capitalize font-bold">{c.role}</p>
+                                            </div>
+                                            {user?.uid === shareSlideshowTarget.userId && (
+                                                <button onClick={() => removeCollaborator(c.email)} className="text-red-400 opacity-0 group-hover:opacity-100"><TrashIcon className="w-4 h-4"/></button>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {isAdvancedEditorOpen && (
@@ -614,6 +848,18 @@ const App: React.FC = () => {
                                     />
                                 )}
                             </div>
+                            
+                            {/* Caption Overlay */}
+                            {((mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption) ? (
+                                <div className="absolute bottom-20 left-1/2 -translate-x-1/2 max-w-2xl w-[90%] bg-black/40 backdrop-blur-md border border-white/10 p-6 rounded-3xl animate-fade-in text-center shadow-2xl">
+                                    <p className="text-white text-xl md:text-2xl font-medium tracking-tight leading-relaxed italic">
+                                        {(mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption}
+                                    </p>
+                                    {(mediaFiles[currentSlide] as any).aiCaption && !(mediaFiles[currentSlide] as any).caption && (
+                                        <span className="block mt-2 text-[8px] text-white/30 uppercase tracking-[0.2em] font-black">AI Generated Caption</span>
+                                    )}
+                                </div>
+                            ) : null}
                         </div>
                     )}
                     {audioSrc && (
