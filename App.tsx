@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp } from 'firebase/app';
@@ -217,6 +218,8 @@ const SettingsIcon = ({ className }: { className?: string }) => (
 const ChevronLeftIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>;
 const ChevronRightIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>;
 const BeakerIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.673.337a4 4 0 01-2.506.326l-1.741-.348a2 2 0 11.774-3.925l1.74.348a6 6 0 003.759-.488l.673-.337a8 8 0 015.147-.689l2.387.477a4 4 0 012.988 4.766l-1.054 5.27a2 2 0 01-3.126 1.264l-2.383-1.588a4 4 0 00-4.431 0l-2.383 1.588a2 2 0 01-3.126-1.264l1.054-5.27a4 4 0 00-.747-3.411L3.834 11a2 2 0 011.264-3.126l5.27-1.054a4 4 0 003.411-.747l2.126-2.126a2 2 0 013.126 1.264l1.054 5.27a4 4 0 00.747 3.411l2.126 2.126a2 2 0 01.126 2.701z" /></svg>;
+const UsersIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>;
+const FilmIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>;
 
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
@@ -280,7 +283,6 @@ const App: React.FC = () => {
         let runningStart = 0;
         let changed = false;
         
-        // Map over existing tracks to calculate managed positions
         const recalculated = audioFiles.map((track, i) => {
             const interval = settings.autoFadeInterval;
             let targetStart = 0;
@@ -293,7 +295,6 @@ const App: React.FC = () => {
                 targetFadeOut = audioFiles.length > 1 ? (interval || 0.5) : 1;
                 runningStart = track.duration;
             } else {
-                // Crossfade overlap: start = previous_end - overlap
                 targetStart = Math.max(0, runningStart - interval);
                 targetFadeIn = interval || 0.5;
                 targetFadeOut = (i === audioFiles.length - 1) ? 1 : (interval || 0.5);
@@ -801,10 +802,57 @@ const App: React.FC = () => {
             </header>
 
             {!user ? (
-                <main className="animate-fade-in text-center py-20 px-4">
-                    <h2 className="text-5xl font-extrabold mb-6 leading-tight">Turn Memories into <br/><span className="text-brand-purple">Masterpieces</span></h2>
-                    <p className="text-xl text-gray-600 mb-10 max-w-2xl mx-auto font-medium">Create beautiful photo slideshows with your favorite music. Perfect for Roku or Amazon Fire TV screensavers.</p>
-                    <button onClick={handleLogin} className="bg-brand-purple text-white py-4 px-12 rounded-full text-lg font-bold shadow-xl hover:scale-105 transition-transform active:scale-95">Get Started</button>
+                <main className="animate-fade-in text-center pt-20 pb-32 px-4">
+                    <div className="max-w-4xl mx-auto mb-20">
+                        <h2 className="text-6xl font-extrabold mb-6 leading-tight tracking-tighter">Turn Memories into <br/><span className="text-brand-purple">Masterpieces</span></h2>
+                        <p className="text-xl text-gray-600 mb-10 font-medium">Create beautiful photo slideshows with your favorite music. Perfect for Roku or Amazon Fire TV screensavers.</p>
+                        <button onClick={handleLogin} className="bg-brand-purple text-white py-4 px-12 rounded-full text-lg font-bold shadow-2xl hover:scale-105 transition-transform active:scale-95">Get Started for Free</button>
+                    </div>
+
+                    <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
+                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
+                                <UploadIcon className="w-8 h-8" />
+                            </div>
+                            <h3 className="text-xl font-bold mb-3 text-gray-900">Upload Media</h3>
+                            <p className="text-gray-500 text-sm leading-relaxed">Easily upload up to 20 high-quality images or video clips. Reorder them on a timeline with simple drag-and-drop controls.</p>
+                        </div>
+                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
+                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
+                                <MusicIcon className="w-8 h-8" />
+                            </div>
+                            <h3 className="text-xl font-bold mb-3 text-gray-900">Background Music</h3>
+                            <p className="text-gray-500 text-sm leading-relaxed">Add multiple background tracks. Our engine handles multi-track layering with precise start offsets for every song.</p>
+                        </div>
+                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
+                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
+                                <SparklesIcon className="w-8 h-8" />
+                            </div>
+                            <h3 className="text-xl font-bold mb-3 text-gray-900">Smart Audio Ducking</h3>
+                            <p className="text-gray-500 text-sm leading-relaxed">Professional audio mix that automatically lowers music volume when video clips play, or keeps it full-volume if videos are muted.</p>
+                        </div>
+                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
+                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
+                                <BeakerIcon className="w-8 h-8" />
+                            </div>
+                            <h3 className="text-xl font-bold mb-3 text-gray-900">AI Smart Captions</h3>
+                            <p className="text-gray-500 text-sm leading-relaxed">Let Gemini AI analyze your photos and generate beautiful, poetic captions automatically based on your visual story.</p>
+                        </div>
+                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
+                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
+                                <UsersIcon className="w-8 h-8" />
+                            </div>
+                            <h3 className="text-xl font-bold mb-3 text-gray-900">Collaborative Sharing</h3>
+                            <p className="text-gray-500 text-sm leading-relaxed">Share your projects with family. Work together in real-time to organize photos and choose the perfect soundtrack.</p>
+                        </div>
+                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
+                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
+                                <FilmIcon className="w-8 h-8" />
+                            </div>
+                            <h3 className="text-xl font-bold mb-3 text-gray-900">Cinematic Transitions</h3>
+                            <p className="text-gray-500 text-sm leading-relaxed">Apply professional styles like Ken Burns (Pan & Zoom), Classic Fade, Slide, and Zoom for a pro-grade cinematic look.</p>
+                        </div>
+                    </div>
                 </main>
             ) : (
                 <main className="p-4 sm:p-8 grid lg:grid-cols-2 gap-8 max-w-7xl mx-auto">
@@ -899,7 +947,7 @@ const App: React.FC = () => {
                                         <input type="checkbox" className="w-4 h-4 accent-brand-purple" checked={settings.muteVideos} onChange={() => setSettings(s => ({...s, muteVideos: !s.muteVideos}))} />
                                         <div className="flex flex-col">
                                             <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Mute Video Clips Audio</span>
-                                            <span className="text-[8px] text-gray-600 font-bold uppercase">Disables sound for all uploaded video assets</span>
+                                            <span className="text-[8px] text-gray-600 font-bold uppercase">Background music volume stays at 100% when video is muted</span>
                                         </div>
                                     </label>
                                 </div>
@@ -1272,6 +1320,7 @@ const App: React.FC = () => {
                                 vol = (a.duration - currentInClipTime) / a.fadeOut;
                             }
                             
+                            // APPLY DUCKING: Only if settings.muteVideos is FALSE
                             const duckFactor = getDuckingFactor(elapsedTime);
                             vol *= duckFactor;
                         }
@@ -1314,7 +1363,6 @@ const AudioPlayer: React.FC<{ src: string, active: boolean, volume: number, star
                 audioRef.current.play().catch(e => console.error("Audio block", e));
                 setHasStarted(true);
             }
-            // Tight sync to prevent drift during seeking or interval switches
             const drift = Math.abs(audioRef.current.currentTime - startTimeInFile);
             if (drift > 0.1) {
                 audioRef.current.currentTime = startTimeInFile;
