@@ -15,12 +15,10 @@ import {
     doc,
     setDoc,
     serverTimestamp,
-    Timestamp,
     query,
     where,
     onSnapshot,
     deleteDoc,
-    orderBy,
 } from 'firebase/firestore';
 import {
     getStorage,
@@ -40,7 +38,7 @@ const firebaseConfig = {
   measurementId: "G-SKRCL4J4GD"
 };
 
-// --- FIREBASE INITIALIZATION (MODULAR) ---
+// --- FIREBASE INITIALIZATION ---
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -161,11 +159,9 @@ const formatDuration = (seconds: number) => {
 
 const getMillis = (val: any): number => {
     if (!val) return 0;
-    // Handle serverTimestamp sentinel or Firestore Timestamp
     if (typeof val.toMillis === 'function') return val.toMillis();
     if (val instanceof Date) return val.getTime();
     if (typeof val === 'number') return val;
-    // If it's the pending server timestamp, return current time for sorting
     return Date.now(); 
 };
 
@@ -224,6 +220,7 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [isFetchingData, setIsFetchingData] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isAdvancedEditorOpen, setIsAdvancedEditorOpen] = useState(false);
     
@@ -256,13 +253,77 @@ const App: React.FC = () => {
         if (found) return 'owner';
         const shared = sharedWithMeSlideshows.find(s => s.id === currentSlideshowId);
         if (shared) {
-            const myCollab = shared.collaborators?.find(c => c.email === user.email);
+            const myCollab = shared.collaborators?.find(c => c.email.toLowerCase() === user.email?.toLowerCase());
             return myCollab?.role || 'viewer';
         }
         return 'owner';
     }, [user, currentSlideshowId, ownedSlideshows, sharedWithMeSlideshows]);
 
     const canEdit = userPermission === 'owner' || userPermission === 'editor';
+
+    // AUTH LISTENER
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, (u) => { 
+            setUser(u); 
+            setIsLoading(false); 
+        });
+        return unsubscribe;
+    }, []);
+
+    // REAL-TIME DATABASE LISTENERS
+    useEffect(() => {
+        if (!user || !user.uid || !user.email) {
+            setOwnedSlideshows([]);
+            setSharedWithMeSlideshows([]);
+            setIsFetchingData(false);
+            return;
+        }
+        
+        setIsFetchingData(true);
+        const slideshowsRef = collection(db, "slideshows");
+        const userUid = user.uid;
+        const userEmail = user.email.toLowerCase();
+
+        // Query 1: Owned by me (Primary)
+        const qOwned = query(slideshowsRef, where("userId", "==", userUid));
+        const unsubOwned = onSnapshot(qOwned, 
+            (snap) => {
+                setOwnedSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
+                setIsFetchingData(false);
+            },
+            (err) => {
+                console.error("Firestore Owned Fetch Error:", err);
+                setError("Gallery error: " + err.message);
+                setIsFetchingData(false);
+            }
+        );
+
+        // Query 2: Shared with me (Secondary)
+        const qShared = query(slideshowsRef, where("collaboratorEmails", "array-contains", userEmail));
+        const unsubShared = onSnapshot(qShared, 
+            (snap) => {
+                setSharedWithMeSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
+            },
+            (err) => {
+                console.error("Firestore Shared Fetch Error:", err);
+            }
+        );
+
+        return () => { 
+            unsubOwned(); 
+            unsubShared(); 
+        };
+    }, [user?.uid, user?.email]); // Stable dependencies
+
+    const allSlideshows = useMemo(() => {
+        const combined = [...ownedSlideshows, ...sharedWithMeSlideshows];
+        const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+        return unique.sort((a, b) => {
+            const tA = getMillis(a.timestamp) || getMillis(a.createdAt) || 0;
+            const tB = getMillis(b.timestamp) || getMillis(b.createdAt) || 0;
+            return tB - tA;
+        });
+    }, [ownedSlideshows, sharedWithMeSlideshows]);
 
     // Progression Engine: Advancement for images
     useEffect(() => {
@@ -338,69 +399,12 @@ const App: React.FC = () => {
         }
     }, [isPlaying, currentSlide, mediaFiles]);
 
-    useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (u) => { 
-            setUser(u); 
-            setIsLoading(false); 
-        });
-        return unsubscribe;
-    }, []);
-
-    // REAL-TIME DATABASE LISTENERS
-    useEffect(() => {
-        if (!user || !user.email) {
-            setOwnedSlideshows([]);
-            setSharedWithMeSlideshows([]);
-            return;
-        }
-        
-        const slideshowsRef = collection(db, "slideshows");
-        const email = user.email.toLowerCase();
-
-        // Query 1: Owned by me
-        const qOwned = query(slideshowsRef, where("userId", "==", user.uid));
-        const unsubOwned = onSnapshot(qOwned, 
-            (snap) => {
-                setOwnedSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
-                setError(null);
-            },
-            (err) => {
-                console.error("Owned Fetch Error", err);
-                setError("Failed to sync your projects. Check your connection.");
-            }
-        );
-
-        // Query 2: Shared with me
-        const qShared = query(slideshowsRef, where("collaboratorEmails", "array-contains", email));
-        const unsubShared = onSnapshot(qShared, 
-            (snap) => {
-                setSharedWithMeSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
-            },
-            (err) => {
-                console.error("Shared Fetch Error", err);
-            }
-        );
-
-        return () => { unsubOwned(); unsubShared(); };
-    }, [user]);
-
-    const allSlideshows = useMemo(() => {
-        const combined = [...ownedSlideshows, ...sharedWithMeSlideshows];
-        // Use a map to handle overlaps (though rare with this schema)
-        const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
-        return unique.sort((a, b) => {
-            const tA = getMillis(a.timestamp) || getMillis(a.createdAt) || 0;
-            const tB = getMillis(b.timestamp) || getMillis(b.createdAt) || 0;
-            return tB - tA;
-        });
-    }, [ownedSlideshows, sharedWithMeSlideshows]);
-
     const handleLogin = async () => {
         const provider = new GoogleAuthProvider();
         try { 
             await signInWithPopup(auth, provider); 
         } catch (e: any) { 
-            setError("Login failed: " + e.message); 
+            setError("Sign in failed: " + e.message); 
         }
     };
 
@@ -440,7 +444,7 @@ const App: React.FC = () => {
         try {
             const id = currentSlideshowId || doc(collection(db, 'slideshows')).id;
             
-            // Sequential upload to avoid hitting storage limits or causing race conditions
+            // Sequential upload to prevent storage bottlenecks
             const serMedia = [];
             for (const m of mediaFiles) {
                 const b: any = { id: m.id, type: m.type, name: m.id, rotation: m.rotation, caption: (m as any).caption, aiCaption: (m as any).aiCaption, duration: (m as any).duration };
@@ -474,8 +478,10 @@ const App: React.FC = () => {
             const existing = allSlideshows.find(s => s.id === id);
             const collaborators = existing?.collaborators || [];
             
-            // Normalize collaborator emails for querying
+            // Normalize emails and ensure owner is ALWAYS in the index for dual-lookup
+            const ownerEmail = user.email.toLowerCase();
             const collaboratorEmails = Array.from(new Set([
+                ownerEmail,
                 ...(existing?.collaboratorEmails || []),
                 ...collaborators.map(c => c.email.toLowerCase())
             ]));
@@ -483,7 +489,7 @@ const App: React.FC = () => {
             await setDoc(doc(db, 'slideshows', id), {
                 userId: existing?.userId || user.uid,
                 userEmail: existing?.userEmail || user.email,
-                name: slideshowName || 'Untitled Slideshow', 
+                name: slideshowName || 'My Slideshow', 
                 media: serMedia, 
                 audio: serAudio,
                 settings, 
@@ -497,7 +503,7 @@ const App: React.FC = () => {
             setCurrentSlideshowId(id);
         } catch (e: any) { 
             console.error("Save Error", e);
-            setError("Failed to save slideshow: " + (e.message || "Unknown error")); 
+            setError("Cloud save failed: " + e.message); 
         } finally { 
             setIsSaving(false); 
         }
@@ -531,13 +537,13 @@ const App: React.FC = () => {
 
     const handleDelete = async (s: SavedSlideshow) => {
         if (!user || s.userId !== user.uid) return;
-        if (!window.confirm(`Delete "${s.name}"? This action cannot be undone.`)) return;
+        if (!window.confirm(`Delete "${s.name}"? This will remove all files associated.`)) return;
         setIsProcessing(true);
         try {
             await deleteDoc(doc(db, 'slideshows', s.id));
             if (currentSlideshowId === s.id) resetWorkspace();
         } catch (e: any) { 
-            setError("Delete failed: " + e.message); 
+            setError("Deletion error: " + e.message); 
         } finally { 
             setIsProcessing(false); 
         }
@@ -569,7 +575,7 @@ const App: React.FC = () => {
             setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs, collaboratorEmails: updatedEmails });
             setShareEmail('');
         } catch (e: any) { 
-            setError("Share failed: " + e.message); 
+            setError("Sharing failed: " + e.message); 
         } finally { 
             setIsProcessing(false); 
         }
@@ -580,7 +586,10 @@ const App: React.FC = () => {
         setIsProcessing(true);
         try {
             const updatedCollabs = (shareSlideshowTarget.collaborators || []).filter(c => c.email !== email);
-            const updatedEmails = updatedCollabs.map(c => c.email.toLowerCase());
+            const updatedEmails = [
+                shareSlideshowTarget.userEmail?.toLowerCase() || "",
+                ...updatedCollabs.map(c => c.email.toLowerCase())
+            ].filter(Boolean);
             
             await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { 
                 collaborators: updatedCollabs,
@@ -589,7 +598,7 @@ const App: React.FC = () => {
             
             setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs, collaboratorEmails: updatedEmails });
         } catch (e: any) { 
-            setError("Remove failed: " + e.message); 
+            setError("Removal failed: " + e.message); 
         } finally { 
             setIsProcessing(false); 
         }
@@ -604,10 +613,11 @@ const App: React.FC = () => {
     return (
         <div className={`min-h-screen font-sans ${user ? 'bg-brand-dark text-gray-200' : 'bg-white text-gray-900'}`}>
             {(isSaving || isProcessing) && (
-                <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center">
-                    <div className="text-center">
+                <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center backdrop-blur-sm">
+                    <div className="text-center p-8 bg-gray-900/80 rounded-[2rem] border border-gray-800 shadow-2xl">
                         <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-brand-purple mx-auto"></div>
-                        <p className="text-white text-xl mt-4 font-bold tracking-tight">Syncing Studio...</p>
+                        <p className="text-white text-xl mt-6 font-black tracking-tight uppercase">Processing...</p>
+                        <p className="text-gray-400 text-sm mt-2">Uploading your memories to the cloud.</p>
                     </div>
                 </div>
             )}
@@ -615,11 +625,11 @@ const App: React.FC = () => {
             <header className={`p-4 flex justify-between items-center border-b sticky top-0 z-40 backdrop-blur-md ${user ? 'bg-gray-900/50 border-gray-800' : 'bg-white/90 border-gray-100'}`}>
                 <h1 className="text-2xl font-bold tracking-tight"><span className="text-brand-purple">Muziq</span> Slides</h1>
                 <div className="flex gap-4 items-center">
-                    {user && <span className="text-xs text-gray-400 hidden sm:inline">{user.email}</span>}
+                    {user && <span className="text-xs text-gray-400 hidden sm:inline font-medium uppercase tracking-widest">{user.displayName || user.email}</span>}
                     {user ? (
-                        <button onClick={() => signOut(auth)} className="bg-gray-200 text-gray-900 py-2 px-4 rounded-lg text-sm font-bold shadow-sm transition-colors hover:bg-gray-300">Logout</button>
+                        <button onClick={() => signOut(auth)} className="bg-gray-200 text-gray-900 py-2 px-6 rounded-lg text-sm font-bold shadow-sm transition-all hover:bg-gray-300">Logout</button>
                     ) : (
-                        <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-4 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Sign In</button>
+                        <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-6 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Sign In</button>
                     )}
                 </div>
             </header>
@@ -667,89 +677,90 @@ const App: React.FC = () => {
                 <main className="p-4 sm:p-8 grid lg:grid-cols-2 gap-8 max-w-7xl mx-auto">
                     <div className="space-y-6">
                         {error && (
-                            <div className="bg-red-500/20 border border-red-500/40 text-red-200 px-4 py-3 rounded-xl text-sm flex justify-between items-center animate-fade-in">
-                                <span>{error}</span>
-                                <button onClick={() => setError(null)} className="hover:text-white"><XIcon className="w-4 h-4"/></button>
+                            <div className="bg-red-500/20 border border-red-500/40 text-red-200 px-4 py-4 rounded-2xl text-sm flex justify-between items-center animate-fade-in backdrop-blur-md">
+                                <span className="font-medium">{error}</span>
+                                <button onClick={() => setError(null)} className="hover:text-white transition-colors p-1"><XIcon className="w-5 h-5"/></button>
                             </div>
                         )}
 
-                        <section className="bg-gray-800/40 p-6 rounded-3xl border border-gray-700/50 shadow-xl">
-                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white"><UploadIcon className="w-5 h-5 text-brand-purple"/> 1. Upload Media</h3>
-                            <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-700 rounded-2xl p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-brand-purple/5 transition-all">
-                                <UploadIcon className="w-10 h-10 mx-auto text-gray-500 mb-2"/>
-                                <p className="text-sm text-gray-400">Click to upload photos or videos</p>
+                        <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><UploadIcon className="w-5 h-5 text-brand-purple"/> 1. Upload Media</h3>
+                            <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-700 rounded-[1.5rem] p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-brand-purple/5 transition-all group">
+                                <UploadIcon className="w-12 h-12 mx-auto text-gray-500 mb-2 group-hover:scale-110 transition-transform group-hover:text-brand-purple"/>
+                                <p className="text-sm text-gray-400 font-bold">Click to upload photos or videos</p>
+                                <p className="text-[10px] text-gray-600 mt-1 uppercase tracking-widest">Max 20 Files</p>
                             </div>
                             <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*" className="hidden" />
                             <div className="mt-4 grid grid-cols-4 gap-3">
                                 {mediaFiles.map(m => (
-                                    <div key={m.id} className="aspect-square bg-black rounded-xl overflow-hidden relative group border border-gray-700 shadow-lg">
+                                    <div key={m.id} className="aspect-square bg-black rounded-2xl overflow-hidden relative group border border-gray-700 shadow-lg">
                                         {m.type === 'image' ? (
-                                            <img src={m.previewUrl} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                                            <img src={m.previewUrl} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
                                         ) : (
                                             <div className="w-full h-full relative">
                                                 <video src={m.previewUrl} className="w-full h-full object-cover opacity-60" muted />
                                                 <div className="absolute inset-0 flex items-center justify-center">
-                                                    <PlayIcon className="w-6 h-6 text-white opacity-80" />
+                                                    <PlayIcon className="w-8 h-8 text-white opacity-80" />
                                                 </div>
-                                                <span className="absolute bottom-1 right-1 text-[8px] bg-black/60 px-1 rounded text-white font-bold">{formatDuration(m.duration || 0)}</span>
+                                                <span className="absolute bottom-2 right-2 text-[8px] bg-black/60 px-1.5 py-0.5 rounded text-white font-black">{formatDuration(m.duration || 0)}</span>
                                             </div>
                                         )}
-                                        <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="absolute top-1 right-1 bg-red-600/80 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"><XIcon className="w-3 h-3 text-white"/></button>
+                                        <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="absolute top-2 right-2 bg-red-600/90 p-1.5 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-md shadow-xl"><XIcon className="w-3 h-3 text-white"/></button>
                                     </div>
                                 ))}
                             </div>
                         </section>
 
-                        <section className="bg-gray-800/40 p-6 rounded-3xl border border-gray-700/50 shadow-xl">
-                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white"><MusicIcon className="w-5 h-5 text-brand-purple"/> 2. Add Background Music</h3>
-                            <button onClick={() => audioInputRef.current?.click()} className="w-full bg-gray-700/50 hover:bg-gray-700 py-3 rounded-xl font-bold flex justify-center gap-2 border border-gray-600/50 transition-colors"><PlusIcon className="w-5 h-5"/> Add Track</button>
+                        <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><MusicIcon className="w-5 h-5 text-brand-purple"/> 2. Add Background Music</h3>
+                            <button onClick={() => audioInputRef.current?.click()} className="w-full bg-gray-700/30 hover:bg-gray-700/50 py-4 rounded-2xl font-black text-sm flex justify-center gap-2 border border-gray-600/50 transition-all active:scale-[0.98] uppercase tracking-widest"><PlusIcon className="w-5 h-5"/> Add Audio Track</button>
                             <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*" className="hidden" />
                             <div className="mt-4 space-y-2">
-                                {audioFiles.map(a => <div key={a.id} className="bg-gray-700/30 p-4 rounded-2xl flex justify-between items-center text-sm font-medium border border-gray-700/50"><span>{a.name} <span className="text-gray-500 font-normal ml-2">{formatDuration(a.duration)}</span></span><button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))}><TrashIcon className="w-4 h-4 text-red-400 hover:scale-110 transition-transform"/></button></div>)}
+                                {audioFiles.map(a => <div key={a.id} className="bg-gray-900/40 p-5 rounded-2xl flex justify-between items-center text-sm font-medium border border-gray-700/50 group shadow-inner"><span><span className="text-brand-purple font-black mr-2 uppercase tracking-tighter">Track</span> {a.name} <span className="text-gray-500 font-bold ml-2">({formatDuration(a.duration)})</span></span><button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))}><TrashIcon className="w-5 h-5 text-red-400 opacity-0 group-hover:opacity-100 transition-all hover:scale-125"/></button></div>)}
                             </div>
                         </section>
 
-                        <section className="bg-gray-800/40 p-6 rounded-3xl border border-gray-700/50 shadow-xl">
-                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white"><SettingsIcon className="w-5 h-5 text-brand-purple"/> 3. Settings</h3>
+                        <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><SettingsIcon className="w-5 h-5 text-brand-purple"/> 3. Settings</h3>
                             <div className="space-y-6">
-                                <div className="space-y-2">
+                                <div className="space-y-3">
                                     <div className="flex justify-between items-center">
-                                        <label className="text-sm text-gray-400">Slide Duration (Seconds)</label>
-                                        <span className="text-brand-purple font-bold">{settings.interval}s</span>
+                                        <label className="text-xs text-gray-500 font-black uppercase tracking-widest">Slide Interval</label>
+                                        <span className="text-brand-purple font-black text-sm">{settings.interval}s</span>
                                     </div>
-                                    <input type="range" min="1" max="30" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
+                                    <input type="range" min="1" max="30" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="text-sm text-gray-400 block">Transition Style</label>
+                                <div className="space-y-3">
+                                    <label className="text-xs text-gray-500 font-black uppercase tracking-widest block">Transition Cinematic</label>
                                     <select 
                                         value={settings.slideStyle} 
                                         onChange={e => setSettings(s => ({...s, slideStyle: e.target.value}))}
-                                        className="w-full bg-gray-700/50 border border-gray-600/50 rounded-xl px-4 py-2 text-sm text-white focus:ring-1 focus:ring-brand-purple outline-none appearance-none cursor-pointer transition-all"
+                                        className="w-full bg-gray-900/50 border border-gray-700/50 rounded-2xl px-5 py-3 text-sm text-white font-bold focus:ring-2 focus:ring-brand-purple outline-none appearance-none cursor-pointer transition-all shadow-inner"
                                     >
                                         <option value="ken-burns">Ken Burns (Pan & Zoom)</option>
-                                        <option value="fade-in">Fade In</option>
-                                        <option value="slide-from-right">Slide from Right</option>
-                                        <option value="slide-from-bottom">Slide from Bottom</option>
-                                        <option value="zoom-in">Zoom In</option>
-                                        <option value="zoom-out">Zoom Out</option>
+                                        <option value="fade-in">Classic Fade</option>
+                                        <option value="slide-from-right">Side Slide</option>
+                                        <option value="slide-from-bottom">Bottom Entry</option>
+                                        <option value="zoom-in">Focus Zoom</option>
+                                        <option value="zoom-out">Deep Pull</option>
                                     </select>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4 pt-2">
-                                    <label className="flex items-center gap-3 cursor-pointer group">
+                                    <label className="flex items-center gap-3 cursor-pointer group bg-gray-900/20 p-3 rounded-2xl border border-transparent hover:border-brand-purple/20 transition-all">
                                         <div className="relative">
                                             <input type="checkbox" className="sr-only" checked={settings.repeatSlideshow} onChange={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} />
                                             <div className={`w-10 h-5 rounded-full transition-colors ${settings.repeatSlideshow ? 'bg-brand-purple' : 'bg-gray-700'}`}></div>
                                             <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${settings.repeatSlideshow ? 'translate-x-5' : 'translate-x-0'}`}></div>
                                         </div>
-                                        <span className="text-xs text-gray-400 group-hover:text-gray-200 transition-colors font-bold uppercase tracking-tight">Loop Slideshow</span>
+                                        <span className="text-[10px] text-gray-500 group-hover:text-gray-200 transition-colors font-black uppercase tracking-widest">Infinite Loop</span>
                                     </label>
-                                    <label className="flex items-center gap-3 cursor-pointer group">
+                                    <label className="flex items-center gap-3 cursor-pointer group bg-gray-900/20 p-3 rounded-2xl border border-transparent hover:border-brand-purple/20 transition-all">
                                         <div className="relative">
                                             <input type="checkbox" className="sr-only" checked={settings.smartCaptionsEnabled} onChange={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} />
                                             <div className={`w-10 h-5 rounded-full transition-colors ${settings.smartCaptionsEnabled ? 'bg-brand-purple' : 'bg-gray-700'}`}></div>
                                             <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${settings.smartCaptionsEnabled ? 'translate-x-5' : 'translate-x-0'}`}></div>
                                         </div>
-                                        <span className="text-xs text-gray-400 group-hover:text-gray-200 transition-colors font-bold uppercase tracking-tight">Smart Captions</span>
+                                        <span className="text-[10px] text-gray-500 group-hover:text-gray-200 transition-colors font-black uppercase tracking-widest">AI Narrator</span>
                                     </label>
                                 </div>
                             </div>
@@ -757,67 +768,79 @@ const App: React.FC = () => {
                     </div>
 
                     <div className="space-y-6">
-                        <section className="bg-gray-800/40 p-6 rounded-3xl border border-gray-700/50 shadow-xl">
+                        <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
                             <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-bold flex items-center gap-2 text-white"><PlayIcon className="w-5 h-5 text-brand-purple"/> 4. Run Slideshow</h3>
-                                <button onClick={() => setIsAdvancedEditorOpen(true)} className="text-[10px] bg-brand-purple/20 text-brand-purple border border-brand-purple/30 py-1.5 px-4 rounded-full flex items-center gap-1.5 hover:bg-brand-purple/40 font-bold tracking-wide uppercase transition-all shadow-sm"><AdjustmentIcon className="w-3 h-3"/> Advanced Editor</button>
+                                <h3 className="text-lg font-bold flex items-center gap-2 text-white uppercase tracking-tighter"><PlayIcon className="w-5 h-5 text-brand-purple"/> 4. Run Slideshow</h3>
+                                <button onClick={() => setIsAdvancedEditorOpen(true)} className="text-[10px] bg-brand-purple/10 text-brand-purple border border-brand-purple/30 py-2 px-5 rounded-full flex items-center gap-1.5 hover:bg-brand-purple/30 font-black tracking-widest uppercase transition-all shadow-xl"><AdjustmentIcon className="w-4 h-4"/> Timeline Editor</button>
                             </div>
-                            <div className="aspect-video bg-black rounded-2xl relative flex items-center justify-center overflow-hidden group border border-gray-700/50 shadow-inner">
+                            <div className="aspect-video bg-black rounded-[2rem] relative flex items-center justify-center overflow-hidden group border border-gray-700/50 shadow-2xl">
                                 {mediaFiles.length > 0 ? (
                                     <>
                                         <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
                                             {mediaFiles[0].type === 'image' ? (
-                                                <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-sm opacity-50" />
+                                                <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-md opacity-30 scale-110" />
                                             ) : (
-                                                <video src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-sm opacity-50" muted />
+                                                <video src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-md opacity-30 scale-110" muted />
                                             )}
                                         </div>
-                                        <button onClick={startPlayback} className="relative z-10 flex items-center justify-center bg-brand-purple p-6 rounded-full shadow-2xl scale-100 hover:scale-110 active:scale-95 transition-all"><PlayIcon className="w-12 h-12 text-white"/></button>
+                                        <div className="relative z-10 text-center">
+                                            <button onClick={startPlayback} className="flex items-center justify-center bg-brand-purple p-8 rounded-full shadow-[0_0_50px_rgba(109,40,217,0.5)] scale-100 hover:scale-110 active:scale-90 transition-all"><PlayIcon className="w-16 h-16 text-white"/></button>
+                                            <p className="text-white font-black text-sm mt-4 uppercase tracking-[0.3em] drop-shadow-md">Preview Experience</p>
+                                        </div>
                                     </>
-                                ) : <p className="text-gray-500 italic font-medium">No media added yet</p>}
+                                ) : <p className="text-gray-600 font-black uppercase tracking-[0.2em] italic">Awaiting Media...</p>}
                             </div>
                         </section>
 
-                        <section className="bg-gray-800/40 p-6 rounded-3xl border border-gray-700/50 shadow-xl">
-                            <h3 className="text-lg font-bold mb-4 text-white">5. Save & Manage</h3>
+                        <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
+                            <h3 className="text-lg font-bold mb-4 text-white uppercase tracking-tighter">5. Project Gallery</h3>
                             <div className="flex gap-2 mb-6">
-                                <input value={slideshowName} onChange={e => setSlideshowName(e.target.value)} placeholder="Slideshow Name" className="flex-1 bg-gray-700/50 rounded-xl px-4 py-2 border border-gray-600/50 outline-none focus:ring-1 focus:ring-brand-purple placeholder:text-gray-500 transition-all" />
+                                <input value={slideshowName} onChange={e => setSlideshowName(e.target.value)} placeholder="Enter Project Name..." className="flex-1 bg-gray-900/40 rounded-2xl px-5 py-4 border border-gray-700/50 outline-none focus:ring-2 focus:ring-brand-purple font-bold placeholder:text-gray-600 transition-all shadow-inner" />
                                 <button 
                                     onClick={handleSave} 
                                     disabled={isSaving || !canEdit} 
-                                    className={`py-2 px-8 rounded-xl font-bold transition-all shadow-lg ${canEdit ? 'bg-brand-purple hover:bg-purple-700 shadow-brand-purple/20' : 'bg-gray-600 cursor-not-allowed opacity-50'}`}>
-                                    {isSaving ? 'Saving...' : canEdit ? 'Save Changes' : 'Viewer Mode'}
+                                    className={`px-8 rounded-2xl font-black text-sm transition-all shadow-2xl active:scale-95 uppercase tracking-widest ${canEdit ? 'bg-brand-purple hover:bg-purple-700 shadow-brand-purple/20' : 'bg-gray-700 cursor-not-allowed opacity-50'}`}>
+                                    {isSaving ? 'Syncing...' : 'Save Cloud'}
                                 </button>
                             </div>
-                            <div className="space-y-3 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
-                                {allSlideshows.length > 0 ? allSlideshows.map(s => (
-                                    <div key={s.id} className={`bg-gray-700/20 p-4 rounded-2xl flex justify-between items-center group border transition-all ${currentSlideshowId === s.id ? 'border-brand-purple/50 bg-brand-purple/5' : 'border-gray-700/30 hover:border-gray-600/50'}`}>
+                            
+                            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                                {isFetchingData ? (
+                                    <div className="py-12 text-center">
+                                        <div className="w-8 h-8 border-2 border-brand-purple border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                        <p className="text-gray-500 font-black text-[10px] uppercase tracking-widest">Connecting to Studio...</p>
+                                    </div>
+                                ) : allSlideshows.length > 0 ? allSlideshows.map(s => (
+                                    <div key={s.id} className={`bg-gray-900/30 p-5 rounded-[1.5rem] flex justify-between items-center group border transition-all ${currentSlideshowId === s.id ? 'border-brand-purple bg-brand-purple/10' : 'border-gray-800/50 hover:border-gray-600 shadow-sm'}`}>
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <h4 className="font-bold text-sm text-white truncate">{s.name}</h4>
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <h4 className="font-black text-sm text-white truncate uppercase tracking-tight">{s.name}</h4>
                                                 {s.userId === user?.uid ? (
-                                                    <span className="text-[8px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/30 uppercase font-black tracking-widest">Owner</span>
+                                                    <span className="text-[7px] bg-brand-purple text-white px-1.5 py-0.5 rounded font-black tracking-widest uppercase">My Proj</span>
                                                 ) : (
-                                                    <span className="text-[8px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 uppercase font-black tracking-widest">{s.collaborators?.find(c => c.email.toLowerCase() === user?.email?.toLowerCase())?.role || 'Viewer'}</span>
+                                                    <span className="text-[7px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-black tracking-widest uppercase">Shared</span>
                                                 )}
                                             </div>
-                                            <div className="flex gap-2 mt-0.5">
-                                                <p className="text-[10px] text-gray-500 font-bold">Duration: {formatDuration(s.totalDuration || 0)}</p>
-                                                <p className="text-[10px] text-brand-purple/70 font-bold">• {s.media?.filter(m => m.type === 'video').length || 0} Videos</p>
-                                                <p className="text-[10px] text-brand-purple/70 font-bold">• {s.media?.filter(m => m.type === 'image').length || 0} Photos</p>
+                                            <div className="flex gap-3 mt-1">
+                                                <p className="text-[9px] text-gray-500 font-bold uppercase tracking-tighter">Length: {formatDuration(s.totalDuration || 0)}</p>
+                                                <p className="text-[9px] text-brand-purple/80 font-bold uppercase tracking-tighter">• {s.media?.length || 0} Assets</p>
                                             </div>
                                         </div>
                                         <div className="flex gap-2 ml-4">
-                                            <button onClick={() => handleLoad(s)} className="text-[10px] bg-brand-purple/10 text-brand-purple border border-brand-purple/20 py-1.5 px-4 rounded-lg font-bold hover:bg-brand-purple/20 transition-all">Load</button>
-                                            <button 
-                                                onClick={() => { setShareSlideshowTarget(s); setIsShareModalOpen(true); }}
-                                                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-600/50 transition-all sm:opacity-0 group-hover:opacity-100"><ShareIcon className="w-4 h-4"/></button>
-                                            {s.userId === user?.uid && (
-                                                <button onClick={() => handleDelete(s)} className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-400/10 sm:opacity-0 group-hover:opacity-100 transition-all"><TrashIcon className="w-4 h-4"/></button>
-                                            )}
+                                            <button onClick={() => handleLoad(s)} className="text-[9px] bg-white text-black py-2 px-5 rounded-xl font-black uppercase tracking-widest hover:scale-105 transition-transform active:scale-95 shadow-xl">Load</button>
+                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button onClick={() => { setShareSlideshowTarget(s); setIsShareModalOpen(true); }} className="p-2 rounded-xl text-gray-500 hover:text-white hover:bg-gray-700 transition-all"><ShareIcon className="w-4 h-4"/></button>
+                                                {s.userId === user?.uid && (
+                                                    <button onClick={() => handleDelete(s)} className="p-2 rounded-xl text-gray-500 hover:text-red-500 hover:bg-red-500/10 transition-all"><TrashIcon className="w-4 h-4"/></button>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
-                                )) : <div className="text-center py-12 text-gray-600 text-sm italic font-medium">No projects found. Use the editor to start your first masterpiece!</div>}
+                                )) : (
+                                    <div className="text-center py-12 px-6 border border-dashed border-gray-800 rounded-[2rem]">
+                                        <p className="text-gray-600 font-black text-xs uppercase tracking-[0.2em] leading-relaxed">Gallery Empty.<br/>Build something unforgettable.</p>
+                                    </div>
+                                )}
                             </div>
                         </section>
                     </div>
@@ -827,49 +850,49 @@ const App: React.FC = () => {
             {/* Share Modal */}
             {isShareModalOpen && shareSlideshowTarget && (
                 <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 animate-fade-in backdrop-blur-md">
-                    <div className="bg-gray-900 w-full max-w-md rounded-3xl border border-gray-800 shadow-2xl overflow-hidden flex flex-col">
-                        <div className="p-6 border-b border-gray-800 flex justify-between items-center bg-gray-800/20">
-                            <h2 className="text-xl font-bold flex items-center gap-2"><ShareIcon className="w-6 h-6 text-brand-purple"/> Share Slideshow</h2>
-                            <button onClick={() => setIsShareModalOpen(false)} className="hover:rotate-90 transition-transform"><XIcon className="w-6 h-6 text-gray-500"/></button>
+                    <div className="bg-gray-900 w-full max-w-md rounded-[2.5rem] border border-gray-800 shadow-2xl overflow-hidden flex flex-col">
+                        <div className="p-8 border-b border-gray-800 flex justify-between items-center bg-gray-800/20">
+                            <h2 className="text-xl font-black flex items-center gap-2 uppercase tracking-tighter"><ShareIcon className="w-6 h-6 text-brand-purple"/> Share Studio</h2>
+                            <button onClick={() => setIsShareModalOpen(false)} className="hover:rotate-90 transition-transform p-1 text-gray-500 hover:text-white"><XIcon className="w-8 h-8"/></button>
                         </div>
-                        <div className="p-6 space-y-6">
-                            <div className="space-y-2">
-                                <label className="text-xs text-gray-500 font-bold uppercase tracking-wider">Add Collaborator</label>
+                        <div className="p-8 space-y-8">
+                            <div className="space-y-3">
+                                <label className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em]">Add Collaborator</label>
                                 <div className="flex gap-2">
                                     <input 
                                         value={shareEmail} 
                                         onChange={e => setShareEmail(e.target.value)} 
-                                        placeholder="User Email" 
-                                        className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-brand-purple transition-all" 
+                                        placeholder="user@example.com" 
+                                        className="flex-1 bg-gray-950 border border-gray-800 rounded-2xl px-5 py-4 text-sm font-bold outline-none focus:ring-2 focus:ring-brand-purple transition-all shadow-inner" 
                                     />
                                     <select 
                                         value={shareRole} 
                                         onChange={e => setShareRole(e.target.value as any)}
-                                        className="bg-gray-800 border border-gray-700 rounded-xl px-2 py-2 text-xs outline-none focus:ring-1 focus:ring-brand-purple"
+                                        className="bg-gray-950 border border-gray-800 rounded-2xl px-3 py-4 text-[10px] font-black uppercase outline-none focus:ring-2 focus:ring-brand-purple"
                                     >
-                                        <option value="viewer">Viewer</option>
-                                        <option value="editor">Editor</option>
+                                        <option value="viewer">View</option>
+                                        <option value="editor">Edit</option>
                                     </select>
-                                    <button onClick={handleShareSlideshow} className="bg-brand-purple px-4 py-2 rounded-xl transition-all hover:bg-purple-700 active:scale-95"><PlusIcon className="w-5 h-5"/></button>
+                                    <button onClick={handleShareSlideshow} className="bg-brand-purple text-white px-5 py-4 rounded-2xl transition-all hover:bg-purple-700 active:scale-90 shadow-xl"><PlusIcon className="w-6 h-6"/></button>
                                 </div>
                             </div>
-                            <div className="space-y-3">
-                                <label className="text-xs text-gray-500 font-bold uppercase tracking-wider">Access List</label>
-                                <div className="max-h-48 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                                    <div className="flex justify-between items-center bg-gray-800/50 p-3 rounded-xl border border-gray-700/50">
+                            <div className="space-y-4">
+                                <label className="text-[10px] text-gray-500 font-black uppercase tracking-[0.2em]">Who has access</label>
+                                <div className="max-h-48 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                                    <div className="flex justify-between items-center bg-gray-800/30 p-4 rounded-2xl border border-gray-700/50">
                                         <div className="min-w-0">
-                                            <p className="text-sm font-medium text-white truncate">{shareSlideshowTarget.userEmail || 'Owner'}</p>
-                                            <p className="text-[10px] text-gray-500 font-bold uppercase">Owner</p>
+                                            <p className="text-sm font-black text-white truncate tracking-tight">{shareSlideshowTarget.userEmail || 'Project Owner'}</p>
+                                            <p className="text-[9px] text-brand-purple font-black uppercase tracking-widest mt-0.5">Primary Owner</p>
                                         </div>
                                     </div>
                                     {shareSlideshowTarget.collaborators?.map(c => (
-                                        <div key={c.email} className="flex justify-between items-center bg-gray-800/50 p-3 rounded-xl border border-gray-700/50 group">
+                                        <div key={c.email} className="flex justify-between items-center bg-gray-800/30 p-4 rounded-2xl border border-gray-700/50 group">
                                             <div className="min-w-0">
-                                                <p className="text-sm font-medium text-white truncate">{c.email}</p>
-                                                <p className="text-[10px] text-brand-purple capitalize font-black tracking-widest">{c.role}</p>
+                                                <p className="text-sm font-black text-white truncate tracking-tight">{c.email}</p>
+                                                <p className="text-[9px] text-gray-400 font-black uppercase tracking-widest mt-0.5">{c.role}</p>
                                             </div>
                                             {user?.uid === shareSlideshowTarget.userId && (
-                                                <button onClick={() => removeCollaborator(c.email)} className="text-red-400 sm:opacity-0 group-hover:opacity-100 transition-opacity"><TrashIcon className="w-4 h-4"/></button>
+                                                <button onClick={() => removeCollaborator(c.email)} className="text-red-400 opacity-0 group-hover:opacity-100 transition-all hover:scale-110 p-2"><TrashIcon className="w-5 h-5"/></button>
                                             )}
                                         </div>
                                     ))}
@@ -881,26 +904,26 @@ const App: React.FC = () => {
             )}
 
             {isAdvancedEditorOpen && (
-                <div className="fixed inset-0 bg-black/95 z-[90] flex items-center justify-center p-4 animate-fade-in backdrop-blur-sm">
-                    <div className="bg-gray-900 w-full max-w-5xl rounded-[2.5rem] border border-gray-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="fixed inset-0 bg-black/95 z-[90] flex items-center justify-center p-4 animate-fade-in backdrop-blur-lg">
+                    <div className="bg-gray-900 w-full max-w-5xl rounded-[3rem] border border-gray-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
                         <div className="p-8 border-b border-gray-800 flex justify-between items-center bg-gray-800/20">
-                            <h2 className="text-2xl font-bold flex items-center gap-3"><AdjustmentIcon className="w-8 h-8 text-brand-purple"/> Timeline Editor</h2>
-                            <button onClick={() => setIsAdvancedEditorOpen(false)} className="hover:rotate-90 transition-transform"><XIcon className="w-8 h-8 text-gray-500"/></button>
+                            <h2 className="text-2xl font-black flex items-center gap-3 uppercase tracking-tighter"><AdjustmentIcon className="w-8 h-8 text-brand-purple"/> Timeline Studio</h2>
+                            <button onClick={() => setIsAdvancedEditorOpen(false)} className="hover:rotate-90 transition-transform text-gray-500 hover:text-white"><XIcon className="w-10 h-10"/></button>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-8 space-y-10 custom-scrollbar">
-                            <div className="space-y-6">
-                                <div className="flex items-center gap-6">
-                                    <div className="w-24 text-[10px] text-gray-500 font-extrabold uppercase tracking-widest">Media Track</div>
-                                    <div className="flex-1 h-24 bg-gray-800/50 rounded-2xl flex items-center gap-2 p-3 overflow-x-auto border border-gray-700/50 custom-scrollbar">
+                        <div className="flex-1 overflow-y-auto p-10 space-y-12 custom-scrollbar">
+                            <div className="space-y-10">
+                                <div className="flex items-center gap-8">
+                                    <div className="w-32 text-[10px] text-gray-500 font-black uppercase tracking-[0.2em] leading-tight">Sequence Track</div>
+                                    <div className="flex-1 h-32 bg-black/50 rounded-3xl flex items-center gap-3 p-4 overflow-x-auto border border-gray-800 custom-scrollbar shadow-inner">
                                         {mediaFiles.map(m => (
-                                            <div key={m.id} className="h-full aspect-square bg-black rounded-xl border border-brand-purple/20 overflow-hidden flex-shrink-0 relative group shadow-lg">
+                                            <div key={m.id} className="h-full aspect-square bg-black rounded-2xl border border-brand-purple/20 overflow-hidden flex-shrink-0 relative group shadow-2xl">
                                                 {m.type === 'image' ? (
                                                     <img src={m.previewUrl} className="w-full h-full object-cover" />
                                                 ) : (
                                                     <div className="w-full h-full relative">
                                                         <video src={m.previewUrl} className="w-full h-full object-cover" muted />
-                                                        <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                                                            <PlayIcon className="w-4 h-4 text-white" />
+                                                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                                                            <PlayIcon className="w-6 h-6 text-white" />
                                                         </div>
                                                     </div>
                                                 )}
@@ -908,19 +931,19 @@ const App: React.FC = () => {
                                         ))}
                                     </div>
                                 </div>
-                                <div className="flex items-start gap-6">
-                                    <div className="w-24 text-[10px] text-gray-500 font-extrabold uppercase tracking-widest mt-4">Audio Track</div>
-                                    <div className="flex-1 space-y-3">
+                                <div className="flex items-start gap-8">
+                                    <div className="w-32 text-[10px] text-gray-500 font-black uppercase tracking-[0.2em] leading-tight mt-6">Audio Orchestration</div>
+                                    <div className="flex-1 space-y-4">
                                         {audioFiles.map(a => (
-                                            <div key={a.id} className="bg-brand-purple/5 border border-brand-purple/20 p-6 rounded-3xl flex flex-wrap gap-6 items-center shadow-inner">
-                                                <span className="text-sm font-bold flex-1 text-white">{a.name}</span>
-                                                <div className="flex gap-8">
-                                                    <label className="flex flex-col gap-1 text-[10px] text-gray-500 uppercase tracking-tighter font-bold">Start Offset
-                                                        <input type="number" value={a.startTime} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: +e.target.value} : x))} className="bg-gray-800 rounded-lg px-2 py-1.5 text-white outline-none w-16 border border-gray-700 focus:border-brand-purple transition-colors"/></label>
-                                                    <label className="flex flex-col gap-1 text-[10px] text-gray-500 uppercase tracking-tighter font-bold">Fade In
-                                                        <input type="number" value={a.fadeIn} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeIn: +e.target.value} : x))} className="bg-gray-800 rounded-lg px-2 py-1.5 text-white outline-none w-16 border border-gray-700 focus:border-brand-purple transition-colors"/></label>
-                                                    <label className="flex flex-col gap-1 text-[10px] text-gray-500 uppercase tracking-tighter font-bold">Fade Out
-                                                        <input type="number" value={a.fadeOut} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeOut: +e.target.value} : x))} className="bg-gray-800 rounded-lg px-2 py-1.5 text-white outline-none w-16 border border-gray-700 focus:border-brand-purple transition-colors"/></label>
+                                            <div key={a.id} className="bg-gray-900 border border-gray-800 p-8 rounded-[2rem] flex flex-wrap gap-10 items-center shadow-2xl">
+                                                <span className="text-sm font-black flex-1 text-white uppercase tracking-tight truncate">{a.name}</span>
+                                                <div className="flex gap-10">
+                                                    <label className="flex flex-col gap-2 text-[10px] text-gray-500 uppercase tracking-widest font-black">Offset
+                                                        <input type="number" value={a.startTime} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: +e.target.value} : x))} className="bg-black rounded-xl px-4 py-3 text-white font-black text-sm outline-none w-20 border border-gray-800 focus:border-brand-purple transition-all shadow-inner"/></label>
+                                                    <label className="flex flex-col gap-2 text-[10px] text-gray-500 uppercase tracking-widest font-black">Fade In
+                                                        <input type="number" value={a.fadeIn} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeIn: +e.target.value} : x))} className="bg-black rounded-xl px-4 py-3 text-white font-black text-sm outline-none w-20 border border-gray-800 focus:border-brand-purple transition-all shadow-inner"/></label>
+                                                    <label className="flex flex-col gap-2 text-[10px] text-gray-500 uppercase tracking-widest font-black">Fade Out
+                                                        <input type="number" value={a.fadeOut} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeOut: +e.target.value} : x))} className="bg-black rounded-xl px-4 py-3 text-white font-black text-sm outline-none w-20 border border-gray-800 focus:border-brand-purple transition-all shadow-inner"/></label>
                                                 </div>
                                             </div>
                                         ))}
@@ -928,24 +951,24 @@ const App: React.FC = () => {
                                 </div>
                             </div>
                         </div>
-                        <div className="p-8 bg-gray-800/30 flex justify-end"><button onClick={() => setIsAdvancedEditorOpen(false)} className="bg-brand-purple hover:bg-purple-700 py-4 px-12 rounded-2xl font-bold shadow-xl shadow-brand-purple/20 transition-all active:scale-95">Apply Changes</button></div>
+                        <div className="p-8 bg-black/40 border-t border-gray-800 flex justify-end"><button onClick={() => setIsAdvancedEditorOpen(false)} className="bg-brand-purple hover:bg-purple-700 py-5 px-16 rounded-[1.5rem] font-black text-sm uppercase tracking-[0.2em] shadow-[0_10px_40px_rgba(109,40,217,0.4)] transition-all active:scale-95">Lock Sequence</button></div>
                     </div>
                 </div>
             )}
 
             {isPlaying && (
                 <div className="fixed inset-0 bg-black z-[100] flex items-center justify-center animate-fade-in">
-                    <button onClick={() => setIsPlaying(false)} className="absolute top-8 right-8 text-white bg-black/40 hover:bg-red-600/80 p-3 rounded-full z-[110] backdrop-blur-md transition-all shadow-2xl active:scale-95"><XIcon className="w-10 h-10"/></button>
+                    <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white bg-black/40 hover:bg-red-600/90 p-4 rounded-full z-[110] backdrop-blur-xl transition-all shadow-2xl active:scale-90 border border-white/10"><XIcon className="w-10 h-10"/></button>
                     {mediaFiles[currentSlide] && (
                         <div className="w-full h-full relative flex items-center justify-center overflow-hidden">
-                            <div key={mediaFiles[currentSlide].id} className={`w-full h-full absolute flex items-center justify-center transition-all duration-1000 animate-${settings.slideStyle}`}>
+                            <div key={mediaFiles[currentSlide].id} className={`w-full h-full absolute flex items-center justify-center transition-all duration-[1500ms] animate-${settings.slideStyle}`}>
                                 {mediaFiles[currentSlide].type === 'image' ? (
-                                    <img src={mediaFiles[currentSlide].previewUrl} className="w-full h-full object-cover" />
+                                    <img src={mediaFiles[currentSlide].previewUrl} className="w-full h-full object-contain" />
                                 ) : (
                                     <video 
                                         ref={videoPreviewRef} 
                                         src={mediaFiles[currentSlide].previewUrl} 
-                                        className="w-full h-full object-contain" 
+                                        className="w-full h-full object-contain shadow-2xl" 
                                         autoPlay 
                                         muted={false} 
                                         onEnded={handleNextSlide} 
@@ -955,12 +978,12 @@ const App: React.FC = () => {
                             
                             {/* Caption Overlay */}
                             {((mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption) ? (
-                                <div className="absolute bottom-20 left-1/2 -translate-x-1/2 max-w-2xl w-[90%] bg-black/40 backdrop-blur-md border border-white/10 p-6 rounded-3xl animate-fade-in text-center shadow-2xl">
-                                    <p className="text-white text-xl md:text-2xl font-medium tracking-tight leading-relaxed italic drop-shadow-lg">
+                                <div className="absolute bottom-24 left-1/2 -translate-x-1/2 max-w-3xl w-[85%] bg-black/40 backdrop-blur-2xl border border-white/5 p-8 rounded-[2.5rem] animate-fade-in text-center shadow-[0_30px_100px_rgba(0,0,0,0.8)]">
+                                    <p className="text-white text-2xl md:text-3xl font-bold tracking-tight leading-relaxed italic drop-shadow-2xl">
                                         {(mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption}
                                     </p>
                                     {(mediaFiles[currentSlide] as any).aiCaption && !(mediaFiles[currentSlide] as any).caption && (
-                                        <span className="block mt-2 text-[8px] text-white/30 uppercase tracking-[0.2em] font-black">AI Generated Caption</span>
+                                        <span className="block mt-4 text-[8px] text-brand-purple font-black uppercase tracking-[0.4em]">Cinematic AI Insight</span>
                                     )}
                                 </div>
                             ) : null}
@@ -981,10 +1004,12 @@ const App: React.FC = () => {
             )}
             
             <style>{`
-                .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+                .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
                 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-                .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(109, 40, 217, 0.3); border-radius: 10px; }
-                .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(109, 40, 217, 0.5); }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(109, 40, 217, 0.4); border-radius: 20px; }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(109, 40, 217, 0.7); }
+                @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+                .animate-fade-in { animation: fadeIn 0.8s ease-out forwards; }
             `}</style>
         </div>
     );
