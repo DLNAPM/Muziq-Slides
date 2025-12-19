@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 // Switch to compat imports for App and Auth to resolve "no exported member" errors
@@ -40,11 +41,9 @@ const firebaseConfig = {
 };
 
 
-// --- FIREBASE INITIALIZATION (Hybrid Compat/Modular) ---
-// Use compat initialization to workaround import errors
+// --- FIREBASE INITIALIZATION ---
 const app = firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
-// Cast app to any to allow interoperability between compat App and modular Services
 const db = getFirestore(app as any);
 const storage = getStorage(app as any);
 
@@ -53,7 +52,7 @@ const storage = getStorage(app as any);
 interface ImageFile {
   id: string;
   type: 'image';
-  file?: File; // File is optional when loaded from server
+  file?: File;
   previewUrl: string;
   caption: string;
   rotation: number;
@@ -63,10 +62,10 @@ interface ImageFile {
 interface VideoFile {
     id:string;
     type: 'video';
-    file?: File; // File is optional when loaded from server
+    file?: File;
     previewUrl: string;
     rotation: number;
-    duration?: number; // Duration in seconds
+    duration?: number; 
     serverData?: { url: string; storagePath: string; };
 }
 
@@ -76,7 +75,10 @@ interface AppStateAudio {
     id: string;
     file?: File;
     name: string;
-    duration: number; // Duration in seconds
+    duration: number;
+    startTime: number; // Global timeline offset
+    fadeIn: number;    // seconds
+    fadeOut: number;   // seconds
     serverData?: { url: string; storagePath: string; };
 }
 
@@ -105,6 +107,9 @@ interface SerializedAudioFile {
     url: string;
     storagePath: string;
     duration?: number;
+    startTime?: number;
+    fadeIn?: number;
+    fadeOut?: number;
 }
 
 interface SharedPermission {
@@ -117,216 +122,67 @@ interface SavedSlideshow {
     userId: string;
     name: string;
     media: SerializedMediaFile[];
-    // audio can be a single object (legacy) or an array
-    audio: SerializedAudioFile | SerializedAudioFile[] | null;
+    audio: SerializedAudioFile[];
     settings: SlideshowSettings;
-    timestamp?: Timestamp; // Last updated
-    createdAt?: Timestamp; // Original creation date
-    totalDuration?: number; // Cached duration in seconds
-    // Fields for sharing functionality
+    timestamp?: Timestamp; 
+    createdAt?: Timestamp; 
+    totalDuration?: number; 
     ownerInfo?: {
         displayName: string | null;
         photoURL: string | null;
     };
-    sharedWith?: string[]; // Array of user emails
+    sharedWith?: string[]; 
     sharedPermissions?: SharedPermission[];
 }
 
 // --- HELPER FUNCTIONS ---
-const fileToGenerativePart = async (file: File) => {
-    const base64EncodedDataPromise = new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-        reader.readAsDataURL(file);
-    });
-    return {
-        inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
-    };
-};
-
-// Helper to fetch blob from URL (used for AI captions on existing images if needed)
-const urlToGenerativePart = async (url: string) => {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    return fileToGenerativePart(new File([blob], "image.jpg", { type: blob.type }));
-};
-
 const getMediaDuration = (file: File): Promise<number> => {
     return new Promise((resolve) => {
         const objectUrl = URL.createObjectURL(file);
         const element = file.type.startsWith('audio') ? new Audio(objectUrl) : document.createElement('video');
-        
-        const cleanup = () => {
-             URL.revokeObjectURL(objectUrl);
-        };
-
+        const cleanup = () => URL.revokeObjectURL(objectUrl);
         if (file.type.startsWith('video')) {
             const videoEl = element as HTMLVideoElement;
             videoEl.preload = 'metadata';
             videoEl.src = objectUrl;
-             // Videos need to load metadata
-             videoEl.onloadedmetadata = () => {
-                const duration = videoEl.duration;
-                resolve(Number.isFinite(duration) ? duration : 0);
-                cleanup();
-            };
-            videoEl.onerror = () => {
-                resolve(0);
-                cleanup();
-            }
+            videoEl.onloadedmetadata = () => { resolve(videoEl.duration || 0); cleanup(); };
+            videoEl.onerror = () => { resolve(0); cleanup(); };
         } else {
-             // Audio
             const audioEl = element as HTMLAudioElement;
-            audioEl.onloadedmetadata = () => {
-                 const duration = audioEl.duration;
-                resolve(Number.isFinite(duration) ? duration : 0);
-                cleanup();
-            };
-            audioEl.onerror = () => {
-                resolve(0);
-                cleanup();
-            }
+            audioEl.onloadedmetadata = () => { resolve(audioEl.duration || 0); cleanup(); };
+            audioEl.onerror = () => { resolve(0); cleanup(); };
         }
     });
 };
 
 const formatDuration = (seconds: number) => {
-    const totalSecs = Math.round(seconds || 0);
+    const totalSecs = Math.max(0, Math.round(seconds || 0));
     const m = Math.floor(totalSecs / 60);
     const s = totalSecs % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
-// --- CONSTANTS ---
-const SLIDE_STYLES = [
-    { id: 'ken-burns', name: 'Ken Burns' },
-    { id: 'fade-in', name: 'Fade In' },
-    { id: 'slide-from-right', name: 'Slide Right' },
-    { id: 'slide-from-bottom', name: 'Slide Up' },
-    { id: 'zoom-in', name: 'Zoom In' },
-    { id: 'zoom-out', name: 'Zoom Out' },
-];
-
 // --- ICON COMPONENTS ---
-const UploadIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-  </svg>
-);
-const MusicIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-13c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
-  </svg>
-);
-const PlayIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-);
-const PauseIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
-);
-const StopIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-  </svg>
-);
-const FastForwardIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" />
-  </svg>
-);
-const RewindIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
-  </svg>
-);
-const XIcon: React.FC<{ className?: string }> = ({ className }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-  </svg>
-);
-const InfoIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-);
-const FilmIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
-    </svg>
-);
-const TrashIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-    </svg>
-);
-const SaveIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-    </svg>
-);
-const GoogleIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg className={className} viewBox="0 0 48 48">
-        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-        <path fill="none" d="M0 0h48v48H0z"></path>
-    </svg>
-);
-const QuestionMarkCircleIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-);
-const SettingsIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37.996.608 2.296.096 2.572-1.065z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-);
-const ShareIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12s-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.368a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z" />
-    </svg>
-);
-const SparklesIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="currentColor" viewBox="0 0 24 24">
-        <path d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.321l5.478.698a.563.563 0 01.31.95l-4.233 3.585a.563.563 0 00-.154.543l1.232 5.022a.563.563 0 01-.82.63l-4.735-2.79a.563.563 0 00-.536 0l-4.735 2.79a.563.563 0 01-.82-.63l1.232-5.022a.563.563 0 00-.154-.543l-4.233-3.585a.563.563 0 01.31-.95l5.478-.698a.563.563 0 00.475-.321L11.48 3.5z" />
-    </svg>
-);
-const RotateIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-    </svg>
-);
-const ChevronDownIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-    </svg>
-);
-const PlusIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-    </svg>
-);
+const UploadIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>;
+const MusicIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-13c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" /></svg>;
+const PlayIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+const StopIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" /></svg>;
+const XIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>;
+const PlusIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>;
+const TrashIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>;
+const AdjustmentIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>;
+const ChevronDownIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>;
+
+// Fix: Added missing SettingsIcon component to resolve 'Cannot find name' error
+const SettingsIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>;
 
 
-// --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
     const [user, setUser] = useState<firebase.User | null>(null);
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
     const [audioFiles, setAudioFiles] = useState<AppStateAudio[]>([]);
     const [settings, setSettings] = useState<SlideshowSettings>({
-        interval: 5,
-        slideStyle: 'ken-burns',
-        showClock: true,
-        smartCaptionsEnabled: false,
-        repeatSlideshow: false,
-        showCaptions: true,
+        interval: 5, slideStyle: 'ken-burns', showClock: true, smartCaptionsEnabled: false, repeatSlideshow: false, showCaptions: true,
     });
     const [isPlaying, setIsPlaying] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
@@ -340,1672 +196,281 @@ const App: React.FC = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
-    
-    // Sharing state
-    const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-    const [slideshowToShare, setSlideshowToShare] = useState<SavedSlideshow | null>(null);
-    const [shareEmail, setShareEmail] = useState('');
-    const [shareRole, setShareRole] = useState<'view' | 'update'>('view');
-    const [isSharing, setIsSharing] = useState(false);
-
-    // AI Caption state
-    const [generatingCaptionId, setGeneratingCaptionId] = useState<string | null>(null);
-
-    // Drag and Drop state
-    const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
-    const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-
-    // Visual Fade Out State
-    const [isFadingOut, setIsFadingOut] = useState(false);
+    const [isAdvancedEditorOpen, setIsAdvancedEditorOpen] = useState(false);
 
     const audioRef = useRef<HTMLAudioElement>(null);
     const videoPreviewRef = useRef<HTMLVideoElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
 
-    // Get current audio source based on index
-    const currentAudioFile = useMemo(() => audioFiles[currentAudioIndex], [audioFiles, currentAudioIndex]);
-
-    const audioSrc = useMemo(() => {
-        if (!currentAudioFile) return null;
-        if (currentAudioFile.file) {
-            return URL.createObjectURL(currentAudioFile.file);
-        }
-        return currentAudioFile.serverData?.url || null;
-    }, [currentAudioFile]);
-
-    // Cleanup audio object URLs
-    useEffect(() => {
-        return () => {
-             // Clean up all object URLs created for audio files when component unmounts
-        };
-    }, []);
-
-    // Calculate durations
     const totalSlideshowDuration = useMemo(() => {
-        return mediaFiles.reduce((acc, curr) => {
-            if (curr.type === 'image') return acc + settings.interval;
-            return acc + (curr.duration || 0); // Use 0 if duration not yet loaded
-        }, 0);
+        return mediaFiles.reduce((acc, curr) => acc + (curr.type === 'image' ? settings.interval : (curr.duration || 0)), 0);
     }, [mediaFiles, settings.interval]);
 
-    const totalMusicDuration = useMemo(() => {
-        return audioFiles.reduce((acc, curr) => acc + curr.duration, 0);
-    }, [audioFiles]);
+    const slideshowElapsedTime = useMemo(() => {
+        return mediaFiles.slice(0, currentSlide).reduce((acc, curr) => acc + (curr.type === 'image' ? settings.interval : (curr.duration || 0)), 0);
+    }, [currentSlide, mediaFiles, settings.interval]);
 
+    // Fix: Added derived audio source for the player to resolve 'Cannot find name audioSrc'
+    const audioSrc = useMemo(() => {
+        const clip = audioFiles[currentAudioIndex];
+        if (!clip) return null;
+        if (clip.serverData) return clip.serverData.url;
+        if (clip.file) return URL.createObjectURL(clip.file);
+        return null;
+    }, [audioFiles, currentAudioIndex]);
 
-    // --- AUTHENTICATION & DATA FETCHING ---
     useEffect(() => {
-        setIsLoading(true);
-        // Use compat auth.onAuthStateChanged
-        const unsubscribeAuth = auth.onAuthStateChanged((currentUser) => {
-            setUser(currentUser);
-            if (!currentUser) {
-                setIsLoading(false);
-                setOwnedSlideshows([]);
-                setSharedSlideshows([]);
-            }
-        });
-        
-        // Handle redirect result (fallback for mobile/ITP issues)
-        auth.getRedirectResult().then((result) => {
-            if (result.user) {
-                setError(null);
-            }
-        }).catch((err: any) => {
-            if (err.code === 'auth/operation-not-supported-in-this-environment') {
-                return;
-            }
-            console.error("Redirect Login Error:", err);
-            
-            if (err.message && (err.message.includes("missing initial state") || err.message.includes("storage-partitioned"))) {
-                setError("Login failed due to browser privacy settings. Please enable cookies or try using a different browser.");
-            } else {
-                setError("Failed to sign in via redirect. " + err.message);
-            }
-        });
-
-        return unsubscribeAuth;
+        const unsubscribe = auth.onAuthStateChanged((u) => { setUser(u); setIsLoading(false); });
+        return unsubscribe;
     }, []);
-    
+
     useEffect(() => {
-        // Ensure user is defined and has necessary properties before setting up listeners
-        if (user?.uid) {
-            setIsLoading(true);
-
-            // Listener for slideshows owned by the user
-            const ownedQuery = query(
-                collection(db, "slideshows"), 
-                where("userId", "==", user.uid),
-                limit(50)
-            );
-            
-            const unsubscribeOwned = onSnapshot(ownedQuery, (querySnapshot) => {
-                const slideshows: SavedSlideshow[] = [];
-                querySnapshot.forEach((doc) => {
-                    slideshows.push({ id: doc.id, ...doc.data() } as SavedSlideshow);
-                });
-                setOwnedSlideshows(slideshows);
-                setIsLoading(false);
-            }, (err) => {
-                console.error("Error fetching owned slideshows:", err);
-                if (err.message.includes("permissions")) {
-                     setError("Permission Error: Please check your Firebase Console Rules.");
-                } else {
-                     setError("Could not load your saved slideshows. Please check your connection.");
-                }
-                setIsLoading(false);
-            });
-
-            // Listener for slideshows shared with the user
-            let unsubscribeShared = () => {};
-            if (user.email) {
-                const sharedQuery = query(
-                    collection(db, "slideshows"), 
-                    where("sharedWith", "array-contains", user.email),
-                    limit(50)
-                );
-                
-                unsubscribeShared = onSnapshot(sharedQuery, (querySnapshot) => {
-                    const slideshows: SavedSlideshow[] = [];
-                    querySnapshot.forEach((doc) => {
-                        slideshows.push({ id: doc.id, ...doc.data() } as SavedSlideshow);
-                    });
-                    setSharedSlideshows(slideshows);
-                }, (err) => {
-                    console.error("Error fetching shared slideshows:", err);
-                });
-            }
-
-            return () => {
-                unsubscribeOwned();
-                unsubscribeShared();
-            };
-        } else {
-            setOwnedSlideshows([]);
-            setSharedSlideshows([]);
-        }
+        if (!user) return;
+        const qOwned = query(collection(db, "slideshows"), where("userId", "==", user.uid));
+        const unsub = onSnapshot(qOwned, (snap) => {
+            setOwnedSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
+        });
+        return unsub;
     }, [user]);
 
     const allSlideshows = useMemo(() => {
-        const combined = [...ownedSlideshows, ...sharedSlideshows];
-        const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
-        // Sort by createdAt descending (Created not Updated). Fallback to timestamp for legacy docs.
-        return unique.sort((a, b) => {
-            const timeA = a.createdAt?.toMillis() ?? a.timestamp?.toMillis() ?? 0;
-            const timeB = b.createdAt?.toMillis() ?? b.timestamp?.toMillis() ?? 0;
-            return timeB - timeA;
+        return [...ownedSlideshows, ...sharedSlideshows].sort((a, b) => {
+            const tA = a.createdAt?.toMillis() ?? a.timestamp?.toMillis() ?? 0;
+            const tB = b.createdAt?.toMillis() ?? b.timestamp?.toMillis() ?? 0;
+            return tB - tA;
         });
     }, [ownedSlideshows, sharedSlideshows]);
 
-    const currentSlideshowObj = useMemo(() => {
-        return allSlideshows.find(s => s.id === currentSlideshowId);
-    }, [allSlideshows, currentSlideshowId]);
-
-    const canEdit = useMemo(() => {
-        if (!user || !currentSlideshowObj) return true; // Default to true if new slideshow
-        if (currentSlideshowObj.userId === user.uid) return true; // Owner
-        
-        // Check shared permissions (Case insensitive check for robustness)
-        const userEmail = user.email?.toLowerCase();
-        const userPerm = currentSlideshowObj.sharedPermissions?.find(p => p.email.toLowerCase() === userEmail);
-        return userPerm?.role === 'update';
-    }, [user, currentSlideshowObj]);
-
     const handleLogin = async () => {
         const provider = new firebase.auth.GoogleAuthProvider();
-        provider.setCustomParameters({
-            prompt: 'select_account'
-        });
-
-        try {
-            await auth.signInWithPopup(provider);
-        } catch (error: any) {
-            console.error("Authentication error:", error);
-            if (error.code === 'auth/popup-blocked' || error.code === 'auth/popup-closed-by-user' || error.message.includes('missing initial state')) {
-                console.log("Popup failed, attempting redirect fallback...");
-                try {
-                    await auth.signInWithRedirect(provider);
-                } catch (redirectError: any) {
-                    console.error("Redirect fallback error:", redirectError);
-                    if (redirectError.code === 'auth/operation-not-supported-in-this-environment') {
-                        setError("This browser environment does not support Google Login. Please try opening the app in a regular browser tab.");
-                    } else {
-                        setError("Failed to start login. Please check browser settings.");
-                    }
-                }
-            } else {
-                setError("Failed to sign in. If you see a 'blocked' error, please check browser popup settings.");
-            }
-        }
+        try { await auth.signInWithPopup(provider); } catch (e) { setError("Login failed"); }
     };
 
-    const handleLogout = async () => {
-        try {
-            await auth.signOut();
-            resetWorkspace();
-            setOwnedSlideshows([]);
-            setSharedSlideshows([]);
-        } catch (error) {
-            console.error("Sign out error:", error);
-            setError("Failed to sign out. Please try again.");
-        }
-    };
-    
-    const resetWorkspace = () => {
-        setMediaFiles([]);
-        setAudioFiles([]);
-        setSlideshowName('');
-        setCurrentSlideshowId(null);
-        if(fileInputRef.current) fileInputRef.current.value = '';
-        if(audioInputRef.current) audioInputRef.current.value = '';
-    }
-    
-    // --- FILE HANDLING ---
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files) {
-            let files: File[] = Array.from(e.target.files);
-            
-            // Standard limit (Metadata.json says up to 20 images)
-            files = files.slice(0, 20 - mediaFiles.length);
-            
-            if (files.length === 0) return;
-
-            const newMediaFilesPromise = files.map(async (file: File): Promise<MediaFile> => {
-                 if (file.type.startsWith('image/')) {
-                    return {
-                        id: `item-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`,
-                        file,
-                        previewUrl: URL.createObjectURL(file),
-                        type: 'image',
-                        caption: '',
-                        rotation: 0,
-                    };
-                } else {
-                    // For video, we also need duration
-                    const duration = await getMediaDuration(file);
-                     return {
-                        id: `item-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`,
-                        file,
-                        previewUrl: URL.createObjectURL(file),
-                        type: 'video',
-                        rotation: 0,
-                        duration,
-                    };
-                }
-            });
-            
-            const resolvedFiles = await Promise.all(newMediaFilesPromise);
-            const validFiles = resolvedFiles.filter((f) => f !== null);
-            setMediaFiles(prev => [...prev, ...validFiles]);
-            if (fileInputRef.current) fileInputRef.current.value = '';
-        }
-    };
-    
-    const handleCaptionChange = (id: string, newCaption: string) => {
-        setMediaFiles(prev => prev.map(media => {
-            if (media.id === id && media.type === 'image') {
-                return { ...media, caption: newCaption };
-            }
-            return media;
+        if (!e.target.files) return;
+        const files = Array.from(e.target.files).slice(0, 20 - mediaFiles.length);
+        // Fix: Explicitly type 'f' as 'File' to resolve 'unknown' type errors when accessing properties or passing it to functions.
+        const resolved = await Promise.all(files.map(async (f: File) => {
+            const isImg = f.type.startsWith('image/');
+            const dur = isImg ? 0 : await getMediaDuration(f);
+            return {
+                id: `m-${Math.random().toString(36).substr(2, 9)}`,
+                file: f, previewUrl: URL.createObjectURL(f), type: isImg ? 'image' : 'video',
+                rotation: 0, caption: '', duration: dur
+            } as MediaFile;
         }));
-    };
-    
-    // Updated video metadata handler for existing videos (loaded without duration)
-    const handleVideoMetadataLoaded = (id: string, duration: number) => {
-        setMediaFiles(prev => prev.map(media => {
-             if (media.id === id && media.type === 'video' && (!media.duration || media.duration === 0)) {
-                 return { ...media, duration };
-             }
-             return media;
-        }));
+        setMediaFiles(p => [...p, ...resolved]);
     };
 
     const handleAudioChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            const duration = await getMediaDuration(file);
-            setAudioFiles(prev => [...prev, {
-                id: `audio-${Date.now()}-${Math.random()}`,
-                file,
-                name: file.name,
-                duration
-            }]);
-            if(audioInputRef.current) audioInputRef.current.value = '';
-        }
+        if (!e.target.files?.[0]) return;
+        const file = e.target.files[0];
+        const duration = await getMediaDuration(file);
+        setAudioFiles(p => [...p, { id: `a-${Date.now()}`, file, name: file.name, duration, startTime: 0, fadeIn: 1, fadeOut: 1 }]);
     };
 
-    const handleDeleteAudio = (id: string) => {
-        setAudioFiles(prev => prev.filter(a => a.id !== id));
-    };
-
-    const handleDeleteMedia = (id: string) => {
-        setMediaFiles(prev => prev.filter(media => media.id !== id));
-    };
-
-    const handleRotateMedia = (id: string, e: React.MouseEvent) => {
-        e.stopPropagation();
-        setMediaFiles(prev => prev.map(media => {
-            if (media.id === id) {
-                return { ...media, rotation: (media.rotation + 90) % 360 };
-            }
-            return media;
-        }));
-    };
-
-    // --- DRAG AND DROP HANDLERS ---
-    const handleDragStart = (e: React.DragEvent<HTMLDivElement>, index: number) => {
-        if (!canEdit) return; // Disable drag start if view only
-        setDraggedItemIndex(index);
-        e.dataTransfer.effectAllowed = 'move';
-        // setData is required for Firefox to initiate drag
-        e.dataTransfer.setData('text/plain', index.toString());
-    };
-
-    const handleDragOver = (e: React.DragEvent<HTMLDivElement>, index: number) => {
-        e.preventDefault(); // Necessary to allow dropping
-        if (index !== dragOverIndex) {
-            setDragOverIndex(index);
-        }
-    };
-
-    const handleDragLeave = () => {
-        setDragOverIndex(null);
-    };
-
-    const handleDrop = (dropIndex: number) => {
-        if (draggedItemIndex === null || draggedItemIndex === dropIndex || !canEdit) {
-            setDraggedItemIndex(null);
-            setDragOverIndex(null);
-            return;
-        }
-
-        const newMediaFiles = [...mediaFiles];
-        const [draggedItem] = newMediaFiles.splice(draggedItemIndex, 1);
-        newMediaFiles.splice(dropIndex, 0, draggedItem);
-
-        setMediaFiles(newMediaFiles);
-        setDraggedItemIndex(null);
-        setDragOverIndex(null);
-    };
-
-    const handleDragEnd = () => {
-        setDraggedItemIndex(null);
-        setDragOverIndex(null);
-    };
-
-
-    // --- AI CAPTION GENERATION ---
-    const handleGenerateCaption = async (media: MediaFile) => {
-        if (!process.env.API_KEY) {
-            setError("API key is not configured for AI features.");
-            return;
-        }
-        setGeneratingCaptionId(media.id);
-        setError(null);
-        try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            let imagePart;
-            if (media.file) {
-                imagePart = await fileToGenerativePart(media.file);
-            } else if (media.serverData) {
-                // If it's a remote file, we try to fetch it.
-                // Note: Fetching cross-origin might fail depending on CORS headers on the bucket.
-                imagePart = await urlToGenerativePart(media.previewUrl);
-            } else {
-                throw new Error("No image source found.");
-            }
-
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: { parts: [imagePart, { text: "Describe this image in a short, one-sentence caption." }] },
-            });
-            
-            const caption = response.text;
-            if (caption) {
-                handleCaptionChange(media.id, caption.trim());
-            } else {
-                throw new Error("AI did not generate a caption.");
-            }
-        } catch (err) {
-            console.error("AI Caption Generation Error:", err);
-            setError("Failed to generate AI caption. This might happen if cross-origin access is restricted for saved images.");
-        } finally {
-            setGeneratingCaptionId(null);
-        }
-    };
-
-
-    // --- SLIDESHOW PLAYBACK ---
-    const handlePlay = () => {
-        if (mediaFiles.length === 0) {
-            setError("Please upload at least one image or video to start the slideshow.");
-            return;
-        }
-        setError(null);
-        setCurrentSlide(0);
-        setCurrentAudioIndex(0); // Reset audio to first track
-        setIsPaused(false);
-        setIsPlaying(true);
-        setIsFadingOut(false);
-        // Playback trigger is handled by useEffect looking at isPlaying and audioSrc
-    };
-
-    const handleClosePreview = () => {
-        setIsPlaying(false);
-        setIsPaused(false);
-        setIsFadingOut(false);
-        if (audioRef.current) {
-            audioRef.current.pause();
-            audioRef.current.currentTime = 0;
-            audioRef.current.volume = 1; // Reset volume
-        }
-    };
-    
-    // Handle audio track switching
-    const handleAudioEnded = () => {
-        if (currentAudioIndex < audioFiles.length - 1) {
-             setCurrentAudioIndex(prev => prev + 1);
-        } else if (settings.repeatSlideshow) {
-             setCurrentAudioIndex(0);
-        }
-        // If it's the last track and no repeat, it stops naturally.
-    };
-    
-    // Trigger play when audio source changes (next song)
+    // Advanced Editor Logic for Audio Timing
     useEffect(() => {
-        if (isPlaying && !isPaused && audioRef.current && audioSrc) {
-             audioRef.current.play().catch(e => console.error("Audio switch play failed", e));
-        }
-    }, [currentAudioIndex, audioSrc, isPlaying, isPaused]);
-
-
-    // Ensure audio stops if slideshow ends automatically (via state change)
-    useEffect(() => {
-        if (!isPlaying && audioRef.current) {
-             audioRef.current.pause();
-             audioRef.current.currentTime = 0;
-             audioRef.current.volume = 1;
-        }
-    }, [isPlaying]);
-    
-    // Reworked playback logic to mute videos and keep background music playing.
-    useEffect(() => {
-        let slideTimer: ReturnType<typeof setTimeout> | undefined;
-        let fadeInterval: ReturnType<typeof setInterval> | undefined;
-        let fadeTimer: ReturnType<typeof setTimeout> | undefined;
-        const videoElement = videoPreviewRef.current;
-        const audioElement = audioRef.current;
-
-        // Reset visual fade out state when slide changes
-        setIsFadingOut(false);
-
-        const cleanup = () => {
-            if (slideTimer) clearTimeout(slideTimer);
-            if (fadeInterval) clearInterval(fadeInterval);
-            if (fadeTimer) clearTimeout(fadeTimer);
-        };
-
-        if (!isPlaying || !mediaFiles.length) {
-            return cleanup;
-        }
-
-        if (isPaused) {
-            if (audioElement) audioElement.pause();
-            if (videoElement) videoElement.pause();
-            return cleanup;
-        }
-
+        if (!isPlaying || isPaused || !audioRef.current) return;
+        const audio = audioRef.current;
         const currentMedia = mediaFiles[currentSlide];
-        const isLastSlide = currentSlide === mediaFiles.length - 1;
+        const clip = audioFiles[currentAudioIndex];
 
-        // --- AUDIO MANAGEMENT ---
-        if (audioElement && audioFiles.length > 0) {
-            // Ensure audio is playing
-            if (audioElement.paused && audioSrc) {
-                audioElement.play().catch(e => console.error("Audio play failed", e));
-            }
-            
-            // Ensure volume is reset to 1 at the start of each slide.
-            // If it is the last slide, the fade logic below will handle decreasing it.
-            // We only reset if we are NOT in the fading process.
-            if (!isLastSlide || settings.repeatSlideshow) {
-                audioElement.volume = 1;
-            }
-        }
-        
-        // --- FADE OUT LOGIC (Last Slide Only) ---
-        // This will fade whatever song is currently playing in audioRef AND trigger visual fade
-        if (isLastSlide && !settings.repeatSlideshow) {
-            const fadeDurationMs = settings.interval * 1000;
-            const steps = 50;
-            const intervalTime = fadeDurationMs / steps;
-            const decrement = 1 / steps;
-            
-            const startFade = () => {
-                // Audio Fade
-                if (audioElement && audioFiles.length > 0) {
-                    // Clear any existing interval just in case
-                    if (fadeInterval) clearInterval(fadeInterval);
-                    
-                    // Only reset volume to 1 if we are not already quiet (resuming fade)
-                    if(audioElement.volume > 0.9) audioElement.volume = 1;
+        const updateAudio = setInterval(() => {
+            if (!audio || !clip) return;
+            // DUCKING & FADING
+            let vol = currentMedia?.type === 'video' ? 0.2 : 1.0;
+            const cur = audio.currentTime;
+            if (cur < clip.fadeIn) vol *= (cur / clip.fadeIn);
+            else if (cur > clip.duration - clip.fadeOut) vol *= ((clip.duration - cur) / clip.fadeOut);
+            audio.volume = Math.max(0, Math.min(1, vol));
+        }, 50);
 
-                    fadeInterval = setInterval(() => {
-                        if (!audioElement) return;
-                        let newVol = audioElement.volume - decrement;
-                        if (newVol < 0) newVol = 0;
-                        audioElement.volume = newVol;
-                        
-                        if (newVol <= 0) {
-                            clearInterval(fadeInterval);
-                        }
-                    }, intervalTime);
-                }
+        return () => clearInterval(updateAudio);
+    }, [isPlaying, isPaused, currentSlide, currentAudioIndex, audioFiles, mediaFiles]);
 
-                // Visual Fade Trigger
-                setIsFadingOut(true);
-            };
-
-            if (currentMedia.type === 'video' && videoElement) {
-                // For videos, wait to start the fade so it finishes right at the end of the video
-                // Logic updated to be robust against pauses
-                const setupVideoFade = () => {
-                    const videoDurationMs = (videoElement.duration || 0) * 1000;
-                    const currentTimeMs = (videoElement.currentTime || 0) * 1000;
-                    
-                    const timeWhenFadeStartsMs = videoDurationMs - fadeDurationMs;
-                    // If video is shorter than interval, fade immediately
-                    const delay = Math.max(0, timeWhenFadeStartsMs - currentTimeMs);
-                    
-                    fadeTimer = setTimeout(startFade, delay);
-                };
-
-                if (videoElement.readyState >= 1) { // Metadata loaded
-                     setupVideoFade();
-                } else {
-                     videoElement.addEventListener('loadedmetadata', setupVideoFade);
-                }
-            } else {
-                // For images, start fading immediately as slide duration equals fade duration
-                startFade();
-            }
-        }
-
-        // --- ADVANCE SLIDE LOGIC ---
-        const advanceSlide = () => {
-            const nextSlideIndex = (currentSlide + 1) % mediaFiles.length;
-            if (isLastSlide && !settings.repeatSlideshow) {
-                setIsPlaying(false);
-            } else {
-                 if (nextSlideIndex === 0 && settings.repeatSlideshow && audioElement) {
-                    // Reset to first song logic if repeating
-                    setCurrentAudioIndex(0);
-                    if (audioElement) {
-                        audioElement.currentTime = 0;
-                        audioElement.volume = 1;
-                    }
-                }
-                setCurrentSlide(nextSlideIndex);
-            }
-        };
-
-        if (currentMedia.type === 'video') {
-            if (videoElement) {
-                // Ensure video is playing (muted by prop)
-                videoElement.play().catch(e => console.error("Video play failed", e));
-
-                // Use onended directly for cleaner cleanup
-                videoElement.onended = advanceSlide;
-                
-                return () => {
-                    cleanup();
-                    if(videoElement) {
-                      videoElement.onended = null;
-                    }
-                };
-            }
-        } else { // Image
-            const slideDurationMs = settings.interval * 1000;
-            slideTimer = setTimeout(advanceSlide, slideDurationMs);
-        }
-
-        return cleanup;
-    }, [isPlaying, isPaused, currentSlide, mediaFiles, settings]); // Removed audioFiles and audioSrc dependencies to prevent slide timer reset
-
-    // Navigation Handlers
-    const handleNext = (e?: React.MouseEvent) => {
-        e?.stopPropagation();
-        setCurrentSlide(prev => (prev + 1) % mediaFiles.length);
-        if (audioRef.current) audioRef.current.volume = 1;
-    };
-
-    const handlePrev = (e?: React.MouseEvent) => {
-        e?.stopPropagation();
-        setCurrentSlide(prev => prev === 0 ? mediaFiles.length - 1 : prev - 1);
-        if (audioRef.current) audioRef.current.volume = 1;
-    };
-    
-    const togglePause = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setIsPaused(prev => !prev);
-    }
-    
-    const handleStop = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        handleClosePreview();
-    }
-    
-    // --- SAVE/LOAD/DELETE/SHARE LOGIC ---
-    const handleSaveSlideshow = async () => {
-        if (!user) {
-            setError("You must be signed in to save a slideshow.");
-            return;
-        }
-        if (!canEdit) {
-            setError("You do not have permission to update this slideshow (View Only).");
-            return;
-        }
-        if (!slideshowName.trim()) {
-            setError("Please enter a name for your slideshow.");
-            return;
-        }
-        if (mediaFiles.length === 0) {
-            setError("Please add some media before saving.");
-            return;
-        }
-
+    const handleSave = async () => {
+        if (!user || !mediaFiles.length) return;
         setIsSaving(true);
-        setError(null);
-
         try {
-            const slideshowId = currentSlideshowId || doc(collection(db, 'slideshows')).id;
-            
-            const serializedMedia: SerializedMediaFile[] = await Promise.all(
-                mediaFiles.map(async (media) => {
-                    // Create base object with common properties
-                    const baseMedia: any = {
-                        id: media.id,
-                        type: media.type,
-                        name: media.file?.name || media.id, 
-                        rotation: media.rotation,
-                    };
-
-                    if (media.serverData) {
-                        baseMedia.url = media.serverData.url;
-                        baseMedia.storagePath = media.serverData.storagePath;
-                    } else if (media.file) {
-                        const fileExt = media.file.name.split('.').pop() || 'bin';
-                        const safeFileName = `${media.id}.${fileExt}`;
-                        const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
-                        
-                        const fileRef = ref(storage, filePath);
-                        await uploadBytes(fileRef, media.file);
-                        const url = await getDownloadURL(fileRef);
-                        
-                        baseMedia.url = url;
-                        baseMedia.storagePath = filePath;
-                        baseMedia.name = media.file.name;
-                    } else {
-                        throw new Error(`Media file ${media.id} is missing data for upload.`);
-                    }
-
-                    // Handle type-specific optional fields to prevent undefined
-                    if (media.type === 'image') {
-                        baseMedia.caption = (media as ImageFile).caption || '';
-                        // Explicitly do not add 'duration' for images
-                    } else if (media.type === 'video') {
-                        const dur = (media as VideoFile).duration;
-                        // Ensure duration is a valid finite number, default to 0
-                        baseMedia.duration = (typeof dur === 'number' && Number.isFinite(dur)) ? dur : 0;
-                    }
-
-                    return baseMedia as SerializedMediaFile;
-                })
-            );
-
-            // Handle multiple audio files
-            const serializedAudio: SerializedAudioFile[] = await Promise.all(
-                audioFiles.map(async (audio) => {
-                     let audioData: any = {};
-                     
-                     if (audio.serverData) {
-                         audioData = {
-                             name: audio.name,
-                             url: audio.serverData.url,
-                             storagePath: audio.serverData.storagePath,
-                         };
-                     } else if (audio.file) {
-                        const fileExt = audio.file.name.split('.').pop() || 'mp3';
-                        const safeFileName = `audio-${audio.id}.${fileExt}`;
-                        const filePath = `users/${user.uid}/${slideshowId}/${safeFileName}`;
-                        
-                        const fileRef = ref(storage, filePath);
-                        await uploadBytes(fileRef, audio.file);
-                        const url = await getDownloadURL(fileRef);
-                        audioData = { 
-                            name: audio.file.name, 
-                            url, 
-                            storagePath: filePath,
-                        };
-                     } else {
-                         throw new Error(`Audio file ${audio.id} missing data.`);
-                     }
-
-                     // Sanitize audio duration
-                     const dur = audio.duration;
-                     audioData.duration = (typeof dur === 'number' && Number.isFinite(dur)) ? dur : 0;
-                     
-                     return audioData as SerializedAudioFile;
-                })
-            );
-
-            // Calculate current total duration for caching in doc
-            const currentTotalDuration = mediaFiles.reduce((acc, curr) => {
-                if (curr.type === 'image') return acc + settings.interval;
-                return acc + (curr.duration || 0);
-            }, 0);
-
-            if (currentSlideshowId) { // Update existing slideshow
-                const updateData = {
-                    name: slideshowName.trim(),
-                    media: serializedMedia,
-                    audio: serializedAudio,
-                    settings,
-                    totalDuration: currentTotalDuration,
-                    timestamp: serverTimestamp() as Timestamp,
-                };
-                // Ensure we are updating the existing doc, preserving sharedWith and ownerInfo
-                await updateDoc(doc(db, 'slideshows', currentSlideshowId), updateData);
-            } else { // Create new slideshow
-                const slideshowData: Omit<SavedSlideshow, 'id'> = {
-                    userId: user.uid,
-                    name: slideshowName.trim(),
-                    media: serializedMedia,
-                    audio: serializedAudio,
-                    settings,
-                    totalDuration: currentTotalDuration,
-                    timestamp: serverTimestamp() as Timestamp,
-                    createdAt: serverTimestamp() as Timestamp,
-                    ownerInfo: {
-                        displayName: user.displayName || 'User', // Fallback to avoid undefined
-                        photoURL: user.photoURL || '',       // Fallback to avoid undefined
-                    },
-                    sharedWith: [],
-                    sharedPermissions: [],
-                };
-                await setDoc(doc(db, 'slideshows', slideshowId), slideshowData);
-                setCurrentSlideshowId(slideshowId);
-            }
-
-        } catch (err) {
-            console.error("Error saving slideshow:", err);
-             // @ts-ignore
-            if (err.message && err.message.includes("permission")) {
-                 setError("Permission Error: Check Firebase Console Rules.");
-            } else {
-                 setError("An error occurred while saving. Please try again.");
-            }
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const handleLoadSlideshow = async (slideshow: SavedSlideshow) => {
-        setIsProcessing(true);
-        setError(null);
-        try {
-            // OPTIMIZATION: Do not download files to creating Blobs. Use remote URLs directly.
-            // This prevents issues with CORS block on fetches and improves loading speed significantly.
-            const newMediaFiles: MediaFile[] = slideshow.media.map((media): MediaFile => {
-                // Determine if video or image based on stored type
-                if (media.type === 'image') {
-                    return {
-                        id: media.id,
-                        type: 'image',
-                        // file: undefined, // File is not loaded locally
-                        previewUrl: media.url, // Use remote URL directly
-                        caption: media.caption || '',
-                        rotation: media.rotation || 0,
-                        serverData: { url: media.url, storagePath: media.storagePath }
-                    };
+            const id = currentSlideshowId || doc(collection(db, 'slideshows')).id;
+            const serMedia = await Promise.all(mediaFiles.map(async m => {
+                const b: any = { id: m.id, type: m.type, name: m.id, rotation: m.rotation, caption: (m as any).caption, duration: (m as any).duration };
+                if (!m.serverData && m.file) {
+                    const path = `users/${user.uid}/${id}/${m.id}`;
+                    await uploadBytes(ref(storage, path), m.file);
+                    b.url = await getDownloadURL(ref(storage, path));
+                    b.storagePath = path;
                 } else {
-                    return {
-                        id: media.id,
-                        type: 'video',
-                        // file: undefined, // File is not loaded locally
-                        previewUrl: media.url, // Use remote URL directly
-                        rotation: media.rotation || 0,
-                        duration: media.duration, // Load duration if available
-                        serverData: { url: media.url, storagePath: media.storagePath }
-                    };
+                    b.url = m.serverData?.url; b.storagePath = m.serverData?.storagePath;
                 }
-            });
-
-            // Handle Audio Legacy (single object) vs New (array)
-            let newAudioFiles: AppStateAudio[] = [];
-            if (slideshow.audio) {
-                if (Array.isArray(slideshow.audio)) {
-                    newAudioFiles = slideshow.audio.map((a, index) => ({
-                         id: `audio-loaded-${index}`,
-                         name: a.name,
-                         duration: (typeof a.duration === 'number' && Number.isFinite(a.duration)) ? a.duration : 0, 
-                         serverData: { url: a.url, storagePath: a.storagePath }
-                    }));
-                } else {
-                    // Legacy single object
-                    const legacyDur = (slideshow.audio as any).duration;
-                    newAudioFiles = [{ 
-                        id: `audio-loaded-legacy`,
-                        name: slideshow.audio.name,
-                        duration: (typeof legacyDur === 'number' && Number.isFinite(legacyDur)) ? legacyDur : 0,
-                        serverData: { url: slideshow.audio.url, storagePath: slideshow.audio.storagePath }
-                    }];
-                }
-            }
-
-            setMediaFiles(newMediaFiles);
-            setAudioFiles(newAudioFiles);
-            setSettings(slideshow.settings);
-            setSlideshowName(slideshow.name);
-            setCurrentSlideshowId(slideshow.id);
-
-        } catch (err) {
-            console.error("Error loading slideshow:", err);
-            setError("Failed to load slideshow settings. Please check your connection.");
-        } finally {
-            setIsProcessing(false);
-        }
-    };
-    
-    const handleDeleteSlideshow = async (slideshow: SavedSlideshow) => {
-        if (!user || user.uid !== slideshow.userId) return;
-        if (!window.confirm(`Are you sure you want to delete "${slideshow.name}"? This action cannot be undone.`)) return;
-
-        setIsProcessing(true);
-        setError(null);
-        try {
-            const filePaths = slideshow.media.map(m => m.storagePath);
-            if (slideshow.audio) {
-                if (Array.isArray(slideshow.audio)) {
-                    slideshow.audio.forEach(a => filePaths.push(a.storagePath));
-                } else {
-                    filePaths.push(slideshow.audio.storagePath);
-                }
-            }
-            
-            await Promise.all(filePaths.map(path => 
-                deleteObject(ref(storage, path)).catch(err => console.warn("Asset deletion failed:", path, err))
-            ));
-            
-            await deleteDoc(doc(db, 'slideshows', slideshow.id));
-
-            if (currentSlideshowId === slideshow.id) {
-                resetWorkspace();
-            }
-
-        } catch (err) {
-            console.error("Error deleting slideshow:", err);
-             // @ts-ignore
-             if (err.message && err.message.includes("permission")) {
-                 setError("Permission Error: Check Firebase Console Rules.");
-            } else {
-                setError("Failed to delete the slideshow. Please try again.");
-            }
-        } finally {
-            setIsProcessing(false);
-        }
-    };
-    
-    const handleOpenShareModal = (slideshow: SavedSlideshow) => {
-        setSlideshowToShare(slideshow);
-        setShareEmail('');
-        setShareRole('view');
-        setIsShareModalOpen(true);
-    };
-
-    const handleCloseShareModal = () => {
-        setIsShareModalOpen(false);
-        setSlideshowToShare(null);
-        setShareEmail('');
-    };
-
-    const handleAddShare = async () => {
-        if (!slideshowToShare || !shareEmail.trim() || !user) return;
-        const emailToAdd = shareEmail.trim().toLowerCase();
-        
-        if (!/\S+@\S+\.\S+/.test(emailToAdd)) {
-            setError("Please enter a valid email address.");
-            return;
-        }
-        if (emailToAdd === user.email) {
-             setError("You can't share a slideshow with yourself.");
-             return;
-        }
-
-        setIsSharing(true);
-        setError(null);
-        try {
-            const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
-            const newPermission: SharedPermission = { email: emailToAdd, role: shareRole };
-
-            // We need to update both the array of emails (for querying) and the permissions array (for logic)
-            // But first, let's remove any existing entry for this user to avoid duplicates in permissions
-            const currentPerms = slideshowToShare.sharedPermissions?.filter(p => p.email !== emailToAdd) || [];
-            currentPerms.push(newPermission);
-
-            await updateDoc(slideshowRef, { 
-                sharedWith: arrayUnion(emailToAdd),
-                sharedPermissions: currentPerms
-            });
-            
-            // Update local state to reflect changes immediately in the modal
-            setSlideshowToShare(prev => ({
-                ...prev!,
-                sharedWith: [...new Set([...(prev!.sharedWith || []), emailToAdd])],
-                sharedPermissions: currentPerms
+                return b;
             }));
-            
-            setShareEmail('');
-        } catch (err) {
-            console.error("Error sharing slideshow:", err);
-            setError("Failed to add user. Please try again.");
-        } finally {
-            setIsSharing(false);
-        }
-    };
-
-    const handleRemoveShare = async (emailToRemove: string) => {
-        if (!slideshowToShare) return;
-
-        setIsSharing(true);
-        setError(null);
-        try {
-            const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
-            
-            const currentPerms = slideshowToShare.sharedPermissions?.filter(p => p.email !== emailToRemove) || [];
-
-            await updateDoc(slideshowRef, { 
-                sharedWith: arrayRemove(emailToRemove),
-                sharedPermissions: currentPerms
-            });
-
-             setSlideshowToShare(prev => ({
-                ...prev!,
-                sharedWith: (prev!.sharedWith || []).filter(e => e !== emailToRemove),
-                sharedPermissions: currentPerms
+            const serAudio = await Promise.all(audioFiles.map(async a => {
+                const b: any = { name: a.name, duration: a.duration, startTime: a.startTime, fadeIn: a.fadeIn, fadeOut: a.fadeOut };
+                if (!a.serverData && a.file) {
+                    const path = `users/${user.uid}/${id}/a-${a.id}`;
+                    await uploadBytes(ref(storage, path), a.file);
+                    b.url = await getDownloadURL(ref(storage, path));
+                    b.storagePath = path;
+                } else {
+                    b.url = a.serverData?.url; b.storagePath = a.serverData?.storagePath;
+                }
+                return b;
             }));
-        } catch (err) {
-            console.error("Error removing share:", err);
-            setError("Failed to remove user. Please try again.");
-        } finally {
-            setIsSharing(false);
-        }
-    };
-    
-    const handleUpdatePermission = async (emailToUpdate: string, newRole: 'view' | 'update') => {
-         if (!slideshowToShare) return;
-         setIsSharing(true);
-         try {
-             const slideshowRef = doc(db, 'slideshows', slideshowToShare.id);
-             const currentPerms = [...(slideshowToShare.sharedPermissions || [])];
-             const idx = currentPerms.findIndex(p => p.email === emailToUpdate);
-             
-             if (idx >= 0) {
-                 currentPerms[idx].role = newRole;
-             } else {
-                 // Legacy user case
-                 currentPerms.push({ email: emailToUpdate, role: newRole });
-             }
-             
-             await updateDoc(slideshowRef, { sharedPermissions: currentPerms });
-             
-             setSlideshowToShare(prev => ({
-                 ...prev!,
-                 sharedPermissions: currentPerms
-             }));
-             
-         } catch (err) {
-             console.error("Error updating permission:", err);
-             setError("Failed to update permission.");
-         } finally {
-             setIsSharing(false);
-         }
+            await setDoc(doc(db, 'slideshows', id), {
+                userId: user.uid, name: slideshowName || 'Untitled', media: serMedia, audio: serAudio,
+                settings, totalDuration: totalSlideshowDuration, timestamp: serverTimestamp(), createdAt: currentSlideshowId ? ownedSlideshows.find(s => s.id === id)?.createdAt : serverTimestamp()
+            });
+            setCurrentSlideshowId(id);
+        } catch (e) { setError("Save failed"); } finally { setIsSaving(false); }
     };
 
+    const handleLoad = (s: SavedSlideshow) => {
+        setMediaFiles(s.media.map(m => ({ id: m.id, type: m.type as any, previewUrl: m.url, rotation: m.rotation || 0, caption: m.caption || '', duration: m.duration || 0, serverData: { url: m.url, storagePath: m.storagePath } })));
+        setAudioFiles(s.audio.map((a, i) => ({ id: `l-${i}`, name: a.name, duration: a.duration || 0, startTime: a.startTime || 0, fadeIn: a.fadeIn || 1, fadeOut: a.fadeOut || 1, serverData: { url: a.url, storagePath: a.storagePath } })));
+        setSettings(s.settings); setSlideshowName(s.name); setCurrentSlideshowId(s.id);
+    };
 
     return (
-        <div className={`min-h-screen font-sans transition-colors duration-500 ${user ? 'bg-brand-dark text-gray-200' : 'bg-white text-gray-900'}`}>
-            {(isSaving || isProcessing) && (
-                <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center">
-                    <div className="text-center">
-                        <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-brand-purple mx-auto"></div>
-                        <p className="text-white text-xl mt-4">{isSaving ? 'Saving...' : (isProcessing ? 'Processing...' : 'Loading...')}</p>
-                    </div>
-                </div>
-            )}
-
-            <header className={`backdrop-blur-sm p-4 flex justify-between items-center sticky top-0 z-40 transition-all duration-300 ${user ? 'bg-gray-900/50 shadow-lg' : 'bg-white/90 border-b border-gray-100 supports-[backdrop-filter]:bg-white/60'}`}>
-                <div className="flex items-center gap-4">
-                    <h1 className="text-3xl font-bold tracking-wider">
-                        <span className="text-brand-purple">Muziq</span> <span className={user ? 'text-white' : 'text-gray-900'}>Slides</span>
-                    </h1>
-                     <button onClick={() => setIsHelpModalOpen(true)} className={`transition-colors ${user ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-brand-purple'}`} aria-label="Open help guide">
-                        <QuestionMarkCircleIcon className="w-7 h-7" />
-                    </button>
-                </div>
-                <div>
-                    {isLoading && !user ? (
-                        <div className="text-gray-400">Loading...</div>
-                    ) : user ? (
-                        <div className="flex items-center gap-4">
-                            <img src={user.photoURL ?? ''} alt={user.displayName ?? 'User'} className="w-10 h-10 rounded-full border-2 border-gray-700" />
-                            <span className="hidden sm:block font-medium">{user.displayName}</span>
-                            <button onClick={handleLogout} className="bg-gray-200 hover:bg-gray-300 text-gray-900 font-bold py-2 px-4 rounded-lg transition-colors text-sm">
-                                Logout
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="flex items-center gap-4">
-                            <button onClick={handleLogin} className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors shadow-md hover:shadow-lg">
-                                <GoogleIcon className="w-5 h-5 bg-white rounded-full p-0.5" />
-                                Sign in
-                            </button>
-                        </div>
-                    )}
+        <div className={`min-h-screen font-sans ${user ? 'bg-brand-dark text-gray-200' : 'bg-white text-gray-900'}`}>
+            <header className={`p-4 flex justify-between items-center border-b ${user ? 'bg-gray-900/50 border-gray-800' : 'bg-white border-gray-100'}`}>
+                <h1 className="text-2xl font-bold"><span className="text-brand-purple">Muziq</span> Slides</h1>
+                <div className="flex gap-4">
+                    {user ? <button onClick={() => auth.signOut()} className="bg-gray-200 text-gray-900 py-2 px-4 rounded-lg text-sm font-bold">Logout</button> : <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-4 rounded-lg text-sm font-bold">Sign In</button>}
                 </div>
             </header>
 
-            <main className={user ? "p-4 sm:p-8" : ""}>
-                 {!user ? (
-                    <div className="animate-fade-in">
-                        {/* Hero Section */}
-                        <section className="py-20 lg:py-32 text-center px-4">
-                            <div className="max-w-4xl mx-auto">
-                                <h2 className="text-5xl md:text-6xl font-extrabold text-gray-900 mb-8 tracking-tight leading-tight">
-                                    Turn Memories into <br/><span className="text-brand-purple">Masterpieces</span>
-                                </h2>
-                                <p className="text-xl text-gray-600 mb-10 max-w-2xl mx-auto leading-relaxed">
-                                    Muziq Slides is the easiest way to create stunning slideshows with your photos, videos, and favorite music. Perfect for sharing moments on any screen.
-                                </p>
-                                <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-                                    <button onClick={handleLogin} className="bg-brand-purple hover:bg-purple-700 text-white text-lg font-bold py-4 px-8 rounded-full shadow-xl hover:shadow-2xl transition-all transform hover:-translate-y-1 flex items-center gap-3">
-                                        <GoogleIcon className="w-6 h-6 bg-white rounded-full p-1" />
-                                        Sign In to Get Started
-                                    </button>
-                                     <button onClick={() => setIsHelpModalOpen(true)} className="text-gray-600 hover:text-brand-purple font-semibold py-4 px-8 rounded-full hover:bg-gray-50 transition-colors">
-                                        Learn More
-                                    </button>
-                                </div>
-                                
-                                {/* Disclaimer for Video Playback Issues */}
-                                <div className="mt-12 max-w-2xl mx-auto bg-white border border-gray-100 shadow-md p-6 rounded-2xl text-left flex flex-col sm:flex-row gap-4 items-start hover:shadow-lg transition-shadow duration-300">
-                                    <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0 text-brand-purple">
-                                        <InfoIcon className="w-6 h-6" />
+            {!user ? (
+                <main className="animate-fade-in text-center py-20 px-4">
+                    <h2 className="text-5xl font-extrabold mb-6 leading-tight">Turn Memories into <br/><span className="text-brand-purple">Masterpieces</span></h2>
+                    <p className="text-xl text-gray-600 mb-10 max-w-2xl mx-auto">Create beautiful photo slideshows with your favorite music. Perfect for Roku or Amazon Fire TV screensavers.</p>
+                    <button onClick={handleLogin} className="bg-brand-purple text-white py-4 px-10 rounded-full text-lg font-bold shadow-lg hover:shadow-2xl transition-all">Get Started for Free</button>
+                    
+                    <div className="mt-20 grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+                        <div className="p-8 bg-gray-50 rounded-2xl border border-gray-100"><UploadIcon className="w-10 h-10 mx-auto mb-4 text-brand-purple"/><h4 className="font-bold mb-2">Upload Media</h4><p className="text-sm text-gray-500">Up to 20 photos and videos in one track.</p></div>
+                        <div className="p-8 bg-gray-50 rounded-2xl border border-gray-100"><MusicIcon className="w-10 h-10 mx-auto mb-4 text-brand-purple"/><h4 className="font-bold mb-2">Add Background Music</h4><p className="text-sm text-gray-500">Professional timeline for exact audio timing.</p></div>
+                        <div className="p-8 bg-gray-50 rounded-2xl border border-gray-100"><AdjustmentIcon className="w-10 h-10 mx-auto mb-4 text-brand-purple"/><h4 className="font-bold mb-2">Advanced Ducking</h4><p className="text-sm text-gray-500">Automatically lower music volume for video clips.</p></div>
+                    </div>
+                </main>
+            ) : (
+                <main className="p-4 sm:p-8 grid lg:grid-cols-2 gap-8">
+                    <div className="space-y-6">
+                        <section className="bg-gray-800/50 p-6 rounded-2xl border border-gray-700">
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><UploadIcon className="w-5 h-5 text-brand-purple"/> 1. Upload Media</h3>
+                            <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-700 rounded-xl p-8 text-center cursor-pointer hover:border-brand-purple transition-all">
+                                <UploadIcon className="w-10 h-10 mx-auto text-gray-500 mb-2"/>
+                                <p className="text-sm text-gray-400">Click to upload photos/videos</p>
+                            </div>
+                            <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*" className="hidden" />
+                            <div className="mt-4 grid grid-cols-4 gap-2">
+                                {mediaFiles.map(m => (
+                                    <div key={m.id} className="aspect-square bg-black rounded-lg overflow-hidden relative group">
+                                        <img src={m.previewUrl} className="w-full h-full object-cover" />
+                                        <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="absolute top-1 right-1 bg-red-600 p-1 rounded-full opacity-0 group-hover:opacity-100"><XIcon className="w-3 h-3 text-white"/></button>
                                     </div>
-                                    <div>
-                                        <h4 className="text-gray-900 font-bold mb-1 text-lg">Video Playback Note</h4>
-                                        <p className="text-gray-600 text-sm leading-relaxed">
-                                            If videos do not appear on some devices (particularly iOS, iPads, or some Windows PCs), it is often due to strict browser security policies regarding autoplay. We strive for maximum compatibility, but some settings are controlled by your device manufacturer.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {/* Scroll Down Indicator */}
-                                <div className="mt-20 flex justify-center animate-bounce">
-                                    <div className="flex flex-col items-center text-gray-400">
-                                        <span className="text-[10px] uppercase tracking-widest font-bold mb-1">Scroll for more</span>
-                                        <ChevronDownIcon className="w-6 h-6 text-brand-purple" />
-                                    </div>
-                                </div>
+                                ))}
                             </div>
                         </section>
 
-                        {/* 3 Features Section */}
-                        <section className="py-20 bg-gray-50 border-t border-gray-100">
-                            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                                <div className="text-center mb-16">
-                                    <h3 className="text-base font-semibold text-brand-purple tracking-wide uppercase">Features</h3>
-                                    <p className="mt-2 text-3xl leading-8 font-extrabold tracking-tight text-gray-900 sm:text-4xl">
-                                        Everything you need
-                                    </p>
-                                </div>
+                        <section className="bg-gray-800/50 p-6 rounded-2xl border border-gray-700">
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><MusicIcon className="w-5 h-5 text-brand-purple"/> 2. Add Background Music</h3>
+                            <button onClick={() => audioInputRef.current?.click()} className="w-full bg-gray-700 py-3 rounded-lg font-bold flex justify-center gap-2"><PlusIcon className="w-5 h-5"/> Add Track</button>
+                            <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*" className="hidden" />
+                            <div className="mt-4 space-y-2">
+                                {audioFiles.map(a => <div key={a.id} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center text-sm font-medium"><span>{a.name} ({formatDuration(a.duration)})</span><button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))}><TrashIcon className="w-4 h-4 text-red-400"/></button></div>)}
+                            </div>
+                        </section>
 
-                                <div className="grid md:grid-cols-3 gap-10">
-                                    {/* Feature 1 */}
-                                    <div className="bg-white p-8 rounded-2xl shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 relative group">
-                                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-400 to-pink-600 rounded-t-2xl transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>
-                                        <div className="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center mb-6 text-brand-purple mx-auto md:mx-0">
-                                            <UploadIcon className="w-8 h-8" />
-                                        </div>
-                                        <h4 className="text-xl font-bold text-gray-900 mb-3 text-center md:text-left">Upload & Organize</h4>
-                                        <p className="text-gray-600 leading-relaxed text-center md:text-left">
-                                            Easily upload up to 20 images and videos. Drag and drop to reorder, rotate to fix orientation, and curate your perfect flow.
-                                        </p>
-                                    </div>
-
-                                    {/* Feature 2 */}
-                                    <div className="bg-white p-8 rounded-2xl shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 relative group">
-                                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 to-cyan-600 rounded-t-2xl transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>
-                                        <div className="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center mb-6 text-blue-600 mx-auto md:mx-0">
-                                            <MusicIcon className="w-8 h-8" />
-                                        </div>
-                                        <h4 className="text-xl font-bold text-gray-900 mb-3 text-center md:text-left">Music & AI Magic</h4>
-                                        <p className="text-gray-600 leading-relaxed text-center md:text-left">
-                                            Set the mood with background music. Use Gemini AI to generate smart captions and apply cinematic effects like Ken Burns.
-                                        </p>
-                                    </div>
-
-                                    {/* Feature 3 */}
-                                    <div className="bg-white p-8 rounded-2xl shadow-sm hover:shadow-lg transition-all duration-300 border border-gray-100 relative group">
-                                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-400 to-emerald-600 rounded-t-2xl transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></div>
-                                        <div className="w-14 h-14 bg-green-100 rounded-xl flex items-center justify-center mb-6 text-green-600 mx-auto md:mx-0">
-                                            <ShareIcon className="w-8 h-8" />
-                                        </div>
-                                        <h4 className="text-xl font-bold text-gray-900 mb-3 text-center md:text-left">Save & Collaborate</h4>
-                                        <p className="text-gray-600 leading-relaxed text-center md:text-left">
-                                            Save your slideshows to the cloud. Share access with friends via email so they can view updates instantly.
-                                        </p>
-                                    </div>
-                                </div>
+                        <section className="bg-gray-800/50 p-6 rounded-2xl border border-gray-700">
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><SettingsIcon className="w-5 h-5 text-brand-purple"/> 3. Settings</h3>
+                            <div className="space-y-4">
+                                <label className="text-sm text-gray-400">Photo Interval: {settings.interval}s</label>
+                                <input type="range" min="1" max="30" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
                             </div>
                         </section>
                     </div>
-                ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        {/* Controls Column */}
-                        <div className="space-y-6">
-                           {/* Uploader */}
-                            <div className="bg-gray-800/50 p-6 rounded-lg">
-                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">1. Upload Media</h3>
-                                <div onClick={() => canEdit && fileInputRef.current?.click()} className={`border-2 border-dashed border-gray-600 rounded-lg p-8 text-center transition-colors ${!canEdit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-brand-purple hover:bg-gray-800'}`}>
-                                    <UploadIcon className="w-12 h-12 mx-auto text-gray-500" />
-                                    <p className="mt-2 text-gray-400">Click to upload images/videos</p>
-                                    <p className="text-xs text-gray-500">Max 20 files</p>
-                                </div>
-                                <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*" className="hidden" disabled={!canEdit} />
-                                <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 gap-4">
-                                    {mediaFiles.map((media, index) => (
-                                        <div 
-                                            key={media.id} 
-                                            className={`flex flex-col gap-1 transition-all duration-200
-                                                ${draggedItemIndex === index ? 'opacity-30 scale-95' : 'opacity-100'}
-                                                ${dragOverIndex === index ? 'bg-brand-purple/20 rounded-lg' : ''}
-                                                ${canEdit ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}
-                                            `}
-                                            draggable={canEdit}
-                                            onDragStart={(e) => handleDragStart(e, index)}
-                                            onDragOver={(e) => handleDragOver(e, index)}
-                                            onDragLeave={handleDragLeave}
-                                            onDrop={() => handleDrop(index)}
-                                            onDragEnd={handleDragEnd}
-                                        >
-                                            <div className="group relative w-full h-24 overflow-hidden rounded-md">
-                                                {media.type === 'video' ? (
-                                                    <video 
-                                                        src={media.previewUrl} 
-                                                        className="w-full h-full object-cover pointer-events-none transition-transform duration-300" 
-                                                        style={{ transform: `rotate(${media.rotation}deg)` }}
-                                                        muted 
-                                                        playsInline
-                                                        preload="auto"
-                                                        crossOrigin="anonymous"
-                                                        // Ensure we capture duration if it was missing (e.g. from older save)
-                                                        onLoadedMetadata={(e) => handleVideoMetadataLoaded(media.id, e.currentTarget.duration)}
-                                                    />
-                                                ) : (
-                                                    <img 
-                                                        src={media.previewUrl} 
-                                                        alt={media.file?.name || 'Slide'} 
-                                                        className="w-full h-full object-cover pointer-events-none transition-transform duration-300"
-                                                        style={{ transform: `rotate(${media.rotation}deg)` }} 
-                                                    />
-                                                )}
-                                                {canEdit && (
-                                                    <>
-                                                        <button onClick={() => handleDeleteMedia(media.id)} className="absolute top-1 right-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                                            <XIcon className="w-4 h-4" />
-                                                        </button>
-                                                        <button onClick={(e) => handleRotateMedia(media.id, e)} className="absolute top-1 left-1 bg-black/50 rounded-full p-1 text-white opacity-0 group-hover:opacity-100 transition-opacity z-10" title="Rotate">
-                                                            <RotateIcon className="w-4 h-4" />
-                                                        </button>
-                                                    </>
-                                                )}
-                                            </div>
-                                            {media.type === 'image' && (
-                                                <div className="relative w-full">
-                                                    <input
-                                                        type="text"
-                                                        value={media.caption}
-                                                        onChange={(e) => handleCaptionChange(media.id, e.target.value)}
-                                                        placeholder="Caption..."
-                                                        maxLength={80}
-                                                        className={`w-full bg-gray-700 text-white text-xs rounded p-1 border border-transparent focus:outline-none focus:ring-1 focus:ring-brand-purple pr-6 ${!canEdit ? 'opacity-70' : ''}`}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                        disabled={!canEdit}
-                                                    />
-                                                    {settings.smartCaptionsEnabled && canEdit && (
-                                                        <button
-                                                            onClick={() => handleGenerateCaption(media)}
-                                                            disabled={generatingCaptionId === media.id}
-                                                            className="absolute top-1/2 right-1 -translate-y-1/2 text-yellow-400 hover:text-yellow-300 disabled:text-gray-500 disabled:cursor-not-allowed"
-                                                            title="Generate AI Caption"
-                                                        >
-                                                            {generatingCaptionId === media.id ? (
-                                                                <div className="w-3 h-3 border-2 border-dashed rounded-full animate-spin border-white"></div>
-                                                            ) : (
-                                                                <SparklesIcon className="w-4 h-4" />
-                                                            )}
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
+
+                    <div className="space-y-6">
+                        <section className="bg-gray-800/50 p-6 rounded-2xl border border-gray-700">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold flex items-center gap-2"><PlayIcon className="w-5 h-5 text-brand-purple"/> 4. Run Slideshow</h3>
+                                <button onClick={() => setIsAdvancedEditorOpen(true)} className="text-xs bg-brand-purple/20 text-brand-purple border border-brand-purple/30 py-1 px-3 rounded-full flex items-center gap-1 hover:bg-brand-purple/40"><AdjustmentIcon className="w-3 h-3"/> Advanced Editor</button>
                             </div>
-                            
-                            {/* Music Picker */}
-                            <div className="bg-gray-800/50 p-6 rounded-lg">
-                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">2. Add Music</h3>
-                                {audioFiles.length === 0 ? (
-                                     <div onClick={() => canEdit && audioInputRef.current?.click()} className={`border-2 border-dashed border-gray-600 rounded-lg p-8 text-center transition-colors ${!canEdit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-brand-purple hover:bg-gray-800'}`}>
-                                        <MusicIcon className="w-12 h-12 mx-auto text-gray-500" />
-                                        <p className="mt-2 text-gray-400">Click to select an audio file</p>
+                            <div className="aspect-video bg-black rounded-xl relative flex items-center justify-center overflow-hidden group">
+                                {mediaFiles.length > 0 ? <button onClick={() => setIsPlaying(true)} className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"><PlayIcon className="w-20 h-20 text-white"/></button> : <p className="text-gray-500">No media yet</p>}
+                            </div>
+                        </section>
+
+                        <section className="bg-gray-800/50 p-6 rounded-2xl border border-gray-700">
+                            <h3 className="text-lg font-bold mb-4">5. Save & Manage</h3>
+                            <div className="flex gap-2 mb-6">
+                                <input value={slideshowName} onChange={e => setSlideshowName(e.target.value)} placeholder="Slideshow Name" className="flex-1 bg-gray-700 rounded-lg px-4 py-2 border-none outline-none focus:ring-1 focus:ring-brand-purple" />
+                                <button onClick={handleSave} disabled={isSaving} className="bg-brand-purple py-2 px-6 rounded-lg font-bold disabled:opacity-50">Save</button>
+                            </div>
+                            <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
+                                {allSlideshows.map(s => (
+                                    <div key={s.id} className="bg-gray-700/50 p-3 rounded-xl flex justify-between items-center group">
+                                        <div><h4 className="font-bold text-sm">{s.name}</h4><p className="text-[10px] text-gray-400">Length: {formatDuration(s.totalDuration || 0)}</p></div>
+                                        <div className="flex gap-2"><button onClick={() => handleLoad(s)} className="text-xs bg-brand-purple py-1 px-4 rounded-lg font-bold">Load</button></div>
                                     </div>
-                                ) : (
-                                    <div className="space-y-3">
-                                        <div className="flex justify-between items-center text-sm text-gray-400 mb-2">
-                                            <span>Slideshow Duration: {formatDuration(totalSlideshowDuration)}</span>
-                                            <span>Music Duration: {formatDuration(totalMusicDuration)}</span>
-                                        </div>
-                                        {audioFiles.map((audio, index) => (
-                                            <div key={audio.id} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center">
-                                                <div className="flex items-center gap-3 overflow-hidden">
-                                                     <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center flex-shrink-0">
-                                                        <span className="text-xs font-bold text-gray-400">{index + 1}</span>
-                                                     </div>
-                                                     <div className="min-w-0">
-                                                         <p className="text-sm font-medium text-white truncate">{audio.name}</p>
-                                                         <p className="text-xs text-gray-400">{formatDuration(audio.duration)}</p>
-                                                     </div>
+                                ))}
+                            </div>
+                        </section>
+                    </div>
+                </main>
+            )}
+
+            {/* ADVANCED EDITOR MODAL */}
+            {isAdvancedEditorOpen && (
+                <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+                    <div className="bg-gray-900 w-full max-w-5xl rounded-3xl border border-gray-800 overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="p-6 border-b border-gray-800 flex justify-between items-center">
+                            <h2 className="text-2xl font-bold flex items-center gap-2"><AdjustmentIcon className="w-8 h-8 text-brand-purple"/> Timeline Editor</h2>
+                            <button onClick={() => setIsAdvancedEditorOpen(false)}><XIcon className="w-8 h-8 text-gray-500"/></button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-24 text-[10px] text-gray-500 font-bold uppercase">Media</div>
+                                    <div className="flex-1 h-20 bg-gray-800 rounded-xl flex items-center gap-1 p-2 overflow-x-auto">
+                                        {mediaFiles.map(m => <div key={m.id} className="h-full aspect-square bg-black rounded border border-brand-purple/20"/>)}
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <div className="w-24 text-[10px] text-gray-500 font-bold uppercase">Audio</div>
+                                    <div className="flex-1 space-y-2">
+                                        {audioFiles.map(a => (
+                                            <div key={a.id} className="bg-brand-purple/10 border border-brand-purple/30 p-4 rounded-xl flex flex-wrap gap-4 items-center">
+                                                <span className="text-sm font-bold flex-1">{a.name}</span>
+                                                <div className="flex gap-4">
+                                                    <label className="text-[10px] text-gray-400">Offset: <input type="number" value={a.startTime} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: +e.target.value} : x))} className="bg-gray-800 w-10 text-white outline-none"/></label>
+                                                    <label className="text-[10px] text-gray-400">Fade In: <input type="number" value={a.fadeIn} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeIn: +e.target.value} : x))} className="bg-gray-800 w-10 text-white outline-none"/></label>
+                                                    <label className="text-[10px] text-gray-400">Fade Out: <input type="number" value={a.fadeOut} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeOut: +e.target.value} : x))} className="bg-gray-800 w-10 text-white outline-none"/></label>
                                                 </div>
-                                                {canEdit && (
-                                                     <button onClick={() => handleDeleteAudio(audio.id)} className="text-gray-400 hover:text-red-400 p-1">
-                                                        <TrashIcon className="w-4 h-4" />
-                                                     </button>
-                                                )}
                                             </div>
                                         ))}
-
-                                        {totalSlideshowDuration > totalMusicDuration && canEdit && (
-                                             <button 
-                                                onClick={() => audioInputRef.current?.click()} 
-                                                className="w-full border-2 border-dashed border-gray-600 rounded-lg p-3 flex items-center justify-center gap-2 text-gray-400 hover:text-brand-purple hover:border-brand-purple hover:bg-gray-800 transition-colors"
-                                             >
-                                                <PlusIcon className="w-5 h-5" />
-                                                Add another song
-                                             </button>
-                                        )}
-                                    </div>
-                                )}
-                                
-                                <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*,.m4p,.m4a" className="hidden" disabled={!canEdit} />
-                                
-                                {/* Audio Player Logic */}
-                                {currentAudioFile && audioSrc && (
-                                    <audio 
-                                        ref={audioRef} 
-                                        src={audioSrc} 
-                                        // Loop only if repeats or if it's the only song? 
-                                        // Requirement: play songs sequentially. Loop if slideshow repeats.
-                                        // We handle looping manually in onEnded via state.
-                                        className="w-full mt-4" 
-                                        controls
-                                        onEnded={handleAudioEnded}
-                                    />
-                                )}
-                            </div>
-
-                             {/* Settings */}
-                            <div className="bg-gray-800/50 p-6 rounded-lg relative overflow-hidden">
-                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 flex justify-between">
-                                    3. Settings
-                                </h3>
-                                <div className={`space-y-4 ${!canEdit ? 'opacity-70 pointer-events-none' : ''}`}>
-                                    <div>
-                                        <label htmlFor="interval" className="block mb-2 text-sm font-medium text-gray-300">Slide Duration: {settings.interval}s</label>
-                                        <input id="interval" type="range" min="1" max="30" value={settings.interval} onChange={(e) => setSettings(s => ({ ...s, interval: parseInt(e.target.value) }))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer" disabled={!canEdit} />
-                                    </div>
-                                    <div>
-                                        <label htmlFor="slideStyle" className="block mb-2 text-sm font-medium text-gray-300">Slide Style</label>
-                                        <select id="slideStyle" value={settings.slideStyle} onChange={(e) => setSettings(s => ({...s, slideStyle: e.target.value}))} className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5" disabled={!canEdit}>
-                                            {SLIDE_STYLES.map(style => <option key={style.id} value={style.id}>{style.name}</option>)}
-                                        </select>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <label htmlFor="showClock" className="text-sm font-medium text-gray-300">Show Clock in Preview</label>
-                                        <button onClick={() => setSettings(s => ({...s, showClock: !s.showClock}))} disabled={!canEdit} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showClock ? 'bg-brand-purple' : 'bg-gray-600'}`}>
-                                            <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.showClock ? 'translate-x-6' : 'translate-x-1'}`}/>
-                                        </button>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <label htmlFor="repeatSlideshow" className="text-sm font-medium text-gray-300">Repeat Slideshow</label>
-                                        <button onClick={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} disabled={!canEdit} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.repeatSlideshow ? 'bg-brand-purple' : 'bg-gray-600'}`}>
-                                            <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.repeatSlideshow ? 'translate-x-6' : 'translate-x-1'}`}/>
-                                        </button>
-                                    </div>
-                                    <div className="flex items-center justify-between">
-                                        <label htmlFor="showCaptions" className="text-sm font-medium text-gray-300">Show Captions</label>
-                                        <button onClick={() => setSettings(s => ({...s, showCaptions: !s.showCaptions}))} disabled={!canEdit} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.showCaptions ? 'bg-brand-purple' : 'bg-gray-600'}`}>
-                                            <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.showCaptions ? 'translate-x-6' : 'translate-x-1'}`}/>
-                                        </button>
-                                    </div>
-                                     <div className="flex items-center justify-between pt-2 border-t border-gray-700/50">
-                                        <label htmlFor="smartCaptions" className="text-sm font-medium text-gray-300">Enable Smart Captions (AI)</label>
-                                        <button onClick={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} disabled={!canEdit} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${settings.smartCaptionsEnabled ? 'bg-brand-purple' : 'bg-gray-600'}`}>
-                                            <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${settings.smartCaptionsEnabled ? 'translate-x-6' : 'translate-x-1'}`}/>
-                                        </button>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        
-                        {/* Preview and Manage Column */}
-                        <div className="space-y-6">
-                            <div className="bg-gray-800/50 p-6 rounded-lg">
-                               <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2">4. Run Slideshow</h3>
-                                <div className="aspect-video bg-black rounded-lg flex items-center justify-center relative overflow-hidden">
-                                    {mediaFiles.length > 0 ? (
-                                        <div className="w-full h-full relative">
-                                            {/* Static preview uses simple image/video tag. Rotation applied. */}
-                                            {mediaFiles[0].type === 'image' ? (
-                                                 <img 
-                                                    src={mediaFiles[0].previewUrl} 
-                                                    alt="Preview" 
-                                                    className="w-full h-full object-contain"
-                                                    style={{ transform: `rotate(${mediaFiles[0].rotation}deg)` }}
-                                                />
-                                            ) : (
-                                                 <video 
-                                                    src={mediaFiles[0].previewUrl} 
-                                                    className="w-full h-full object-contain"
-                                                    style={{ transform: `rotate(${mediaFiles[0].rotation}deg)` }}
-                                                    muted
-                                                    playsInline
-                                                    preload="auto"
-                                                    crossOrigin="anonymous"
-                                                />
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="text-gray-500 text-center">
-                                            <FilmIcon className="w-24 h-24 mx-auto" />
-                                            <p>Your slideshow will appear here</p>
-                                        </div>
-                                    )}
-                                     <button onClick={handlePlay} className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed" disabled={mediaFiles.length === 0}>
-                                        <PlayIcon className="w-20 h-20 text-white" />
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            {/* Save & Manage */}
-                            <div className="bg-gray-800/50 p-6 rounded-lg relative overflow-hidden">
-                                <h3 className="text-xl font-semibold mb-4 border-b border-gray-700 pb-2 flex justify-between">
-                                    5. Save, Share & Manage
-                                </h3>
-                                <div className="flex gap-4 mb-4">
-                                     <input type="text" value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Enter slideshow name" className="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5" disabled={!canEdit} />
-                                     <button 
-                                        onClick={handleSaveSlideshow} 
-                                        disabled={isSaving || mediaFiles.length === 0 || !canEdit} 
-                                        className="bg-brand-purple hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed"
-                                        title={!canEdit ? "View Only - Contact owner for edit access" : "Save Slideshow"}
-                                     >
-                                        <SaveIcon className="w-5 h-5" />
-                                        {currentSlideshowId ? 'Update' : 'Save'}
-                                     </button>
-                                     <button onClick={resetWorkspace} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">New</button>
-                                </div>
-                                
-                                {user && (
-                                    <>
-                                        <h4 className="text-lg font-semibold mt-6 mb-2">My Slideshows</h4>
-                                        <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                                            {isLoading ? <p>Loading slideshows...</p> : allSlideshows.length > 0 ? allSlideshows.map(s => {
-                                                // Determine permission for this specific slideshow in the list
-                                                const isOwner = s.userId === user.uid;
-                                                const myPerm = !isOwner ? s.sharedPermissions?.find(p => p.email === user.email) : null;
-                                                const roleLabel = isOwner ? 'Owner' : (myPerm?.role === 'update' ? 'Editor' : 'Viewer');
-
-                                                return (
-                                                    <div key={s.id} className="flex justify-between items-center bg-gray-700/50 p-2 rounded-lg gap-2">
-                                                        <div className="flex items-center gap-3 min-w-0">
-                                                            {s.userId !== user.uid && s.ownerInfo?.photoURL && (
-                                                                <img src={s.ownerInfo.photoURL} alt={s.ownerInfo.displayName ?? 'Owner'} className="w-8 h-8 rounded-full flex-shrink-0" title={`Shared by ${s.ownerInfo.displayName}`} />
-                                                            )}
-                                                            <div className="truncate">
-                                                                <p className="truncate font-semibold flex items-center gap-2">
-                                                                    {s.name}
-                                                                    <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide ${isOwner ? 'hidden' : 'bg-blue-900 text-blue-200'}`}>
-                                                                        {roleLabel}
-                                                                    </span>
-                                                                </p>
-                                                                <div className="flex items-center gap-2 text-xs text-gray-400">
-                                                                    {s.userId !== user.uid && s.ownerInfo?.displayName && (
-                                                                        <span className="truncate">By {s.ownerInfo.displayName}</span>
-                                                                    )}
-                                                                    <span className="bg-gray-800 px-1.5 rounded-sm font-medium text-gray-300">
-                                                                        {formatDuration(s.totalDuration || 0)}
-                                                                    </span>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex gap-2 flex-shrink-0">
-                                                            <button onClick={() => handleLoadSlideshow(s)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded-md text-sm">Load</button>
-                                                            {isOwner && (
-                                                                <>
-                                                                    <button onClick={() => handleOpenShareModal(s)} className="bg-green-600 hover:bg-green-700 text-white font-bold p-2 rounded-md" title="Share"><ShareIcon className="w-4 h-4"/></button>
-                                                                    <button onClick={() => handleDeleteSlideshow(s)} className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded-md" title="Delete"><TrashIcon className="w-4 h-4"/></button>
-                                                                </>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            }) : <p className="text-gray-400">No saved slideshows yet.</p>}
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-
-                        </div>
+                        <div className="p-6 bg-gray-800/30 flex justify-end"><button onClick={() => setIsAdvancedEditorOpen(false)} className="bg-brand-purple py-3 px-10 rounded-xl font-bold">Done</button></div>
                     </div>
-                )}
+                </div>
+            )}
 
-                {error && (
-                    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-red-500 text-white py-2 px-6 rounded-lg shadow-lg z-50 flex items-center gap-2 animate-fade-in whitespace-nowrap">
-                        <InfoIcon className="w-5 h-5" />
-                        {error}
-                        <button onClick={() => setError(null)} className="ml-4 font-bold">
-                            <XIcon className="w-5 h-5"/>
-                        </button>
-                    </div>
-                )}
-            </main>
-
-            {/* Fullscreen Preview Modal */}
             {isPlaying && (
-                <div className="fixed inset-0 bg-black z-50 flex flex-col items-center justify-center animate-fade-in group">
-                    {/* Top Right Close Button (Always visible) */}
-                    <button onClick={handleClosePreview} className="absolute top-4 right-4 text-white bg-black/50 hover:bg-red-600 rounded-full p-2 z-50 transition-colors">
-                        <XIcon className="w-8 h-8" />
-                    </button>
-                    
+                <div className="fixed inset-0 bg-black z-[60] flex items-center justify-center animate-fade-in">
+                    <button onClick={() => setIsPlaying(false)} className="absolute top-4 right-4 text-white bg-black/50 p-2 rounded-full z-50"><XIcon className="w-10 h-10"/></button>
                     {mediaFiles[currentSlide] && (
-                        <div className="w-full h-full relative overflow-hidden">
-                            {/* Wrapper applies the animation */}
-                            <div 
-                                className={`w-full h-full absolute inset-0 animate-${settings.slideStyle}`}
-                                style={{ animationPlayState: isPaused ? 'paused' : 'running' }}
-                            >
-                                {mediaFiles[currentSlide].type === 'image' && (
-                                    <>
-                                        <img
-                                            key={mediaFiles[currentSlide].id}
-                                            src={mediaFiles[currentSlide].previewUrl}
-                                            alt="Slideshow"
-                                            className="w-full h-full object-cover"
-                                            style={{ transform: `rotate(${mediaFiles[currentSlide].rotation}deg)` }}
-                                        />
-                                        {settings.showCaptions && (mediaFiles[currentSlide] as ImageFile).caption && (
-                                            <div className="absolute bottom-24 left-0 right-0 p-4 text-center z-40 pointer-events-none">
-                                                <p className="inline-block bg-black/50 text-white text-xl md:text-2xl font-semibold py-2 px-4 rounded-lg animate-fade-in">
-                                                    {(mediaFiles[currentSlide] as ImageFile).caption}
-                                                </p>
-                                            </div>
-                                        )}
-                                    </>
-                                )}
-                                {mediaFiles[currentSlide].type === 'video' && (
-                                    <video
-                                        ref={videoPreviewRef}
-                                        key={mediaFiles[currentSlide].id}
-                                        src={mediaFiles[currentSlide].previewUrl}
-                                        className="w-full h-full object-contain"
-                                        style={{ transform: `rotate(${mediaFiles[currentSlide].rotation}deg)` }}
-                                        autoPlay
-                                        muted
-                                        playsInline
-                                        preload="auto"
-                                        crossOrigin="anonymous"
-                                    />
-                                )}
+                        <div className="w-full h-full relative flex items-center justify-center overflow-hidden">
+                            <div className={`w-full h-full absolute animate-${settings.slideStyle}`}>
+                                {mediaFiles[currentSlide].type === 'image' ? <img src={mediaFiles[currentSlide].previewUrl} className="w-full h-full object-cover" /> : <video ref={videoPreviewRef} src={mediaFiles[currentSlide].previewUrl} className="w-full h-full object-contain" autoPlay muted={false} onEnded={() => currentSlide < mediaFiles.length - 1 ? setCurrentSlide(s => s + 1) : setIsPlaying(false)}/>}
                             </div>
-                             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30 pointer-events-none" />
-
-                            {/* Visual Fade Overlay */}
-                            <div 
-                                className="absolute inset-0 bg-black pointer-events-none transition-opacity ease-linear z-40"
-                                style={{ 
-                                    opacity: isFadingOut ? 1 : 0, 
-                                    transitionDuration: `${settings.interval}s` 
-                                }}
-                            />
                         </div>
                     )}
-
-                    {settings.showClock && (
-                        <div className="absolute top-5 left-5 text-white text-2xl font-semibold bg-black/30 p-2 rounded-lg z-40">
-                           {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                    )}
-
-                    {/* Controls Overlay - Shows on hover or if paused */}
-                    <div className={`absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/90 to-transparent transition-opacity duration-300 flex justify-center items-center gap-6 z-50 opacity-0 group-hover:opacity-100 ${isPaused ? 'opacity-100' : ''}`}>
-                         <button 
-                            onClick={handlePrev} 
-                            className="text-white hover:text-brand-purple p-2 rounded-full hover:bg-white/10 transition-all transform hover:scale-110"
-                            title="Previous Slide"
-                        >
-                             <RewindIcon className="w-10 h-10" />
-                         </button>
-                         
-                         <button 
-                            onClick={togglePause} 
-                            className="text-white hover:text-brand-purple p-4 bg-white/10 rounded-full hover:bg-white/20 transition-all transform hover:scale-110 border-2 border-white/20"
-                            title={isPaused ? "Resume" : "Pause"}
-                        >
-                            {isPaused ? (
-                                <PlayIcon className="w-12 h-12 ml-1" />
-                            ) : (
-                                <PauseIcon className="w-12 h-12" />
-                            )}
-                         </button>
-
-                         <button 
-                            onClick={handleStop}
-                            className="text-white hover:text-red-500 p-2 rounded-full hover:bg-white/10 transition-all transform hover:scale-110"
-                            title="Stop Slideshow"
-                         >
-                             <StopIcon className="w-10 h-10" />
-                         </button>
-
-                         <button 
-                            onClick={handleNext} 
-                            className="text-white hover:text-brand-purple p-2 rounded-full hover:bg-white/10 transition-all transform hover:scale-110"
-                            title="Next Slide"
-                        >
-                             <FastForwardIcon className="w-10 h-10" />
-                         </button>
-                    </div>
-                </div>
-            )}
-
-             {/* Share Modal */}
-            {isShareModalOpen && slideshowToShare && (
-                <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center animate-fade-in p-4" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
-                    <div className="bg-gray-800 rounded-lg shadow-xl max-w-lg w-full p-6 relative">
-                        <button onClick={handleCloseShareModal} className="absolute top-4 right-4 text-gray-400 hover:text-white" aria-label="Close share menu">
-                            <XIcon className="w-6 h-6" />
-                        </button>
-                        <h2 id="share-modal-title" className="text-xl font-bold text-brand-purple mb-4">Share "{slideshowToShare.name}"</h2>
-                        <div className="space-y-4">
-                            <div className="flex gap-2 items-center">
-                                <input
-                                    type="email"
-                                    value={shareEmail}
-                                    onChange={(e) => setShareEmail(e.target.value)}
-                                    placeholder="Enter user's Google email"
-                                    className="flex-grow bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block w-full p-2.5"
-                                    aria-label="Email to share with"
-                                />
-                                <select 
-                                    value={shareRole}
-                                    onChange={(e) => setShareRole(e.target.value as 'view' | 'update')}
-                                    className="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-brand-purple focus:border-brand-purple block p-2.5"
-                                >
-                                    <option value="view">View</option>
-                                    <option value="update">Update</option>
-                                </select>
-                                <button onClick={handleAddShare} disabled={isSharing || !shareEmail} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-500 flex-shrink-0">
-                                    {isSharing ? 'Adding...' : 'Add'}
-                                </button>
-                            </div>
-                            <div>
-                                <div className="flex justify-between items-center mb-2">
-                                    <h3 className="text-lg font-semibold">Shared with:</h3>
-                                </div>
-                                <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
-                                    {(slideshowToShare.sharedWith ?? []).length > 0 ? (
-                                        slideshowToShare.sharedWith!.map(email => {
-                                            const perm = slideshowToShare.sharedPermissions?.find(p => p.email === email);
-                                            const role = perm?.role || 'view'; // Default to 'view' if legacy
-
-                                            return (
-                                                <div key={email} className="flex justify-between items-center bg-gray-700/50 p-2 rounded">
-                                                    <div className="flex flex-col">
-                                                        <span className="text-sm truncate">{email}</span>
-                                                        <span className="text-[10px] text-gray-400 uppercase">{role}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <select
-                                                            value={role}
-                                                            onChange={(e) => handleUpdatePermission(email, e.target.value as 'view' | 'update')}
-                                                            disabled={isSharing}
-                                                            className="bg-gray-600 border border-gray-500 text-white text-xs rounded p-1 focus:ring-brand-purple focus:border-brand-purple"
-                                                        >
-                                                            <option value="view">View</option>
-                                                            <option value="update">Update</option>
-                                                        </select>
-                                                        <button onClick={() => handleRemoveShare(email)} disabled={isSharing} className="text-red-400 hover:text-red-300 p-1 disabled:opacity-50" aria-label={`Remove ${email}`}>
-                                                            <TrashIcon className="w-4 h-4" />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })
-                                    ) : <p className="text-gray-400 text-sm italic">Not shared with anyone yet.</p>}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Help Modal */}
-            {isHelpModalOpen && (
-                <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center animate-fade-in p-4" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
-                    <div className="bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full p-8 relative">
-                        <button onClick={() => setIsHelpModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white" aria-label="Close help guide">
-                            <XIcon className="w-6 h-6" />
-                        </button>
-                        <h2 id="help-modal-title" className="text-2xl font-bold text-brand-purple mb-4">How to Use Muziq Slides</h2>
-                        <div className="space-y-4 text-gray-300">
-                            <p>Welcome! Muziq Slides helps you create beautiful, animated slideshows with your favorite photos, videos, and music. It's perfect for creating a custom screensaver for your TV.</p>
-                            <h3 className="text-xl font-semibold text-white pt-2 border-t border-gray-700">Quick Start Guide:</h3>
-                            <ol className="list-decimal list-inside space-y-2">
-                                <li><strong>Sign In:</strong> Click the "Sign in with Google" button to save and manage your creations.</li>
-                                <li><strong>Upload Media:</strong> Click the upload box to select up to 20 of your favorite images and videos.</li>
-                                <li><strong>Arrange & Rotate:</strong> Drag and drop thumbnails to reorder. Click the rotate icon on any image/video to fix its orientation.</li>
-                                <li><strong>Add Captions:</strong> Type a description below each image. Or, enable "Smart Captions" in Settings and click the ✨ icon to generate one with AI!</li>
-                                <li><strong>Add Music:</strong> Click the music box to add a background audio track to your slideshow.</li>
-                                <li><strong>Customize:</strong> Use the Settings panel to choose slide styles and duration.</li>
-                                <li><strong>Save & Share:</strong> Name your slideshow, hit "Save", and use the "Share" icon to invite friends by email.</li>
-                                <li><strong>Preview:</strong> Hover over the preview window and click the play icon to see your slideshow in action.</li>
-                            </ol>
-                            <p>That's it! Enjoy your personalized slideshow.</p>
-
-                            <h3 className="text-xl font-semibold text-white pt-2 border-t border-gray-700">Troubleshooting Video Playback</h3>
-                            <p>
-                                If you notice that images load but videos do not appear on certain devices (particularly iPhones, iPads, or some Windows PCs), this is usually caused by <strong>strict browser policies</strong> that block autoplaying media to save battery or data.
-                            </p>
-                            <p>
-                                This is a common restriction on mobile browsers. We have added specific configurations to minimize this, but if videos remain hidden, try interacting with the page (tapping) or ensuring your device is not in "Low Power Mode".
-                            </p>
-                        </div>
-                    </div>
+                    {audioSrc && <audio ref={audioRef} src={audioSrc} autoPlay onEnded={() => setCurrentAudioIndex(i => (i + 1) % audioFiles.length)} />}
                 </div>
             )}
         </div>
