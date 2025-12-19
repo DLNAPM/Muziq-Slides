@@ -531,30 +531,57 @@ const App: React.FC = () => {
             
             const serMedia = [];
             for (const m of mediaFiles) {
-                const b: any = { id: m.id, type: m.type, name: m.id, rotation: m.rotation, caption: (m as any).caption, aiCaption: (m as any).aiCaption, duration: (m as any).duration, volume: (m as any).volume, duckBGM: (m as any).duckBGM };
+                // Ensure no undefined values are passed to Firestore
+                const b: any = { 
+                    id: m.id || `m-${Math.random().toString(36).substr(2, 9)}`, 
+                    type: m.type, 
+                    name: m.id || 'unnamed', 
+                    rotation: m.rotation || 0, 
+                    caption: (m as any).caption || "", 
+                    aiCaption: (m as any).aiCaption || "", 
+                    duration: (m as any).duration || 0, 
+                    volume: (m as any).volume ?? 1.0, 
+                    duckBGM: (m as any).duckBGM ?? true 
+                };
+                
                 if (!m.serverData && m.file) {
                     const path = `users/${user.uid}/${id}/${m.id}`;
                     await uploadBytes(ref(storage, path), m.file);
                     b.url = await getDownloadURL(ref(storage, path));
                     b.storagePath = path;
+                } else if (m.serverData) {
+                    b.url = m.serverData.url; 
+                    b.storagePath = m.serverData.storagePath;
                 } else {
-                    b.url = m.serverData?.url; 
-                    b.storagePath = m.serverData?.storagePath;
+                    // Fallback to avoid undefined url/path
+                    b.url = "";
+                    b.storagePath = "";
                 }
                 serMedia.push(b);
             }
 
             const serAudio = [];
             for (const a of audioFiles) {
-                const b: any = { id: a.id, name: a.name, duration: a.duration, startTime: a.startTime, fadeIn: a.fadeIn, fadeOut: a.fadeOut };
+                const b: any = { 
+                    id: a.id, 
+                    name: a.name || "Untitled", 
+                    duration: a.duration || 0, 
+                    startTime: a.startTime || 0, 
+                    fadeIn: a.fadeIn || 1, 
+                    fadeOut: a.fadeOut || 1 
+                };
+                
                 if (!a.serverData && a.file) {
                     const path = `users/${user.uid}/${id}/a-${a.id}`;
                     await uploadBytes(ref(storage, path), a.file);
                     b.url = await getDownloadURL(ref(storage, path));
                     b.storagePath = path;
+                } else if (a.serverData) {
+                    b.url = a.serverData.url; 
+                    b.storagePath = a.serverData.storagePath;
                 } else {
-                    b.url = a.serverData?.url; 
-                    b.storagePath = a.serverData?.storagePath;
+                    b.url = "";
+                    b.storagePath = "";
                 }
                 serAudio.push(b);
             }
@@ -567,23 +594,26 @@ const App: React.FC = () => {
                 ...collaborators.map(c => c.email.toLowerCase())
             ]));
 
-            await setDoc(doc(db, 'slideshows', id), {
+            // Final data object construction with strict undefined checks
+            const saveData = {
                 userId: existing?.userId || user.uid,
                 userEmail: existing?.userEmail || user.email,
                 name: slideshowName || 'My Slideshow', 
                 media: serMedia, 
                 audio: serAudio,
-                settings, 
-                totalDuration: totalSlideshowDuration, 
+                settings: settings, 
+                totalDuration: totalSlideshowDuration || 0, 
                 timestamp: serverTimestamp(), 
                 createdAt: existing?.createdAt || serverTimestamp(),
                 collaborators: collaborators,
                 collaboratorEmails: collaboratorEmails
-            }, { merge: true });
+            };
+
+            await setDoc(doc(db, 'slideshows', id), saveData, { merge: true });
             
             setCurrentSlideshowId(id);
         } catch (e: any) { 
-            console.error("Save Error", e);
+            console.error("Save Error:", e);
             setError("Cloud save failed: " + e.message); 
         } finally { 
             setIsSaving(false); 
@@ -636,7 +666,7 @@ const App: React.FC = () => {
                 media: s.media,
                 audio: s.audio,
                 settings: s.settings,
-                totalDuration: s.totalDuration,
+                totalDuration: s.totalDuration || 0,
                 timestamp: serverTimestamp(),
                 createdAt: serverTimestamp(),
                 collaborators: [],
@@ -1123,7 +1153,7 @@ const App: React.FC = () => {
                         {/* Timeline Ruler */}
                         <div className="bg-gray-950/50 rounded-3xl p-6 border border-gray-800/50 shadow-2xl relative">
                             <div className="absolute top-0 left-[180px] right-6 h-6 border-b border-gray-800 flex justify-between px-1">
-                                {Array.from({ length: Math.ceil(Math.max(totalSlideshowDuration, totalSlideshowDuration) / 5) + 1 }).map((_, i) => (
+                                {Array.from({ length: Math.ceil(Math.max(totalSlideshowDuration, 0) / 5) + 1 }).map((_, i) => (
                                     <span key={i} className="text-[8px] text-gray-600 font-black">{i * 5}s</span>
                                 ))}
                             </div>
