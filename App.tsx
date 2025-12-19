@@ -121,6 +121,7 @@ interface SavedSlideshow {
     createdAt?: Timestamp; 
     totalDuration?: number;
     collaborators?: Collaborator[];
+    collaboratorEmails?: string[]; // Added for reliable querying
 }
 
 // --- HELPER FUNCTIONS ---
@@ -334,32 +335,20 @@ const App: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        if (!user) return;
+        if (!user || !user.email) return;
+        
         const qOwned = query(collection(db, "slideshows"), where("userId", "==", user.uid));
         const unsubOwned = onSnapshot(qOwned, (snap) => {
             setOwnedSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
         });
 
-        // Use array-contains for sharing with email
-        const qShared = query(collection(db, "slideshows"), where("collaborators", "array-contains", { email: user.email, role: 'viewer' }));
-        const unsubSharedViewer = onSnapshot(qShared, (snap) => {
-            setSharedWithMeSlideshows(p => {
-                const updated = snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow));
-                const filtered = p.filter(x => !snap.docs.map(d => d.id).includes(x.id));
-                return [...filtered, ...updated];
-            });
+        // Use simplified email array for reliable sharing query
+        const qShared = query(collection(db, "slideshows"), where("collaboratorEmails", "array-contains", user.email));
+        const unsubShared = onSnapshot(qShared, (snap) => {
+            setSharedWithMeSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
         });
 
-        const qSharedEditor = query(collection(db, "slideshows"), where("collaborators", "array-contains", { email: user.email, role: 'editor' }));
-        const unsubSharedEditor = onSnapshot(qSharedEditor, (snap) => {
-             setSharedWithMeSlideshows(p => {
-                const updated = snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow));
-                const filtered = p.filter(x => !snap.docs.map(d => d.id).includes(x.id));
-                return [...filtered, ...updated];
-            });
-        });
-
-        return () => { unsubOwned(); unsubSharedViewer(); unsubSharedEditor(); };
+        return () => { unsubOwned(); unsubShared(); };
     }, [user]);
 
     const allSlideshows = useMemo(() => {
@@ -438,6 +427,9 @@ const App: React.FC = () => {
             
             const existing = ownedSlideshows.find(s => s.id === id) || sharedWithMeSlideshows.find(s => s.id === id);
             
+            const collaborators = existing?.collaborators || [];
+            const collaboratorEmails = collaborators.map(c => c.email);
+
             await setDoc(doc(db, 'slideshows', id), {
                 userId: existing?.userId || user.uid,
                 userEmail: existing?.userEmail || user.email,
@@ -448,7 +440,8 @@ const App: React.FC = () => {
                 totalDuration: totalSlideshowDuration, 
                 timestamp: serverTimestamp(), 
                 createdAt: existing?.createdAt || serverTimestamp(),
-                collaborators: existing?.collaborators || []
+                collaborators: collaborators,
+                collaboratorEmails: collaboratorEmails
             }, { merge: true });
             
             setCurrentSlideshowId(id);
@@ -485,9 +478,13 @@ const App: React.FC = () => {
         if (!shareSlideshowTarget || !shareEmail) return;
         setIsProcessing(true);
         try {
-            const updatedCollabs = [...(shareSlideshowTarget.collaborators || []), { email: shareEmail, role: shareRole }];
-            await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { collaborators: updatedCollabs }, { merge: true });
-            setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs });
+            const updatedCollabs = [...(shareSlideshowTarget.collaborators || []), { email: shareEmail.toLowerCase(), role: shareRole }];
+            const updatedEmails = updatedCollabs.map(c => c.email);
+            await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { 
+                collaborators: updatedCollabs,
+                collaboratorEmails: updatedEmails
+            }, { merge: true });
+            setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs, collaboratorEmails: updatedEmails });
             setShareEmail('');
         } catch (e) { setError("Share failed"); } finally { setIsProcessing(false); }
     };
@@ -497,8 +494,12 @@ const App: React.FC = () => {
         setIsProcessing(true);
         try {
             const updatedCollabs = (shareSlideshowTarget.collaborators || []).filter(c => c.email !== email);
-            await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { collaborators: updatedCollabs }, { merge: true });
-            setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs });
+            const updatedEmails = updatedCollabs.map(c => c.email);
+            await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { 
+                collaborators: updatedCollabs,
+                collaboratorEmails: updatedEmails
+            }, { merge: true });
+            setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs, collaboratorEmails: updatedEmails });
         } catch (e) { setError("Remove failed"); } finally { setIsProcessing(false); }
     };
 
@@ -523,46 +524,46 @@ const App: React.FC = () => {
                 <h1 className="text-2xl font-bold tracking-tight"><span className="text-brand-purple">Muziq</span> Slides</h1>
                 <div className="flex gap-4 items-center">
                     {user && <span className="text-xs text-gray-400 hidden sm:inline">{user.email}</span>}
-                    {user ? <button onClick={() => auth.signOut()} className="bg-gray-200 text-gray-900 py-2 px-4 rounded-lg text-sm font-bold shadow-sm">Logout</button> : <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-4 rounded-lg text-sm font-bold shadow-md">Sign In</button>}
+                    {user ? <button onClick={() => auth.signOut()} className="bg-gray-200 text-gray-900 py-2 px-4 rounded-lg text-sm font-bold shadow-sm transition-colors hover:bg-gray-300">Logout</button> : <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-4 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Sign In</button>}
                 </div>
             </header>
 
             {!user ? (
                 <main className="animate-fade-in text-center py-20 px-4">
                     <h2 className="text-5xl font-extrabold mb-6 leading-tight">Turn Memories into <br/><span className="text-brand-purple">Masterpieces</span></h2>
-                    <p className="text-xl text-gray-600 mb-10 max-w-2xl mx-auto">Create beautiful photo slideshows with your favorite music. Perfect for Roku or Amazon Fire TV screensavers.</p>
-                    <button onClick={handleLogin} className="bg-brand-purple text-white py-4 px-12 rounded-full text-lg font-bold shadow-xl hover:scale-105 transition-transform">Get Started for Free</button>
+                    <p className="text-xl text-gray-600 mb-10 max-w-2xl mx-auto font-medium">Create beautiful photo slideshows with your favorite music. Perfect for Roku or Amazon Fire TV screensavers.</p>
+                    <button onClick={handleLogin} className="bg-brand-purple text-white py-4 px-12 rounded-full text-lg font-bold shadow-xl hover:scale-105 transition-transform active:scale-95">Get Started for Free</button>
                     
                     <div className="mt-20 grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto text-left">
-                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all">
                             <UploadIcon className="w-10 h-10 mb-4 text-brand-purple"/>
                             <h4 className="font-bold text-lg mb-2">Upload Media</h4>
-                            <p className="text-sm text-gray-500 leading-relaxed">Combine up to 20 photos and high-quality video clips into a single professional sequence.</p>
+                            <p className="text-sm text-gray-500 leading-relaxed">Combine up to 20 photos and high-quality video clips into a single professional sequence effortlessly.</p>
                         </div>
-                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all">
                             <MusicIcon className="w-10 h-10 mb-4 text-brand-purple"/>
                             <h4 className="font-bold text-lg mb-2">Background Music</h4>
-                            <p className="text-sm text-gray-500 leading-relaxed">Add multiple audio tracks with a professional timeline editor for precise start offsets and fades.</p>
+                            <p className="text-sm text-gray-500 leading-relaxed">Add multiple audio tracks with a professional timeline editor for precise start offsets and smooth fades.</p>
                         </div>
-                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all">
                             <AdjustmentIcon className="w-10 h-10 mb-4 text-brand-purple"/>
                             <h4 className="font-bold text-lg mb-2">Smart Audio Ducking</h4>
-                            <p className="text-sm text-gray-500 leading-relaxed">The app automatically lowers background music volume when a video clip with sound is playing.</p>
+                            <p className="text-sm text-gray-500 leading-relaxed">The app automatically lowers background music volume whenever a video clip with its own sound is playing.</p>
                         </div>
-                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all">
                             <SparklesIcon className="w-10 h-10 mb-4 text-brand-purple"/>
                             <h4 className="font-bold text-lg mb-2">AI Smart Captions</h4>
-                            <p className="text-sm text-gray-500 leading-relaxed">Let Gemini AI analyze your photos and generate beautiful, poetic captions automatically.</p>
+                            <p className="text-sm text-gray-500 leading-relaxed">Leverage Gemini AI to analyze your photos and generate beautiful, poetic captions automatically based on content.</p>
                         </div>
-                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all">
                             <ShareIcon className="w-10 h-10 mb-4 text-brand-purple"/>
                             <h4 className="font-bold text-lg mb-2">Collaborative Sharing</h4>
-                            <p className="text-sm text-gray-500 leading-relaxed">Invite family and friends to view or edit your slideshows with robust permission controls.</p>
+                            <p className="text-sm text-gray-500 leading-relaxed">Invite family and friends to view or edit your slideshows with robust Viewer and Editor permission controls.</p>
                         </div>
-                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="p-8 bg-gray-50 rounded-3xl border border-gray-100 shadow-sm hover:shadow-md transition-all">
                             <SettingsIcon className="w-10 h-10 mb-4 text-brand-purple"/>
                             <h4 className="font-bold text-lg mb-2">Cinematic Transitions</h4>
-                            <p className="text-sm text-gray-500 leading-relaxed">Choose from multiple transition styles including Ken Burns, cross-fades, and zooms for a high-end look.</p>
+                            <p className="text-sm text-gray-500 leading-relaxed">Choose from multiple transition styles including Ken Burns, cross-fades, and zooms for a high-end cinematic look.</p>
                         </div>
                     </div>
                 </main>
@@ -578,16 +579,16 @@ const App: React.FC = () => {
                             <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*" className="hidden" />
                             <div className="mt-4 grid grid-cols-4 gap-3">
                                 {mediaFiles.map(m => (
-                                    <div key={m.id} className="aspect-square bg-black rounded-xl overflow-hidden relative group border border-gray-700">
+                                    <div key={m.id} className="aspect-square bg-black rounded-xl overflow-hidden relative group border border-gray-700 shadow-lg">
                                         {m.type === 'image' ? (
-                                            <img src={m.previewUrl} className="w-full h-full object-cover" />
+                                            <img src={m.previewUrl} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                                         ) : (
                                             <div className="w-full h-full relative">
                                                 <video src={m.previewUrl} className="w-full h-full object-cover opacity-60" muted />
                                                 <div className="absolute inset-0 flex items-center justify-center">
                                                     <PlayIcon className="w-6 h-6 text-white opacity-80" />
                                                 </div>
-                                                <span className="absolute bottom-1 right-1 text-[8px] bg-black/60 px-1 rounded text-white">{formatDuration(m.duration || 0)}</span>
+                                                <span className="absolute bottom-1 right-1 text-[8px] bg-black/60 px-1 rounded text-white font-bold">{formatDuration(m.duration || 0)}</span>
                                             </div>
                                         )}
                                         <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="absolute top-1 right-1 bg-red-600/80 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"><XIcon className="w-3 h-3 text-white"/></button>
@@ -620,7 +621,7 @@ const App: React.FC = () => {
                                     <select 
                                         value={settings.slideStyle} 
                                         onChange={e => setSettings(s => ({...s, slideStyle: e.target.value}))}
-                                        className="w-full bg-gray-700/50 border border-gray-600/50 rounded-xl px-4 py-2 text-sm text-white focus:ring-1 focus:ring-brand-purple outline-none appearance-none cursor-pointer"
+                                        className="w-full bg-gray-700/50 border border-gray-600/50 rounded-xl px-4 py-2 text-sm text-white focus:ring-1 focus:ring-brand-purple outline-none appearance-none cursor-pointer transition-all"
                                     >
                                         <option value="ken-burns">Ken Burns (Pan & Zoom)</option>
                                         <option value="fade-in">Fade In</option>
@@ -637,7 +638,7 @@ const App: React.FC = () => {
                                             <div className={`w-10 h-5 rounded-full transition-colors ${settings.repeatSlideshow ? 'bg-brand-purple' : 'bg-gray-700'}`}></div>
                                             <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${settings.repeatSlideshow ? 'translate-x-5' : 'translate-x-0'}`}></div>
                                         </div>
-                                        <span className="text-xs text-gray-400 group-hover:text-gray-200 transition-colors">Loop Slideshow</span>
+                                        <span className="text-xs text-gray-400 group-hover:text-gray-200 transition-colors font-bold uppercase tracking-tight">Loop Slideshow</span>
                                     </label>
                                     <label className="flex items-center gap-3 cursor-pointer group">
                                         <div className="relative">
@@ -645,7 +646,7 @@ const App: React.FC = () => {
                                             <div className={`w-10 h-5 rounded-full transition-colors ${settings.smartCaptionsEnabled ? 'bg-brand-purple' : 'bg-gray-700'}`}></div>
                                             <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${settings.smartCaptionsEnabled ? 'translate-x-5' : 'translate-x-0'}`}></div>
                                         </div>
-                                        <span className="text-xs text-gray-400 group-hover:text-gray-200 transition-colors">Smart Captions</span>
+                                        <span className="text-xs text-gray-400 group-hover:text-gray-200 transition-colors font-bold uppercase tracking-tight">Smart Captions</span>
                                     </label>
                                 </div>
                             </div>
@@ -658,7 +659,7 @@ const App: React.FC = () => {
                                 <h3 className="text-lg font-bold flex items-center gap-2 text-white"><PlayIcon className="w-5 h-5 text-brand-purple"/> 4. Run Slideshow</h3>
                                 <button onClick={() => setIsAdvancedEditorOpen(true)} className="text-[10px] bg-brand-purple/20 text-brand-purple border border-brand-purple/30 py-1.5 px-4 rounded-full flex items-center gap-1.5 hover:bg-brand-purple/40 font-bold tracking-wide uppercase transition-all shadow-sm"><AdjustmentIcon className="w-3 h-3"/> Advanced Editor</button>
                             </div>
-                            <div className="aspect-video bg-black rounded-2xl relative flex items-center justify-center overflow-hidden group border border-gray-700/50">
+                            <div className="aspect-video bg-black rounded-2xl relative flex items-center justify-center overflow-hidden group border border-gray-700/50 shadow-inner">
                                 {mediaFiles.length > 0 ? (
                                     <>
                                         <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
@@ -670,14 +671,14 @@ const App: React.FC = () => {
                                         </div>
                                         <button onClick={startPlayback} className="relative z-10 flex items-center justify-center bg-brand-purple p-6 rounded-full shadow-2xl scale-100 hover:scale-110 active:scale-95 transition-all"><PlayIcon className="w-12 h-12 text-white"/></button>
                                     </>
-                                ) : <p className="text-gray-500 italic">No media added yet</p>}
+                                ) : <p className="text-gray-500 italic font-medium">No media added yet</p>}
                             </div>
                         </section>
 
                         <section className="bg-gray-800/40 p-6 rounded-3xl border border-gray-700/50 shadow-xl">
                             <h3 className="text-lg font-bold mb-4 text-white">5. Save & Manage</h3>
                             <div className="flex gap-2 mb-6">
-                                <input value={slideshowName} onChange={e => setSlideshowName(e.target.value)} placeholder="Slideshow Name" className="flex-1 bg-gray-700/50 rounded-xl px-4 py-2 border border-gray-600/50 outline-none focus:ring-1 focus:ring-brand-purple placeholder:text-gray-500" />
+                                <input value={slideshowName} onChange={e => setSlideshowName(e.target.value)} placeholder="Slideshow Name" className="flex-1 bg-gray-700/50 rounded-xl px-4 py-2 border border-gray-600/50 outline-none focus:ring-1 focus:ring-brand-purple placeholder:text-gray-500 transition-all" />
                                 <button 
                                     onClick={handleSave} 
                                     disabled={isSaving || !canEdit} 
@@ -687,33 +688,33 @@ const App: React.FC = () => {
                             </div>
                             <div className="space-y-3 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
                                 {allSlideshows.length > 0 ? allSlideshows.map(s => (
-                                    <div key={s.id} className="bg-gray-700/20 p-4 rounded-2xl flex justify-between items-center group border border-gray-700/30 hover:border-gray-600/50 transition-colors">
+                                    <div key={s.id} className="bg-gray-700/20 p-4 rounded-2xl flex justify-between items-center group border border-gray-700/30 hover:border-gray-600/50 transition-all">
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2">
                                                 <h4 className="font-bold text-sm text-white truncate">{s.name}</h4>
                                                 {s.userId === user?.uid ? (
-                                                    <span className="text-[8px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/30 uppercase font-black">Owner</span>
+                                                    <span className="text-[8px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded border border-green-500/30 uppercase font-black tracking-widest">Owner</span>
                                                 ) : (
-                                                    <span className="text-[8px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 uppercase font-black">{s.collaborators?.find(c => c.email === user?.email)?.role || 'Viewer'}</span>
+                                                    <span className="text-[8px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/30 uppercase font-black tracking-widest">{s.collaborators?.find(c => c.email === user?.email)?.role || 'Viewer'}</span>
                                                 )}
                                             </div>
                                             <div className="flex gap-2 mt-0.5">
-                                                <p className="text-[10px] text-gray-500">Duration: {formatDuration(s.totalDuration || 0)}</p>
-                                                <p className="text-[10px] text-brand-purple/70">• {s.media?.filter(m => m.type === 'video').length || 0} Videos</p>
-                                                <p className="text-[10px] text-brand-purple/70">• {s.media?.filter(m => m.type === 'image').length || 0} Photos</p>
+                                                <p className="text-[10px] text-gray-500 font-bold">Duration: {formatDuration(s.totalDuration || 0)}</p>
+                                                <p className="text-[10px] text-brand-purple/70 font-bold">• {s.media?.filter(m => m.type === 'video').length || 0} Videos</p>
+                                                <p className="text-[10px] text-brand-purple/70 font-bold">• {s.media?.filter(m => m.type === 'image').length || 0} Photos</p>
                                             </div>
                                         </div>
                                         <div className="flex gap-2 ml-4">
                                             <button onClick={() => handleLoad(s)} className="text-[10px] bg-brand-purple/10 text-brand-purple border border-brand-purple/20 py-1.5 px-4 rounded-lg font-bold hover:bg-brand-purple/20 transition-all">Load</button>
                                             <button 
                                                 onClick={() => { setShareSlideshowTarget(s); setIsShareModalOpen(true); }}
-                                                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-600/50 transition-all opacity-0 group-hover:opacity-100"><ShareIcon className="w-4 h-4"/></button>
+                                                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-600/50 transition-all sm:opacity-0 group-hover:opacity-100"><ShareIcon className="w-4 h-4"/></button>
                                             {s.userId === user?.uid && (
-                                                <button onClick={() => handleDelete(s)} className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-400/10 opacity-0 group-hover:opacity-100 transition-all"><TrashIcon className="w-4 h-4"/></button>
+                                                <button onClick={() => handleDelete(s)} className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-400/10 sm:opacity-0 group-hover:opacity-100 transition-all"><TrashIcon className="w-4 h-4"/></button>
                                             )}
                                         </div>
                                     </div>
-                                )) : <div className="text-center py-8 text-gray-600 text-sm italic">You haven't saved any slideshows yet</div>}
+                                )) : <div className="text-center py-8 text-gray-600 text-sm italic font-medium">No slideshows found. Create your first one above!</div>}
                             </div>
                         </section>
                     </div>
@@ -724,9 +725,9 @@ const App: React.FC = () => {
             {isShareModalOpen && shareSlideshowTarget && (
                 <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 animate-fade-in backdrop-blur-md">
                     <div className="bg-gray-900 w-full max-w-md rounded-3xl border border-gray-800 shadow-2xl overflow-hidden flex flex-col">
-                        <div className="p-6 border-b border-gray-800 flex justify-between items-center">
+                        <div className="p-6 border-b border-gray-800 flex justify-between items-center bg-gray-800/20">
                             <h2 className="text-xl font-bold flex items-center gap-2"><ShareIcon className="w-6 h-6 text-brand-purple"/> Share Slideshow</h2>
-                            <button onClick={() => setIsShareModalOpen(false)}><XIcon className="w-6 h-6 text-gray-500"/></button>
+                            <button onClick={() => setIsShareModalOpen(false)} className="hover:rotate-90 transition-transform"><XIcon className="w-6 h-6 text-gray-500"/></button>
                         </div>
                         <div className="p-6 space-y-6">
                             <div className="space-y-2">
@@ -736,7 +737,7 @@ const App: React.FC = () => {
                                         value={shareEmail} 
                                         onChange={e => setShareEmail(e.target.value)} 
                                         placeholder="User Email" 
-                                        className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-brand-purple" 
+                                        className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2 text-sm outline-none focus:ring-1 focus:ring-brand-purple transition-all" 
                                     />
                                     <select 
                                         value={shareRole} 
@@ -746,26 +747,26 @@ const App: React.FC = () => {
                                         <option value="viewer">Viewer</option>
                                         <option value="editor">Editor</option>
                                     </select>
-                                    <button onClick={handleShareSlideshow} className="bg-brand-purple px-4 py-2 rounded-xl"><PlusIcon className="w-5 h-5"/></button>
+                                    <button onClick={handleShareSlideshow} className="bg-brand-purple px-4 py-2 rounded-xl transition-all hover:bg-purple-700 active:scale-95"><PlusIcon className="w-5 h-5"/></button>
                                 </div>
                             </div>
                             <div className="space-y-3">
                                 <label className="text-xs text-gray-500 font-bold uppercase tracking-wider">Access List</label>
-                                <div className="max-h-48 overflow-y-auto space-y-2 pr-2">
+                                <div className="max-h-48 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
                                     <div className="flex justify-between items-center bg-gray-800/50 p-3 rounded-xl border border-gray-700/50">
                                         <div className="min-w-0">
                                             <p className="text-sm font-medium text-white truncate">{shareSlideshowTarget.userEmail || 'Owner'}</p>
-                                            <p className="text-[10px] text-gray-500">Owner</p>
+                                            <p className="text-[10px] text-gray-500 font-bold uppercase">Owner</p>
                                         </div>
                                     </div>
                                     {shareSlideshowTarget.collaborators?.map(c => (
                                         <div key={c.email} className="flex justify-between items-center bg-gray-800/50 p-3 rounded-xl border border-gray-700/50 group">
                                             <div className="min-w-0">
                                                 <p className="text-sm font-medium text-white truncate">{c.email}</p>
-                                                <p className="text-[10px] text-brand-purple capitalize font-bold">{c.role}</p>
+                                                <p className="text-[10px] text-brand-purple capitalize font-black tracking-widest">{c.role}</p>
                                             </div>
                                             {user?.uid === shareSlideshowTarget.userId && (
-                                                <button onClick={() => removeCollaborator(c.email)} className="text-red-400 opacity-0 group-hover:opacity-100"><TrashIcon className="w-4 h-4"/></button>
+                                                <button onClick={() => removeCollaborator(c.email)} className="text-red-400 sm:opacity-0 group-hover:opacity-100 transition-opacity"><TrashIcon className="w-4 h-4"/></button>
                                             )}
                                         </div>
                                     ))}
@@ -783,13 +784,13 @@ const App: React.FC = () => {
                             <h2 className="text-2xl font-bold flex items-center gap-3"><AdjustmentIcon className="w-8 h-8 text-brand-purple"/> Timeline Editor</h2>
                             <button onClick={() => setIsAdvancedEditorOpen(false)} className="hover:rotate-90 transition-transform"><XIcon className="w-8 h-8 text-gray-500"/></button>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-8 space-y-10">
+                        <div className="flex-1 overflow-y-auto p-8 space-y-10 custom-scrollbar">
                             <div className="space-y-6">
                                 <div className="flex items-center gap-6">
                                     <div className="w-24 text-[10px] text-gray-500 font-extrabold uppercase tracking-widest">Media Track</div>
-                                    <div className="flex-1 h-24 bg-gray-800/50 rounded-2xl flex items-center gap-2 p-3 overflow-x-auto border border-gray-700/50">
+                                    <div className="flex-1 h-24 bg-gray-800/50 rounded-2xl flex items-center gap-2 p-3 overflow-x-auto border border-gray-700/50 custom-scrollbar">
                                         {mediaFiles.map(m => (
-                                            <div key={m.id} className="h-full aspect-square bg-black rounded-xl border border-brand-purple/20 overflow-hidden flex-shrink-0 relative group">
+                                            <div key={m.id} className="h-full aspect-square bg-black rounded-xl border border-brand-purple/20 overflow-hidden flex-shrink-0 relative group shadow-lg">
                                                 {m.type === 'image' ? (
                                                     <img src={m.previewUrl} className="w-full h-full object-cover" />
                                                 ) : (
@@ -811,11 +812,11 @@ const App: React.FC = () => {
                                             <div key={a.id} className="bg-brand-purple/5 border border-brand-purple/20 p-6 rounded-3xl flex flex-wrap gap-6 items-center shadow-inner">
                                                 <span className="text-sm font-bold flex-1 text-white">{a.name}</span>
                                                 <div className="flex gap-8">
-                                                    <label className="flex flex-col gap-1 text-[10px] text-gray-500 uppercase tracking-tighter">Start Offset
+                                                    <label className="flex flex-col gap-1 text-[10px] text-gray-500 uppercase tracking-tighter font-bold">Start Offset
                                                         <input type="number" value={a.startTime} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: +e.target.value} : x))} className="bg-gray-800 rounded-lg px-2 py-1.5 text-white outline-none w-16 border border-gray-700 focus:border-brand-purple transition-colors"/></label>
-                                                    <label className="flex flex-col gap-1 text-[10px] text-gray-500 uppercase tracking-tighter">Fade In
+                                                    <label className="flex flex-col gap-1 text-[10px] text-gray-500 uppercase tracking-tighter font-bold">Fade In
                                                         <input type="number" value={a.fadeIn} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeIn: +e.target.value} : x))} className="bg-gray-800 rounded-lg px-2 py-1.5 text-white outline-none w-16 border border-gray-700 focus:border-brand-purple transition-colors"/></label>
-                                                    <label className="flex flex-col gap-1 text-[10px] text-gray-500 uppercase tracking-tighter">Fade Out
+                                                    <label className="flex flex-col gap-1 text-[10px] text-gray-500 uppercase tracking-tighter font-bold">Fade Out
                                                         <input type="number" value={a.fadeOut} onChange={e => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeOut: +e.target.value} : x))} className="bg-gray-800 rounded-lg px-2 py-1.5 text-white outline-none w-16 border border-gray-700 focus:border-brand-purple transition-colors"/></label>
                                                 </div>
                                             </div>
@@ -824,14 +825,14 @@ const App: React.FC = () => {
                                 </div>
                             </div>
                         </div>
-                        <div className="p-8 bg-gray-800/30 flex justify-end"><button onClick={() => setIsAdvancedEditorOpen(false)} className="bg-brand-purple hover:bg-purple-700 py-4 px-12 rounded-2xl font-bold shadow-xl shadow-brand-purple/20 transition-all">Apply Changes</button></div>
+                        <div className="p-8 bg-gray-800/30 flex justify-end"><button onClick={() => setIsAdvancedEditorOpen(false)} className="bg-brand-purple hover:bg-purple-700 py-4 px-12 rounded-2xl font-bold shadow-xl shadow-brand-purple/20 transition-all active:scale-95">Apply Changes</button></div>
                     </div>
                 </div>
             )}
 
             {isPlaying && (
                 <div className="fixed inset-0 bg-black z-[100] flex items-center justify-center animate-fade-in">
-                    <button onClick={() => setIsPlaying(false)} className="absolute top-8 right-8 text-white bg-black/40 hover:bg-red-600/80 p-3 rounded-full z-[110] backdrop-blur-md transition-colors shadow-2xl"><XIcon className="w-10 h-10"/></button>
+                    <button onClick={() => setIsPlaying(false)} className="absolute top-8 right-8 text-white bg-black/40 hover:bg-red-600/80 p-3 rounded-full z-[110] backdrop-blur-md transition-all shadow-2xl active:scale-95"><XIcon className="w-10 h-10"/></button>
                     {mediaFiles[currentSlide] && (
                         <div className="w-full h-full relative flex items-center justify-center overflow-hidden">
                             <div key={mediaFiles[currentSlide].id} className={`w-full h-full absolute flex items-center justify-center transition-all duration-1000 animate-${settings.slideStyle}`}>
@@ -852,7 +853,7 @@ const App: React.FC = () => {
                             {/* Caption Overlay */}
                             {((mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption) ? (
                                 <div className="absolute bottom-20 left-1/2 -translate-x-1/2 max-w-2xl w-[90%] bg-black/40 backdrop-blur-md border border-white/10 p-6 rounded-3xl animate-fade-in text-center shadow-2xl">
-                                    <p className="text-white text-xl md:text-2xl font-medium tracking-tight leading-relaxed italic">
+                                    <p className="text-white text-xl md:text-2xl font-medium tracking-tight leading-relaxed italic drop-shadow-lg">
                                         {(mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption}
                                     </p>
                                     {(mediaFiles[currentSlide] as any).aiCaption && !(mediaFiles[currentSlide] as any).caption && (
@@ -875,6 +876,13 @@ const App: React.FC = () => {
                     )}
                 </div>
             )}
+            
+            <style>{`
+                .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+                .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(109, 40, 217, 0.3); border-radius: 10px; }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(109, 40, 217, 0.5); }
+            `}</style>
         </div>
     );
 };
