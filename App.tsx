@@ -95,7 +95,8 @@ interface SlideshowSettings {
     repeatSlideshow: boolean;
     showCaptions: boolean;
     autoFadeEnabled: boolean;
-    autoFadeInterval: number; // 3, 5, or 7
+    autoFadeInterval: number; // 0, 3, or 5
+    muteVideos: boolean;
 }
 
 interface SerializedMediaFile {
@@ -206,6 +207,7 @@ const TrashIcon = ({ className }: { className?: string }) => <svg xmlns="http://
 const ShareIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>;
 const DuplicateIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>;
 const SparklesIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" /></svg>;
+const VolumeOffIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15L4 13.414V10.586L5.586 9M9 5L5 9H2V15H5L9 19V5ZM15.536 8.464l-4.243 4.243m0-4.243l4.243 4.243" /></svg>;
 const SettingsIcon = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -229,7 +231,8 @@ const App: React.FC = () => {
         repeatSlideshow: false, 
         showCaptions: true,
         autoFadeEnabled: false,
-        autoFadeInterval: 5,
+        autoFadeInterval: 3,
+        muteVideos: false,
     });
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentSlide, setCurrentSlide] = useState(0);
@@ -290,8 +293,8 @@ const App: React.FC = () => {
                 // Position this track so it overlaps the previous one by 'interval'
                 const startPos = runningStart - interval;
                 track.startTime = Math.max(0, startPos);
-                track.fadeIn = interval;
-                track.fadeOut = (i === updatedAudio.length - 1) ? 1 : interval;
+                track.fadeIn = interval || 0.5; // Ensure at least a tiny fade even if interval is 0 for smooth start
+                track.fadeOut = (i === updatedAudio.length - 1) ? 1 : (interval || 0.5);
                 runningStart = track.startTime + track.duration;
             }
         }
@@ -876,7 +879,7 @@ const App: React.FC = () => {
                                         <option value="zoom-out">Deep Pull</option>
                                     </select>
                                 </div>
-                                <div className="grid grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <label className="flex items-center gap-3 cursor-pointer group bg-gray-900/20 p-4 rounded-2xl border border-gray-800 hover:border-brand-purple/50 transition-all">
                                         <input type="checkbox" className="w-4 h-4 accent-brand-purple" checked={settings.repeatSlideshow} onChange={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} />
                                         <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Loop Slideshow</span>
@@ -884,6 +887,13 @@ const App: React.FC = () => {
                                     <label className="flex items-center gap-3 cursor-pointer group bg-gray-900/20 p-4 rounded-2xl border border-gray-800 hover:border-brand-purple/50 transition-all">
                                         <input type="checkbox" className="w-4 h-4 accent-brand-purple" checked={settings.smartCaptionsEnabled} onChange={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} />
                                         <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Smart Captions</span>
+                                    </label>
+                                    <label className="flex items-center gap-3 cursor-pointer group bg-gray-900/20 p-4 rounded-2xl border border-gray-800 hover:border-brand-purple/50 transition-all sm:col-span-2">
+                                        <input type="checkbox" className="w-4 h-4 accent-brand-purple" checked={settings.muteVideos} onChange={() => setSettings(s => ({...s, muteVideos: !s.muteVideos}))} />
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Mute Video Clips Audio</span>
+                                            <span className="text-[8px] text-gray-600 font-bold uppercase">Disables sound for all uploaded video assets</span>
+                                        </div>
                                     </label>
                                 </div>
                             </div>
@@ -1038,9 +1048,9 @@ const App: React.FC = () => {
 
                             {settings.autoFadeEnabled && (
                                 <div className="flex items-center gap-4 animate-fade-in">
-                                    <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Overlap Interval:</span>
+                                    <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Crossfade Controls (Overlap):</span>
                                     <div className="flex bg-gray-900 p-1 rounded-2xl border border-gray-800">
-                                        {[3, 5, 7].map(interval => (
+                                        {[0, 3, 5].map(interval => (
                                             <button 
                                                 key={interval}
                                                 onClick={() => setSettings(s => ({...s, autoFadeInterval: interval}))}
@@ -1050,7 +1060,7 @@ const App: React.FC = () => {
                                             </button>
                                         ))}
                                     </div>
-                                    <div className="ml-auto text-[9px] text-brand-purple font-bold bg-brand-purple/10 px-3 py-1 rounded-lg border border-brand-purple/20">AI MANAGED MODE ACTIVE</div>
+                                    <div className="ml-auto text-[9px] text-brand-purple font-bold bg-brand-purple/10 px-3 py-1 rounded-lg border border-brand-purple/20">AI MANAGED CROSSFADE ACTIVE</div>
                                 </div>
                             )}
                         </div>
@@ -1065,9 +1075,14 @@ const App: React.FC = () => {
 
                             <div className="space-y-6 mt-4">
                                 <div className="flex gap-4 group">
-                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
+                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center relative">
                                         <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Track 1: Visuals</span>
                                         <span className="text-[8px] text-brand-purple font-bold">Images & Clips</span>
+                                        {settings.muteVideos && (
+                                            <div className="absolute top-2 right-2 bg-red-500/20 text-red-500 p-1 rounded-lg">
+                                                <VolumeOffIcon className="w-3 h-3" />
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="flex-1 h-20 bg-gray-950/40 rounded-2xl border border-gray-800/50 flex relative overflow-x-auto custom-scrollbar">
                                         {mediaWithTimestamps.map((m, idx) => (
@@ -1191,10 +1206,10 @@ const App: React.FC = () => {
                                         src={mediaWithTimestamps[currentSlide].previewUrl} 
                                         className="w-full h-full object-contain shadow-2xl" 
                                         autoPlay 
-                                        muted={false} 
+                                        muted={settings.muteVideos} 
                                         onLoadedMetadata={e => {
                                             const video = e.target as HTMLVideoElement;
-                                            video.volume = (mediaWithTimestamps[currentSlide] as VideoFile).volume || 1.0;
+                                            video.volume = settings.muteVideos ? 0 : ((mediaWithTimestamps[currentSlide] as VideoFile).volume || 1.0);
                                             const offset = elapsedTime - mediaWithTimestamps[currentSlide].timelineStart;
                                             if (offset > 0) video.currentTime = offset;
                                         }}
