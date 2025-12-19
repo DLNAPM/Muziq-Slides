@@ -883,10 +883,10 @@ const App: React.FC = () => {
                                     />
                                 )}
                             </div>
-                            {/* AI Caption Overlay */}
+                            {/* AI Caption Overlay - Refined for Cinematic Clarity */}
                             {(settings.showCaptions && ((mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption)) && (
-                                <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur-xl px-12 py-6 rounded-[2rem] border border-white/10 text-center max-w-[80%] animate-fade-in shadow-2xl">
-                                    <p className="text-white text-xl md:text-2xl font-bold tracking-tight italic">
+                                <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-black/30 backdrop-blur-lg px-10 py-4 rounded-xl border border-white/5 text-center w-[92%] max-w-6xl animate-fade-in shadow-2xl z-50">
+                                    <p className="text-white text-lg md:text-xl font-semibold tracking-wide leading-relaxed drop-shadow-md italic">
                                         {(mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption}
                                     </p>
                                 </div>
