@@ -191,11 +191,10 @@ const getMediaDuration = (file: File): Promise<number> => {
 };
 
 const formatDuration = (seconds: number) => {
-    if (!seconds || isNaN(seconds)) return '0s';
-    const m = Math.floor(seconds / 60);
-    const s = Math.round(seconds % 60);
-    if (m === 0) return `${s}s`;
-    return `${m}m ${s}s`;
+    const totalSecs = Math.round(seconds || 0);
+    const m = Math.floor(totalSecs / 60);
+    const s = totalSecs % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
 // --- CONSTANTS ---
@@ -1578,8 +1577,8 @@ const App: React.FC = () => {
                                 ) : (
                                     <div className="space-y-3">
                                         <div className="flex justify-between items-center text-sm text-gray-400 mb-2">
-                                            <span>Slideshow Duration: {Math.round(totalSlideshowDuration)}s</span>
-                                            <span>Music Duration: {Math.round(totalMusicDuration)}s</span>
+                                            <span>Slideshow Duration: {formatDuration(totalSlideshowDuration)}</span>
+                                            <span>Music Duration: {formatDuration(totalMusicDuration)}</span>
                                         </div>
                                         {audioFiles.map((audio, index) => (
                                             <div key={audio.id} className="bg-gray-700 p-3 rounded-lg flex justify-between items-center">
@@ -1589,7 +1588,7 @@ const App: React.FC = () => {
                                                      </div>
                                                      <div className="min-w-0">
                                                          <p className="text-sm font-medium text-white truncate">{audio.name}</p>
-                                                         <p className="text-xs text-gray-400">{Math.round(audio.duration)}s</p>
+                                                         <p className="text-xs text-gray-400">{formatDuration(audio.duration)}</p>
                                                      </div>
                                                 </div>
                                                 {canEdit && (
