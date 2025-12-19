@@ -68,6 +68,8 @@ interface VideoFile {
     previewUrl: string;
     rotation: number;
     duration?: number; 
+    volume: number; // 0 to 1
+    duckBGM: boolean;
     serverData?: { url: string; storagePath: string; };
 }
 
@@ -103,9 +105,12 @@ interface SerializedMediaFile {
     aiCaption?: string;
     rotation?: number;
     duration?: number;
+    volume?: number;
+    duckBGM?: boolean;
 }
 
 interface SerializedAudioFile {
+    id: string;
     name: string;
     url: string;
     storagePath: string;
@@ -203,6 +208,7 @@ const SettingsIcon = ({ className }: { className?: string }) => (
 );
 const ChevronLeftIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>;
 const ChevronRightIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>;
+const BeakerIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.673.337a4 4 0 01-2.506.326l-1.741-.348a2 2 0 11.774-3.925l1.74.348a6 6 0 003.759-.488l.673-.337a8 8 0 015.147-.689l2.387.477a4 4 0 012.988 4.766l-1.054 5.27a2 2 0 01-3.126 1.264l-2.383-1.588a4 4 0 00-4.431 0l-2.383 1.588a2 2 0 01-3.126-1.264l1.054-5.27a4 4 0 00-.747-3.411L3.834 11a2 2 0 011.264-3.126l5.27-1.054a4 4 0 003.411-.747l2.126-2.126a2 2 0 013.126 1.264l1.054 5.27a4 4 0 00.747 3.411l2.126 2.126a2 2 0 01.126 2.701z" /></svg>;
 
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
@@ -214,7 +220,7 @@ const App: React.FC = () => {
     });
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentSlide, setCurrentSlide] = useState(0);
-    const [currentAudioIndex, setCurrentAudioIndex] = useState(0); 
+    const [elapsedTime, setElapsedTime] = useState(0); 
     const [slideshowName, setSlideshowName] = useState('');
     const [currentSlideshowId, setCurrentSlideshowId] = useState<string | null>(null);
     const [ownedSlideshows, setOwnedSlideshows] = useState<SavedSlideshow[]>([]);
@@ -232,22 +238,24 @@ const App: React.FC = () => {
     const [shareEmail, setShareEmail] = useState('');
     const [shareRole, setShareRole] = useState<'viewer' | 'editor'>('viewer');
 
-    const audioRef = useRef<HTMLAudioElement>(null);
     const videoPreviewRef = useRef<HTMLVideoElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
+    const playbackTimerRef = useRef<any>(null);
 
-    const totalSlideshowDuration = useMemo(() => {
-        return mediaFiles.reduce((acc, curr) => acc + (curr.type === 'image' ? settings.interval : (curr.duration || 0)), 0);
+    const mediaWithTimestamps = useMemo(() => {
+        let currentPos = 0;
+        return mediaFiles.map(m => {
+            const start = currentPos;
+            const dur = m.type === 'image' ? settings.interval : (m.duration || 0);
+            currentPos += dur;
+            return { ...m, timelineStart: start, timelineEnd: currentPos };
+        });
     }, [mediaFiles, settings.interval]);
 
-    const audioSrc = useMemo(() => {
-        const currentAudio = audioFiles[currentAudioIndex];
-        if (!currentAudio) return null;
-        if (currentAudio.serverData) return currentAudio.serverData.url;
-        if (currentAudio.file) return URL.createObjectURL(currentAudio.file);
-        return null;
-    }, [audioFiles, currentAudioIndex]);
+    const totalSlideshowDuration = useMemo(() => {
+        return mediaWithTimestamps.length > 0 ? mediaWithTimestamps[mediaWithTimestamps.length - 1].timelineEnd : 0;
+    }, [mediaWithTimestamps]);
 
     const resetWorkspace = useCallback(() => {
         setMediaFiles([]);
@@ -256,8 +264,8 @@ const App: React.FC = () => {
         setCurrentSlideshowId(null);
         setError(null);
         setCurrentSlide(0);
-        setCurrentAudioIndex(0);
         setIsPlaying(false);
+        setElapsedTime(0);
     }, []);
 
     const userPermission = useMemo(() => {
@@ -340,29 +348,36 @@ const App: React.FC = () => {
         });
     }, [ownedSlideshows, sharedWithMeSlideshows]);
 
-    const handleNextSlide = useCallback(() => {
-        if (currentSlide < mediaFiles.length - 1) {
-            setCurrentSlide(s => s + 1);
-        } else if (settings.repeatSlideshow) {
-            setCurrentSlide(0);
-        } else {
-            setIsPlaying(false);
-        }
-    }, [currentSlide, mediaFiles.length, settings.repeatSlideshow]);
-
-    // Progression Engine
+    // Enhanced Playback Engine
     useEffect(() => {
-        let timer: any;
-        if (isPlaying && mediaFiles[currentSlide]) {
-            const currentMedia = mediaFiles[currentSlide];
-            if (currentMedia.type === 'image') {
-                timer = setTimeout(() => {
-                    handleNextSlide();
-                }, settings.interval * 1000);
-            }
+        if (!isPlaying) {
+            if (playbackTimerRef.current) clearInterval(playbackTimerRef.current);
+            return;
         }
-        return () => clearTimeout(timer);
-    }, [isPlaying, currentSlide, settings.interval, mediaFiles.length, handleNextSlide]);
+
+        const TICK = 50; // Higher frequency for smoother audio ramps
+        playbackTimerRef.current = setInterval(() => {
+            setElapsedTime(prev => {
+                const next = prev + (TICK / 1000);
+                if (next >= totalSlideshowDuration) {
+                    if (settings.repeatSlideshow) return 0;
+                    setIsPlaying(false);
+                    return 0;
+                }
+                return next;
+            });
+        }, TICK);
+
+        return () => clearInterval(playbackTimerRef.current);
+    }, [isPlaying, totalSlideshowDuration, settings.repeatSlideshow]);
+
+    // Update currentSlide based on elapsedTime
+    useEffect(() => {
+        const activeIdx = mediaWithTimestamps.findIndex(m => elapsedTime >= m.timelineStart && elapsedTime < m.timelineEnd);
+        if (activeIdx !== -1 && activeIdx !== currentSlide) {
+            setCurrentSlide(activeIdx);
+        }
+    }, [elapsedTime, mediaWithTimestamps, currentSlide]);
 
     const generateSmartCaptions = async () => {
         if (!settings.smartCaptionsEnabled) return;
@@ -402,16 +417,6 @@ const App: React.FC = () => {
         }
     };
 
-    useEffect(() => {
-        if (!isPlaying || !audioRef.current) return;
-        const currentMedia = mediaFiles[currentSlide];
-        if (currentMedia?.type === 'video') {
-            audioRef.current.volume = 0.2;
-        } else {
-            audioRef.current.volume = 1.0;
-        }
-    }, [isPlaying, currentSlide, mediaFiles]);
-
     const handleLogin = async () => {
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: 'select_account' });
@@ -432,7 +437,7 @@ const App: React.FC = () => {
             return {
                 id: `m-${Math.random().toString(36).substr(2, 9)}`,
                 file: f, previewUrl: URL.createObjectURL(f), type: isImg ? 'image' : 'video',
-                rotation: 0, caption: '', duration: dur
+                rotation: 0, caption: '', duration: dur, volume: 1.0, duckBGM: true
             } as MediaFile;
         }));
         setMediaFiles(p => [...p, ...resolved]);
@@ -462,7 +467,7 @@ const App: React.FC = () => {
             
             const serMedia = [];
             for (const m of mediaFiles) {
-                const b: any = { id: m.id, type: m.type, name: m.id, rotation: m.rotation, caption: (m as any).caption, aiCaption: (m as any).aiCaption, duration: (m as any).duration };
+                const b: any = { id: m.id, type: m.type, name: m.id, rotation: m.rotation, caption: (m as any).caption, aiCaption: (m as any).aiCaption, duration: (m as any).duration, volume: (m as any).volume, duckBGM: (m as any).duckBGM };
                 if (!m.serverData && m.file) {
                     const path = `users/${user.uid}/${id}/${m.id}`;
                     await uploadBytes(ref(storage, path), m.file);
@@ -477,7 +482,7 @@ const App: React.FC = () => {
 
             const serAudio = [];
             for (const a of audioFiles) {
-                const b: any = { name: a.name, duration: a.duration, startTime: a.startTime, fadeIn: a.fadeIn, fadeOut: a.fadeOut };
+                const b: any = { id: a.id, name: a.name, duration: a.duration, startTime: a.startTime, fadeIn: a.fadeIn, fadeOut: a.fadeOut };
                 if (!a.serverData && a.file) {
                     const path = `users/${user.uid}/${id}/a-${a.id}`;
                     await uploadBytes(ref(storage, path), a.file);
@@ -524,7 +529,7 @@ const App: React.FC = () => {
     const handleLoad = (s: SavedSlideshow) => {
         setIsPlaying(false);
         setCurrentSlide(0);
-        setCurrentAudioIndex(0);
+        setElapsedTime(0);
 
         setMediaFiles((s.media || []).map(m => ({ 
             id: m.id, 
@@ -534,11 +539,13 @@ const App: React.FC = () => {
             caption: m.caption || '', 
             aiCaption: m.aiCaption || '', 
             duration: m.duration || 0, 
+            volume: m.volume ?? 1.0,
+            duckBGM: m.duckBGM ?? true,
             serverData: { url: m.url, storagePath: m.storagePath } 
         })));
 
         setAudioFiles((s.audio || []).map((a, i) => ({ 
-            id: `l-${i}`, 
+            id: a.id || `l-${i}`, 
             name: a.name, 
             duration: a.duration || 0, 
             startTime: a.startTime || 0, 
@@ -572,8 +579,8 @@ const App: React.FC = () => {
         if (settings.smartCaptionsEnabled) {
             await generateSmartCaptions();
         }
+        setElapsedTime(0);
         setCurrentSlide(0);
-        setCurrentAudioIndex(0);
         setIsPlaying(true);
     };
 
@@ -622,6 +629,51 @@ const App: React.FC = () => {
             setIsProcessing(false); 
         }
     };
+
+    // Intelligent Ducking Calculation
+    const getDuckingFactor = useCallback((time: number) => {
+        const FADE_TIME = 0.8;
+        const DUCK_LEVEL = 0.15;
+        
+        // Find if the current point in time is inside a segment that should duck BGM
+        const segment = mediaWithTimestamps.find(m => 
+            m.type === 'video' && 
+            (m as VideoFile).duckBGM && 
+            time >= m.timelineStart && 
+            time < m.timelineEnd
+        );
+
+        if (!segment) return 1.0;
+
+        const timeIn = time - segment.timelineStart;
+        const timeOut = segment.timelineEnd - time;
+
+        // Check neighboring segments to determine if we should ramp or stay ducked
+        const segIdx = mediaWithTimestamps.indexOf(segment);
+        const prevSeg = segIdx > 0 ? mediaWithTimestamps[segIdx - 1] : null;
+        const nextSeg = segIdx < mediaWithTimestamps.length - 1 ? mediaWithTimestamps[segIdx + 1] : null;
+
+        const prevIsDucking = prevSeg?.type === 'video' && (prevSeg as VideoFile).duckBGM;
+        const nextIsDucking = nextSeg?.type === 'video' && (nextSeg as VideoFile).duckBGM;
+
+        let duckFactor = DUCK_LEVEL;
+
+        // Ramp down from 1.0 at segment start IF previous segment wasn't ducking
+        if (!prevIsDucking && timeIn < FADE_TIME) {
+            const progress = timeIn / FADE_TIME;
+            duckFactor = 1.0 - (progress * (1.0 - DUCK_LEVEL));
+        }
+        
+        // Ramp back up to 1.0 at segment end IF next segment isn't ducking
+        if (!nextIsDucking && timeOut < FADE_TIME) {
+            const progress = timeOut / FADE_TIME;
+            const endRamp = 1.0 - (progress * (1.0 - DUCK_LEVEL));
+            // Ensure we take the deeper ducking if fades overlap (rare but possible)
+            duckFactor = Math.max(duckFactor, endRamp);
+        }
+
+        return duckFactor;
+    }, [mediaWithTimestamps]);
 
     if (isLoading) return (
         <div className="min-h-screen bg-brand-dark flex items-center justify-center">
@@ -765,7 +817,17 @@ const App: React.FC = () => {
 
                     <div className="space-y-6">
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
-                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><PlayIcon className="w-5 h-5 text-brand-purple"/> 4. Preview Theater</h3>
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold flex items-center gap-2 text-white uppercase tracking-tighter"><PlayIcon className="w-5 h-5 text-brand-purple"/> 4. Preview Theater</h3>
+                                {canEdit && (
+                                    <button 
+                                        onClick={() => setIsAdvancedEditorOpen(true)}
+                                        className="text-[10px] bg-brand-purple/20 hover:bg-brand-purple/40 text-brand-purple px-4 py-2 rounded-xl font-black uppercase tracking-widest border border-brand-purple/30 transition-all flex items-center gap-2"
+                                    >
+                                        <BeakerIcon className="w-4 h-4"/> Advanced Studio
+                                    </button>
+                                )}
+                            </div>
                             <div className="aspect-video bg-black rounded-[2rem] relative flex items-center justify-center overflow-hidden border border-gray-700/50 shadow-2xl group">
                                 {mediaFiles.length > 0 ? (
                                     <>
@@ -827,83 +889,235 @@ const App: React.FC = () => {
                 </main>
             )}
 
-            {isShareModalOpen && shareSlideshowTarget && (
-                <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 animate-fade-in backdrop-blur-md">
-                    <div className="bg-gray-900 w-full max-w-md rounded-[2.5rem] border border-gray-800 shadow-2xl flex flex-col p-8">
-                        <div className="flex justify-between items-center mb-8">
-                            <h2 className="text-xl font-black uppercase tracking-tighter">Share Studio</h2>
-                            <button onClick={() => setIsShareModalOpen(false)} className="text-gray-500 hover:text-white"><XIcon className="w-8 h-8"/></button>
+            {isAdvancedEditorOpen && (
+                <div className="fixed inset-0 bg-brand-dark z-[100] flex flex-col p-6 animate-fade-in overflow-hidden">
+                    <header className="flex justify-between items-center mb-8 shrink-0">
+                        <div>
+                            <h2 className="text-3xl font-black uppercase tracking-tighter flex items-center gap-4"><BeakerIcon className="w-8 h-8 text-brand-purple"/> Advanced Studio</h2>
+                            <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">Multi-Track Timeline Editor</p>
                         </div>
-                        <div className="space-y-6">
-                            <div className="flex gap-2">
-                                <input 
-                                    value={shareEmail} 
-                                    onChange={e => setShareEmail(e.target.value)} 
-                                    placeholder="email@example.com" 
-                                    className="flex-1 bg-gray-950 border border-gray-800 rounded-2xl px-5 py-4 text-sm font-bold text-white shadow-inner" 
-                                />
-                                <button onClick={handleShareSlideshow} className="bg-brand-purple text-white px-5 py-4 rounded-2xl hover:bg-purple-700 active:scale-90"><PlusIcon className="w-6 h-6"/></button>
-                            </div>
-                            <div className="max-h-48 overflow-y-auto space-y-3 custom-scrollbar">
-                                <p className="text-[10px] text-gray-500 font-black uppercase tracking-widest">Access List</p>
-                                <div className="bg-gray-800/30 p-4 rounded-2xl border border-gray-700/50 flex justify-between items-center">
-                                    <span className="text-sm font-black text-white">{shareSlideshowTarget.userEmail || 'Owner'}</span>
-                                    <span className="text-[9px] text-brand-purple font-black uppercase tracking-widest">Owner</span>
-                                </div>
-                                {shareSlideshowTarget.collaborators?.map(c => (
-                                    <div key={c.email} className="bg-gray-800/30 p-4 rounded-2xl border border-gray-700/50 flex justify-between items-center group">
-                                        <span className="text-sm font-black text-white">{c.email}</span>
-                                        {user?.uid === shareSlideshowTarget.userId && (
-                                            <button onClick={() => removeCollaborator(c.email)} className="text-red-400 opacity-0 group-hover:opacity-100"><TrashIcon className="w-4 h-4"/></button>
-                                        )}
-                                    </div>
+                        <button onClick={() => setIsAdvancedEditorOpen(false)} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-full transition-all border border-gray-700 shadow-xl"><XIcon className="w-6 h-6"/></button>
+                    </header>
+
+                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 pr-2 pb-20">
+                        {/* Timeline Header - Ruler */}
+                        <div className="bg-gray-950/50 rounded-3xl p-6 border border-gray-800/50 shadow-2xl relative">
+                            <div className="absolute top-0 left-[180px] right-6 h-6 border-b border-gray-800 flex justify-between px-1">
+                                {Array.from({ length: Math.ceil(totalSlideshowDuration / 5) + 1 }).map((_, i) => (
+                                    <span key={i} className="text-[8px] text-gray-600 font-black">{i * 5}s</span>
                                 ))}
+                            </div>
+
+                            <div className="space-y-6 mt-4">
+                                {/* Visual Tracks */}
+                                <div className="flex gap-4 group">
+                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
+                                        <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Track 1: Visuals</span>
+                                        <span className="text-[8px] text-brand-purple font-bold">Images & Clips</span>
+                                    </div>
+                                    <div className="flex-1 h-20 bg-gray-950/40 rounded-2xl border border-gray-800/50 flex relative overflow-x-auto custom-scrollbar">
+                                        {mediaWithTimestamps.map((m, idx) => (
+                                            <div 
+                                                key={m.id} 
+                                                className={`h-full border-r border-gray-800 relative transition-all group/clip overflow-hidden ${m.type === 'image' ? 'bg-brand-purple/10' : 'bg-blue-500/10'}`}
+                                                style={{ width: `${(m.timelineEnd - m.timelineStart) * 20}px`, minWidth: '40px' }}
+                                            >
+                                                {m.type === 'image' ? <img src={m.previewUrl} className="w-full h-full object-cover opacity-30"/> : <video src={m.previewUrl} className="w-full h-full object-cover opacity-30" muted/>}
+                                                <div className="absolute inset-0 flex flex-col items-center justify-center p-1 pointer-events-none">
+                                                    <span className="text-[8px] font-black text-white/40 uppercase whitespace-nowrap">{m.type} #{idx+1}</span>
+                                                    <span className="text-[8px] font-bold text-white/20 whitespace-nowrap">{formatDuration(m.timelineEnd - m.timelineStart)}</span>
+                                                </div>
+                                                {/* Advanced Controls per Clip */}
+                                                {m.type === 'video' && (
+                                                    <div className="absolute bottom-1 left-1 flex gap-1 opacity-0 group-hover/clip:opacity-100 transition-opacity pointer-events-auto">
+                                                        <button 
+                                                            onClick={() => {
+                                                                const updated = [...mediaFiles];
+                                                                (updated[idx] as VideoFile).duckBGM = !(updated[idx] as VideoFile).duckBGM;
+                                                                setMediaFiles(updated);
+                                                            }}
+                                                            className={`text-[7px] px-1 rounded font-black uppercase tracking-tighter ${(m as VideoFile).duckBGM ? 'bg-brand-purple text-white' : 'bg-gray-800 text-gray-400'}`}
+                                                        >
+                                                            Duck BGM: {(m as VideoFile).duckBGM ? 'ON' : 'OFF'}
+                                                        </button>
+                                                        <input 
+                                                            type="range" min="0" max="1" step="0.1" 
+                                                            value={(m as VideoFile).volume}
+                                                            onChange={e => {
+                                                                const updated = [...mediaFiles];
+                                                                (updated[idx] as VideoFile).volume = parseFloat(e.target.value);
+                                                                setMediaFiles(updated);
+                                                            }}
+                                                            className="w-10 accent-brand-purple h-2"
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Audio Tracks */}
+                                <div className="flex gap-4">
+                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
+                                        <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Track 2: Audio</span>
+                                        <span className="text-[8px] text-blue-400 font-bold">Music & Voice</span>
+                                    </div>
+                                    <div className="flex-1 min-h-[160px] bg-gray-950/40 rounded-2xl border border-gray-800/50 p-4 space-y-3 relative overflow-x-auto custom-scrollbar">
+                                        {audioFiles.map((a, idx) => (
+                                            <div key={a.id} className="relative group/audio">
+                                                <div 
+                                                    className="h-12 bg-blue-500/20 border border-blue-500/30 rounded-xl relative overflow-hidden flex items-center px-4"
+                                                    style={{ 
+                                                        marginLeft: `${a.startTime * 20}px`, 
+                                                        width: `${a.duration * 20}px` 
+                                                    }}
+                                                >
+                                                    <div className="absolute inset-y-0 left-0 bg-blue-500/20" style={{ width: `${a.fadeIn * 20}px` }} title="Fade In Area"/>
+                                                    <div className="absolute inset-y-0 right-0 bg-red-500/20" style={{ width: `${a.fadeOut * 20}px` }} title="Fade Out Area"/>
+                                                    <MusicIcon className="w-4 h-4 text-blue-400 mr-3 shrink-0"/>
+                                                    <span className="text-[10px] font-black text-white truncate shrink-0 max-w-[150px]">{a.name}</span>
+                                                    <span className="text-[8px] font-bold text-blue-500/60 ml-auto whitespace-nowrap">{formatDuration(a.duration)}</span>
+                                                </div>
+
+                                                {/* Audio Control Panel */}
+                                                <div className="flex gap-4 mt-2 mb-4 bg-gray-900/40 p-3 rounded-xl border border-gray-800/30">
+                                                    <div className="space-y-1 flex-1">
+                                                        <label className="text-[7px] text-gray-500 font-black uppercase tracking-widest">Start Time Offset ({a.startTime}s)</label>
+                                                        <input 
+                                                            type="range" min="0" max={totalSlideshowDuration} step="1" 
+                                                            value={a.startTime} 
+                                                            onChange={e => {
+                                                                const updated = [...audioFiles];
+                                                                updated[idx].startTime = parseInt(e.target.value);
+                                                                setAudioFiles(updated);
+                                                            }}
+                                                            className="w-full h-1 accent-blue-500" 
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[7px] text-gray-500 font-black uppercase tracking-widest">Fade In ({a.fadeIn}s)</label>
+                                                        <input 
+                                                            type="number" min="0" max="10" 
+                                                            value={a.fadeIn} 
+                                                            onChange={e => {
+                                                                const updated = [...audioFiles];
+                                                                updated[idx].fadeIn = parseFloat(e.target.value);
+                                                                setAudioFiles(updated);
+                                                            }}
+                                                            className="w-12 bg-gray-950 text-white text-[9px] font-bold p-1 rounded border border-gray-800"
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <label className="text-[7px] text-gray-500 font-black uppercase tracking-widest">Fade Out ({a.fadeOut}s)</label>
+                                                        <input 
+                                                            type="number" min="0" max="10" 
+                                                            value={a.fadeOut} 
+                                                            onChange={e => {
+                                                                const updated = [...audioFiles];
+                                                                updated[idx].fadeOut = parseFloat(e.target.value);
+                                                                setAudioFiles(updated);
+                                                            }}
+                                                            className="w-12 bg-gray-950 text-white text-[9px] font-bold p-1 rounded border border-gray-800"
+                                                        />
+                                                    </div>
+                                                    <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="self-end pb-1"><TrashIcon className="w-4 h-4 text-red-500 hover:scale-110 transition-transform"/></button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {audioFiles.length === 0 && <div className="h-full flex items-center justify-center text-[10px] font-black uppercase text-gray-700 tracking-[0.3em]">Drop Music Tracks Above</div>}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
+
+                    <footer className="shrink-0 bg-gray-950 p-6 rounded-t-[2.5rem] border-t border-gray-800 flex justify-between items-center shadow-inner">
+                        <div className="flex items-center gap-6">
+                            <div className="flex flex-col">
+                                <span className="text-[10px] text-gray-500 font-black uppercase tracking-widest">Total Master Length</span>
+                                <span className="text-2xl font-black text-brand-purple tracking-tighter">{formatDuration(totalSlideshowDuration)}</span>
+                            </div>
+                        </div>
+                        <div className="flex gap-4">
+                            <button onClick={startPlayback} className="bg-brand-purple text-white px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-purple-700 shadow-xl transition-all active:scale-95 flex items-center gap-2"><PlayIcon className="w-5 h-5"/> Studio Preview</button>
+                            <button onClick={handleSave} className="bg-white text-black px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-gray-200 shadow-xl transition-all active:scale-95">Commit Changes</button>
+                        </div>
+                    </footer>
                 </div>
             )}
 
             {isPlaying && (
                 <div className="fixed inset-0 bg-black z-[100] flex items-center justify-center animate-fade-in">
                     <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white bg-black/40 hover:bg-red-600/90 p-4 rounded-full z-[110] backdrop-blur-xl transition-all border border-white/10 shadow-2xl"><XIcon className="w-10 h-10"/></button>
-                    {mediaFiles[currentSlide] && (
+                    {mediaWithTimestamps[currentSlide] && (
                         <div className="w-full h-full relative flex items-center justify-center overflow-hidden">
-                            <div key={mediaFiles[currentSlide].id} className={`w-full h-full absolute flex items-center justify-center transition-all duration-[1500ms] animate-${settings.slideStyle}`}>
-                                {mediaFiles[currentSlide].type === 'image' ? (
-                                    <img src={mediaFiles[currentSlide].previewUrl} className="w-full h-full object-contain" alt="slide" />
+                            <div key={mediaWithTimestamps[currentSlide].id} className={`w-full h-full absolute flex items-center justify-center transition-all duration-[1500ms] animate-${settings.slideStyle}`}>
+                                {mediaWithTimestamps[currentSlide].type === 'image' ? (
+                                    <img src={mediaWithTimestamps[currentSlide].previewUrl} className="w-full h-full object-contain" alt="slide" />
                                 ) : (
                                     <video 
                                         ref={videoPreviewRef} 
-                                        src={mediaFiles[currentSlide].previewUrl} 
+                                        src={mediaWithTimestamps[currentSlide].previewUrl} 
                                         className="w-full h-full object-contain shadow-2xl" 
                                         autoPlay 
                                         muted={false} 
-                                        onEnded={handleNextSlide} 
+                                        onLoadedMetadata={e => {
+                                            const video = e.target as HTMLVideoElement;
+                                            video.volume = (mediaWithTimestamps[currentSlide] as VideoFile).volume || 1.0;
+                                            // Sync current playback time if resumed or scrubbed
+                                            const offset = elapsedTime - mediaWithTimestamps[currentSlide].timelineStart;
+                                            if (offset > 0) video.currentTime = offset;
+                                        }}
                                     />
                                 )}
                             </div>
-                            {/* AI Caption Overlay - Refined for Cinematic Clarity */}
-                            {(settings.showCaptions && ((mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption)) && (
+                            
+                            {/* AI Caption Overlay */}
+                            {(settings.showCaptions && ((mediaWithTimestamps[currentSlide] as any).caption || (mediaWithTimestamps[currentSlide] as any).aiCaption)) && (
                                 <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-black/30 backdrop-blur-lg px-10 py-4 rounded-xl border border-white/5 text-center w-[92%] max-w-6xl animate-fade-in shadow-2xl z-50">
                                     <p className="text-white text-lg md:text-xl font-semibold tracking-wide leading-relaxed drop-shadow-md italic">
-                                        {(mediaFiles[currentSlide] as any).caption || (mediaFiles[currentSlide] as any).aiCaption}
+                                        {(mediaWithTimestamps[currentSlide] as any).caption || (mediaWithTimestamps[currentSlide] as any).aiCaption}
                                     </p>
                                 </div>
                             )}
+
+                            {/* Progress Indicator */}
+                            <div className="absolute bottom-4 left-4 right-4 h-1 bg-white/10 rounded-full overflow-hidden">
+                                <div className="h-full bg-brand-purple transition-all" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }}/>
+                            </div>
                         </div>
                     )}
-                    {audioSrc && (
-                        <audio 
-                            ref={audioRef} 
-                            src={audioSrc} 
-                            autoPlay 
-                            onEnded={() => {
-                                if (currentAudioIndex < audioFiles.length - 1) setCurrentAudioIndex(i => i + 1);
-                                else if (settings.repeatSlideshow) setCurrentAudioIndex(0);
-                            }} 
-                        />
-                    )}
+                    
+                    {/* Synchronized Multi-Track Audio Engine with Intelligent Ducking */}
+                    {audioFiles.map((a, idx) => {
+                        const isActive = elapsedTime >= a.startTime && elapsedTime < (a.startTime + a.duration);
+                        const currentInClipTime = elapsedTime - a.startTime;
+                        
+                        // Track-level Volume (Fade In / Fade Out)
+                        let vol = 1.0;
+                        if (isActive) {
+                            if (currentInClipTime < a.fadeIn) {
+                                vol = currentInClipTime / a.fadeIn;
+                            } else if (currentInClipTime > (a.duration - a.fadeOut)) {
+                                vol = (a.duration - currentInClipTime) / a.fadeOut;
+                            }
+                            
+                            // Gradual Audio Ducking Logic
+                            const duckFactor = getDuckingFactor(elapsedTime);
+                            vol *= duckFactor;
+                        }
+
+                        return (
+                            <AudioPlayer 
+                                key={a.id} 
+                                src={a.serverData?.url || (a.file ? URL.createObjectURL(a.file) : '')} 
+                                active={isActive} 
+                                volume={vol} 
+                                startTimeInFile={currentInClipTime}
+                            />
+                        );
+                    })}
                 </div>
             )}
             
@@ -912,9 +1126,36 @@ const App: React.FC = () => {
                 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(109, 40, 217, 0.4); border-radius: 20px; }
                 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
                 .animate-fade-in { animation: fadeIn 0.8s ease-out forwards; }
+                input[type='range'] { -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
+                input[type='range']::-webkit-slider-runnable-track { background: #374151; height: 0.25rem; border-radius: 0.5rem; }
+                input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; margin-top: -6px; background-color: #6d28d9; height: 1rem; width: 1rem; border-radius: 9999px; }
             `}</style>
         </div>
     );
+};
+
+// Internal component for controlled Audio playback
+const AudioPlayer: React.FC<{ src: string, active: boolean, volume: number, startTimeInFile: number }> = ({ src, active, volume, startTimeInFile }) => {
+    const audioRef = useRef<HTMLAudioElement>(null);
+    const [hasStarted, setHasStarted] = useState(false);
+
+    useEffect(() => {
+        if (!audioRef.current) return;
+        if (active) {
+            if (!hasStarted) {
+                audioRef.current.currentTime = Math.max(0, startTimeInFile);
+                audioRef.current.play().catch(e => console.error("Audio block", e));
+                setHasStarted(true);
+            }
+            // Continuous volume updates for smooth ducking ramps
+            audioRef.current.volume = Math.max(0, Math.min(1, volume));
+        } else {
+            audioRef.current.pause();
+            setHasStarted(false);
+        }
+    }, [active, hasStarted, volume, startTimeInFile]);
+
+    return <audio ref={audioRef} src={src} preload="auto" />;
 };
 
 export default App;
