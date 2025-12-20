@@ -85,7 +85,7 @@ interface AppStateAudio {
     startTime: number;
     fadeIn: number;
     fadeOut: number;
-    previewUrl: string; // Stable preview URL
+    previewUrl: string; 
     serverData?: { url: string; storagePath: string; };
 }
 
@@ -293,6 +293,15 @@ const App: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
     const playbackTimerRef = useRef<any>(null);
+
+    // Prevent body scroll when help or theater is open
+    useEffect(() => {
+        if (isHelpOpen || isPlaying) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = '';
+        }
+    }, [isHelpOpen, isPlaying]);
 
     useEffect(() => {
         return () => {
@@ -1412,7 +1421,7 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {/* "?" HELPER BUTTON: Visible on Landing Page AND Logged-in State */}
+            {/* DYNAMIC HELPER UI - DEDUPLICATED */}
             <button 
                 onClick={() => setIsHelpOpen(true)}
                 className="fixed bottom-8 left-8 w-14 h-14 bg-brand-purple text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-purple-600 active:scale-90 transition-all z-[150] border-4 border-white/20 group"
@@ -1421,9 +1430,8 @@ const App: React.FC = () => {
                 <QuestionIcon className="w-8 h-8 group-hover:rotate-12 transition-transform" />
             </button>
 
-            {/* DYNAMIC HELPER MODAL */}
             {isHelpOpen && (
-                <div className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4 sm:p-8 animate-fade-in backdrop-blur-xl overflow-hidden">
+                <div className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4 sm:p-8 animate-fade-in backdrop-blur-md overflow-hidden">
                     <div className="bg-gray-900 w-full max-w-4xl max-h-[90vh] rounded-[3rem] border border-gray-800 shadow-2xl flex flex-col relative overflow-hidden">
                         <button 
                             onClick={() => setIsHelpOpen(false)} 
@@ -1443,7 +1451,6 @@ const App: React.FC = () => {
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                                {/* 1. WHAT & PURPOSE */}
                                 <section className="space-y-4">
                                     <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
                                         <FilmIcon className="w-5 h-5 text-brand-purple"/> What is this?
@@ -1453,7 +1460,6 @@ const App: React.FC = () => {
                                     </p>
                                 </section>
 
-                                {/* 2. WHO SHOULD USE */}
                                 <section className="space-y-4">
                                     <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
                                         <UsersIcon className="w-5 h-5 text-brand-purple"/> Who is it for?
@@ -1463,7 +1469,6 @@ const App: React.FC = () => {
                                     </p>
                                 </section>
 
-                                {/* 3. FEATURES */}
                                 <section className="space-y-6 md:col-span-2">
                                     <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
                                         <SparklesIcon className="w-5 h-5 text-brand-purple"/> Features & Advanced Studio
@@ -1492,7 +1497,6 @@ const App: React.FC = () => {
                                     </div>
                                 </section>
 
-                                {/* 4. DISCLAIMER (STRICT) */}
                                 <section className="md:col-span-2 bg-red-500/10 p-8 rounded-3xl border border-red-500/30">
                                     <h3 className="text-lg font-black text-red-500 uppercase tracking-tight flex items-center gap-2 mb-4">
                                         <VolumeOffIcon className="w-6 h-6"/> Content Disclaimer & Rules
@@ -1522,8 +1526,6 @@ const App: React.FC = () => {
             <style>{`
                 .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
                 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(109, 40, 217, 0.4); border-radius: 20px; }
-                @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-                .animate-fade-in { animation: fadeIn 0.8s ease-out forwards; }
                 input[type='range'] { -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
                 input[type='range']::-webkit-slider-runnable-track { background: rgba(255,255,255,0.1); height: 0.25rem; border-radius: 0.5rem; }
                 input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; margin-top: -6px; background-color: #6d28d9; height: 1rem; width: 1rem; border-radius: 9999px; box-shadow: 0 0 10px rgba(109, 40, 217, 0.5); border: 2px solid white; }
