@@ -196,6 +196,36 @@ const urlToBase64 = async (url: string): Promise<string> => {
     });
 };
 
+const AudioPlayer: React.FC<{
+    src: string;
+    active: boolean;
+    volume: number;
+    startTimeInFile: number;
+}> = ({ src, active, volume, startTimeInFile }) => {
+    const audioRef = useRef<HTMLAudioElement>(null);
+
+    useEffect(() => {
+        const audio = audioRef.current;
+        if (!audio) return;
+
+        if (active) {
+            audio.volume = volume;
+            if (audio.paused) {
+                audio.play().catch((e) => console.error("Audio playback blocked", e));
+            }
+            if (Math.abs(audio.currentTime - startTimeInFile) > 0.3) {
+                audio.currentTime = startTimeInFile;
+            }
+        } else {
+            if (!audio.paused) {
+                audio.pause();
+            }
+        }
+    }, [active, volume, startTimeInFile]);
+
+    return <audio ref={audioRef} src={src} preload="auto" />;
+};
+
 // --- ICON COMPONENTS ---
 const UploadIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>;
 const MusicIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-13c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" /></svg>;
@@ -221,6 +251,7 @@ const ChevronRightIcon = ({ className }: { className?: string }) => <svg xmlns="
 const BeakerIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.673.337a4 4 0 01-2.506.326l-1.741-.348a2 2 0 11.774-3.925l1.74.348a6 6 0 003.759-.488l.673-.337a8 8 0 015.147-.689l2.387.477a4 4 0 012.988 4.766l-1.054 5.27a2 2 0 01-3.126 1.264l-2.383-1.588a4 4 0 00-4.431 0l-2.383 1.588a2 2 0 01-3.126-1.264l1.054-5.27a4 4 0 00-.747-3.411L3.834 11a2 2 0 011.264-3.126l5.27-1.054a4 4 0 003.411-.747l2.126-2.126a2 2 0 013.126 1.264l1.054 5.27a4 4 0 00.747 3.411l2.126 2.126a2 2 0 01.126 2.701z" /></svg>;
 const UsersIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>;
 const FilmIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>;
+const QuestionIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
@@ -251,8 +282,8 @@ const App: React.FC = () => {
     const [isFetchingData, setIsFetchingData] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isAdvancedEditorOpen, setIsAdvancedEditorOpen] = useState(false);
+    const [isHelpOpen, setIsHelpOpen] = useState(false);
     
-    // Sharing State
     const [isShareModalOpen, setIsShareModalOpen] = useState(false);
     const [shareSlideshowTarget, setShareSlideshowTarget] = useState<SavedSlideshow | null>(null);
     const [shareEmail, setShareEmail] = useState('');
@@ -263,7 +294,6 @@ const App: React.FC = () => {
     const audioInputRef = useRef<HTMLInputElement>(null);
     const playbackTimerRef = useRef<any>(null);
 
-    // Cleanup object URLs to prevent memory leaks
     useEffect(() => {
         return () => {
             mediaFiles.forEach(m => {
@@ -289,7 +319,6 @@ const App: React.FC = () => {
         return mediaWithTimestamps.length > 0 ? mediaWithTimestamps[mediaWithTimestamps.length - 1].timelineEnd : 0;
     }, [mediaWithTimestamps]);
 
-    // AI AUTO-FADE ENGINE RECALCULATION
     useEffect(() => {
         if (!settings.autoFadeEnabled || audioFiles.length === 0) return;
 
@@ -327,7 +356,6 @@ const App: React.FC = () => {
     }, [settings.autoFadeEnabled, settings.autoFadeInterval, audioFiles.length]);
 
     const resetWorkspace = useCallback(() => {
-        // Revoke URLs before clearing
         mediaFiles.forEach(m => { if (m.previewUrl.startsWith('blob:')) URL.revokeObjectURL(m.previewUrl); });
         audioFiles.forEach(a => { if (a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl); });
 
@@ -355,7 +383,6 @@ const App: React.FC = () => {
 
     const canEdit = userPermission === 'owner' || userPermission === 'editor';
 
-    // AUTH LISTENER
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (u) => { 
             setUser(u); 
@@ -367,7 +394,6 @@ const App: React.FC = () => {
         return unsubscribe;
     }, [resetWorkspace]);
 
-    // REAL-TIME DATABASE LISTENERS
     useEffect(() => {
         const stableUserUid = user?.uid;
         const stableUserEmail = user?.email?.toLowerCase();
@@ -421,7 +447,6 @@ const App: React.FC = () => {
         });
     }, [ownedSlideshows, sharedWithMeSlideshows]);
 
-    // Enhanced Playback Engine
     useEffect(() => {
         if (!isPlaying) {
             if (playbackTimerRef.current) clearInterval(playbackTimerRef.current);
@@ -444,7 +469,6 @@ const App: React.FC = () => {
         return () => clearInterval(playbackTimerRef.current);
     }, [isPlaying, totalSlideshowDuration, settings.repeatSlideshow]);
 
-    // Update currentSlide based on elapsedTime
     useEffect(() => {
         const activeIdx = mediaWithTimestamps.findIndex(m => elapsedTime >= m.timelineStart && elapsedTime < m.timelineEnd);
         if (activeIdx !== -1 && activeIdx !== currentSlide) {
@@ -528,7 +552,7 @@ const App: React.FC = () => {
         if (!e.target.files?.[0]) return;
         const file = e.target.files[0];
         const duration = await getMediaDuration(file);
-        const previewUrl = URL.createObjectURL(file); // Create once
+        const previewUrl = URL.createObjectURL(file); 
         setAudioFiles(p => [...p, { 
             id: `a-${Date.now()}`, 
             file, 
@@ -648,7 +672,6 @@ const App: React.FC = () => {
         setCurrentSlide(0);
         setElapsedTime(0);
 
-        // Cleanup previous object URLs
         audioFiles.forEach(a => { if (a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl); });
 
         setMediaFiles((s.media || []).map(m => ({ 
@@ -671,7 +694,7 @@ const App: React.FC = () => {
             startTime: a.startTime || 0, 
             fadeIn: a.fadeIn || 1, 
             fadeOut: a.fadeOut || 1, 
-            previewUrl: a.url, // For server files, previewUrl is the server url
+            previewUrl: a.url, 
             serverData: { url: a.url, storagePath: a.storagePath } 
         })));
 
@@ -1388,6 +1411,113 @@ const App: React.FC = () => {
                     })}
                 </div>
             )}
+
+            {/* "?" HELPER BUTTON: Visible on Landing Page AND Logged-in State */}
+            <button 
+                onClick={() => setIsHelpOpen(true)}
+                className="fixed bottom-8 left-8 w-14 h-14 bg-brand-purple text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-purple-600 active:scale-90 transition-all z-[150] border-4 border-white/20 group"
+                aria-label="App Help Guide"
+            >
+                <QuestionIcon className="w-8 h-8 group-hover:rotate-12 transition-transform" />
+            </button>
+
+            {/* DYNAMIC HELPER MODAL */}
+            {isHelpOpen && (
+                <div className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4 sm:p-8 animate-fade-in backdrop-blur-xl overflow-hidden">
+                    <div className="bg-gray-900 w-full max-w-4xl max-h-[90vh] rounded-[3rem] border border-gray-800 shadow-2xl flex flex-col relative overflow-hidden">
+                        <button 
+                            onClick={() => setIsHelpOpen(false)} 
+                            className="absolute top-6 right-8 text-gray-500 hover:text-white transition-colors z-[210] p-2"
+                        >
+                            <XIcon className="w-10 h-10"/>
+                        </button>
+
+                        <div className="flex-1 overflow-y-auto p-8 sm:p-12 custom-scrollbar">
+                            <div className="text-center mb-12">
+                                <h2 className="text-4xl font-black uppercase tracking-tighter text-white mb-2">
+                                    {user ? `Hello, ${user.displayName || 'Creator'}!` : 'Welcome to Muziq Slides'}
+                                </h2>
+                                <p className="text-brand-purple font-bold uppercase tracking-[0.2em] text-xs">
+                                    {user ? 'Your Creative Studio Awaits' : 'The Future of Family Storytelling'}
+                                </p>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                                {/* 1. WHAT & PURPOSE */}
+                                <section className="space-y-4">
+                                    <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
+                                        <FilmIcon className="w-5 h-5 text-brand-purple"/> What is this?
+                                    </h3>
+                                    <p className="text-sm text-gray-400 leading-relaxed font-medium">
+                                        Muziq Slides is a high-fidelity cinematic slideshow engine. Its purpose is to bridge the gap between static photo albums and professional motion pictures, allowing you to preserve memories with orchestral-level multi-track audio and intelligent transitions.
+                                    </p>
+                                </section>
+
+                                {/* 2. WHO SHOULD USE */}
+                                <section className="space-y-4">
+                                    <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
+                                        <UsersIcon className="w-5 h-5 text-brand-purple"/> Who is it for?
+                                    </h3>
+                                    <p className="text-sm text-gray-400 leading-relaxed font-medium">
+                                        Perfect for families wanting to share high-quality visual stories, creators building ambient backgrounds for streaming, and anyone looking for a pro-grade screensaver for Roku or Amazon Fire TV devices.
+                                    </p>
+                                </section>
+
+                                {/* 3. FEATURES */}
+                                <section className="space-y-6 md:col-span-2">
+                                    <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
+                                        <SparklesIcon className="w-5 h-5 text-brand-purple"/> Features & Advanced Studio
+                                    </h3>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                        <div className="bg-gray-800/30 p-6 rounded-3xl border border-gray-800/50">
+                                            <h4 className="text-xs font-black text-white uppercase mb-3 tracking-widest">Standard Features</h4>
+                                            <ul className="text-[11px] text-gray-500 space-y-2 list-disc list-inside font-bold">
+                                                <li>Mixed Media Timeline (Photos & 45s Video Clips)</li>
+                                                <li>Cinematic Styles: Ken Burns, Zoom, Glide & Fade</li>
+                                                <li>Real-time HD Theater Preview Engine</li>
+                                                <li>Cloud Persistence: Save & Archive Unlimited Projects</li>
+                                                <li>One-click Cloning for templating projects</li>
+                                            </ul>
+                                        </div>
+                                        <div className="bg-brand-purple/5 p-6 rounded-3xl border border-brand-purple/20">
+                                            <h4 className="text-xs font-black text-brand-purple uppercase mb-3 tracking-widest">Advanced Studio</h4>
+                                            <ul className="text-[11px] text-gray-400 space-y-2 list-disc list-inside font-bold">
+                                                <li>AI Smart Captions: Powered by Gemini AI Vision</li>
+                                                <li>Intelligent Audio Ducking (Music lowers for video clips)</li>
+                                                <li>Multi-Track Layering: Precise audio offset controls</li>
+                                                <li>Crossfade Engine: Automatic track-chaining and transitions</li>
+                                                <li>Collaborative Sharing: Multi-user real-time editing</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                {/* 4. DISCLAIMER (STRICT) */}
+                                <section className="md:col-span-2 bg-red-500/10 p-8 rounded-3xl border border-red-500/30">
+                                    <h3 className="text-lg font-black text-red-500 uppercase tracking-tight flex items-center gap-2 mb-4">
+                                        <VolumeOffIcon className="w-6 h-6"/> Content Disclaimer & Rules
+                                    </h3>
+                                    <div className="space-y-4 text-sm font-bold text-gray-300">
+                                        <p className="leading-relaxed">
+                                            Muziq Slides is dedicated to wholesome family storytelling and cinematic artistry. We maintain a zero-tolerance policy regarding illegal or harmful content.
+                                        </p>
+                                        <div className="bg-black/40 p-5 rounded-2xl border border-red-500/20 text-xs text-red-200 uppercase tracking-wide leading-loose">
+                                            THIS APP IS STRICTLY PROHIBITED FOR:
+                                            <ul className="mt-3 list-disc list-inside space-y-2">
+                                                <li className="font-black">No videos of a pornographic or explicit adult nature.</li>
+                                                <li className="font-black">Strictly NO sharing of any videos of underage children of a sexual nature.</li>
+                                                <li>No hosting of violence, hate speech, or targeted harassment.</li>
+                                                <li>No illegal material or infringement of intellectual property.</li>
+                                            </ul>
+                                        </div>
+                                        <p className="text-[10px] text-gray-500 italic mt-4 uppercase">Failure to comply will result in immediate permanent account termination and reporting to appropriate authorities.</p>
+                                    </div>
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             
             <style>{`
                 .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
@@ -1400,40 +1530,6 @@ const App: React.FC = () => {
             `}</style>
         </div>
     );
-};
-
-const AudioPlayer: React.FC<{ src: string, active: boolean, volume: number, startTimeInFile: number }> = ({ src, active, volume, startTimeInFile }) => {
-    const audioRef = useRef<HTMLAudioElement>(null);
-    const [hasStarted, setHasStarted] = useState(false);
-
-    useEffect(() => {
-        if (!audioRef.current) return;
-        if (active) {
-            if (!hasStarted) {
-                audioRef.current.currentTime = Math.max(0, startTimeInFile);
-                const playPromise = audioRef.current.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(e => {
-                        // Handle browser autoplay policies
-                        console.debug("Autoplay blocked or audio interrupted", e);
-                    });
-                }
-                setHasStarted(true);
-            }
-            const drift = Math.abs(audioRef.current.currentTime - startTimeInFile);
-            if (drift > 0.15) {
-                audioRef.current.currentTime = startTimeInFile;
-            }
-            audioRef.current.volume = volume;
-        } else {
-            if (hasStarted) {
-                audioRef.current.pause();
-                setHasStarted(false);
-            }
-        }
-    }, [active, hasStarted, volume, startTimeInFile]);
-
-    return <audio ref={audioRef} src={src} preload="auto" />;
 };
 
 export default App;
