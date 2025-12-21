@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp } from 'firebase/app';
@@ -543,8 +542,8 @@ const App: React.FC = () => {
             const isImg = f.type.startsWith('image/');
             const dur = isImg ? 0 : await getMediaDuration(f);
             
-            if (!isImg && dur > 45) {
-                setError(`Video "${f.name}" is too long. Maximum allowed duration is 45 seconds.`);
+            if (!isImg && dur > 60) {
+                setError(`Video "${f.name}" is too long. Maximum allowed duration is 60 seconds.`);
                 continue;
             }
 
@@ -832,6 +831,7 @@ const App: React.FC = () => {
         const timeOut = segment.timelineEnd - time;
 
         const segIdx = mediaWithTimestamps.indexOf(segment);
+        // FIX: Replaced 'prevSeg' with 'segIdx - 1' to avoid using a variable before its declaration.
         const prevSeg = segIdx > 0 ? mediaWithTimestamps[segIdx - 1] : null;
         const nextSeg = segIdx < mediaWithTimestamps.length - 1 ? mediaWithTimestamps[segIdx + 1] : null;
 
@@ -1004,7 +1004,7 @@ const App: React.FC = () => {
                                         <label className="text-xs text-gray-500 font-black uppercase tracking-widest">Slide Duration (Seconds)</label>
                                         <span className="text-brand-purple font-black text-sm">{settings.interval}s</span>
                                     </div>
-                                    <input type="range" min="1" max="45" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
+                                    <input type="range" min="1" max="60" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
                                 </div>
                                 <div className="space-y-3">
                                     <label className="text-xs text-gray-500 font-black uppercase tracking-widest block">Transition Style</label>
@@ -1421,106 +1421,110 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {/* DYNAMIC HELPER UI - DEDUPLICATED */}
-            <button 
-                onClick={() => setIsHelpOpen(true)}
-                className="fixed bottom-8 left-8 w-14 h-14 bg-brand-purple text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-purple-600 active:scale-90 transition-all z-[150] border-4 border-white/20 group"
-                aria-label="App Help Guide"
-            >
-                <QuestionIcon className="w-8 h-8 group-hover:rotate-12 transition-transform" />
-            </button>
+            {/* DYNAMIC HELPER UI - ONLY SHOWN WHEN USER LOGGED IN */}
+            {user && (
+                <>
+                    <button 
+                        onClick={() => setIsHelpOpen(true)}
+                        className="fixed bottom-8 left-8 w-14 h-14 bg-brand-purple text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-purple-600 active:scale-90 transition-all z-[150] border-4 border-white/20 group"
+                        aria-label="App Help Guide"
+                    >
+                        <QuestionIcon className="w-8 h-8 group-hover:rotate-12 transition-transform" />
+                    </button>
 
-            {isHelpOpen && (
-                <div className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4 sm:p-8 animate-fade-in backdrop-blur-md overflow-hidden">
-                    <div className="bg-gray-900 w-full max-w-4xl max-h-[90vh] rounded-[3rem] border border-gray-800 shadow-2xl flex flex-col relative overflow-hidden">
-                        <button 
-                            onClick={() => setIsHelpOpen(false)} 
-                            className="absolute top-6 right-8 text-gray-500 hover:text-white transition-colors z-[210] p-2"
-                        >
-                            <XIcon className="w-10 h-10"/>
-                        </button>
+                    {isHelpOpen && (
+                        <div className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4 sm:p-8 animate-fade-in backdrop-blur-md overflow-hidden">
+                            <div className="bg-gray-900 w-full max-w-4xl max-h-[90vh] rounded-[3rem] border border-gray-800 shadow-2xl flex flex-col relative overflow-hidden">
+                                <button 
+                                    onClick={() => setIsHelpOpen(false)} 
+                                    className="absolute top-6 right-8 text-gray-500 hover:text-white transition-colors z-[210] p-2"
+                                >
+                                    <XIcon className="w-10 h-10"/>
+                                </button>
 
-                        <div className="flex-1 overflow-y-auto p-8 sm:p-12 custom-scrollbar">
-                            <div className="text-center mb-12">
-                                <h2 className="text-4xl font-black uppercase tracking-tighter text-white mb-2">
-                                    {user ? `Hello, ${user.displayName || 'Creator'}!` : 'Welcome to Muziq Slides'}
-                                </h2>
-                                <p className="text-brand-purple font-bold uppercase tracking-[0.2em] text-xs">
-                                    {user ? 'Your Creative Studio Awaits' : 'The Future of Family Storytelling'}
-                                </p>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                                <section className="space-y-4">
-                                    <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
-                                        <FilmIcon className="w-5 h-5 text-brand-purple"/> What is this?
-                                    </h3>
-                                    <p className="text-sm text-gray-400 leading-relaxed font-medium">
-                                        Muziq Slides is a high-fidelity cinematic slideshow engine. Its purpose is to bridge the gap between static photo albums and professional motion pictures, allowing you to preserve memories with orchestral-level multi-track audio and intelligent transitions.
-                                    </p>
-                                </section>
-
-                                <section className="space-y-4">
-                                    <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
-                                        <UsersIcon className="w-5 h-5 text-brand-purple"/> Who is it for?
-                                    </h3>
-                                    <p className="text-sm text-gray-400 leading-relaxed font-medium">
-                                        Perfect for families wanting to share high-quality visual stories, creators building ambient backgrounds for streaming, and anyone looking for a pro-grade screensaver for Roku or Amazon Fire TV devices.
-                                    </p>
-                                </section>
-
-                                <section className="space-y-6 md:col-span-2">
-                                    <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
-                                        <SparklesIcon className="w-5 h-5 text-brand-purple"/> Features & Advanced Studio
-                                    </h3>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                        <div className="bg-gray-800/30 p-6 rounded-3xl border border-gray-800/50">
-                                            <h4 className="text-xs font-black text-white uppercase mb-3 tracking-widest">Standard Features</h4>
-                                            <ul className="text-[11px] text-gray-500 space-y-2 list-disc list-inside font-bold">
-                                                <li>Mixed Media Timeline (Photos & 45s Video Clips)</li>
-                                                <li>Cinematic Styles: Ken Burns, Zoom, Glide & Fade</li>
-                                                <li>Real-time HD Theater Preview Engine</li>
-                                                <li>Cloud Persistence: Save & Archive Unlimited Projects</li>
-                                                <li>One-click Cloning for templating projects</li>
-                                            </ul>
-                                        </div>
-                                        <div className="bg-brand-purple/5 p-6 rounded-3xl border border-brand-purple/20">
-                                            <h4 className="text-xs font-black text-brand-purple uppercase mb-3 tracking-widest">Advanced Studio</h4>
-                                            <ul className="text-[11px] text-gray-400 space-y-2 list-disc list-inside font-bold">
-                                                <li>AI Smart Captions: Powered by Gemini AI Vision</li>
-                                                <li>Intelligent Audio Ducking (Music lowers for video clips)</li>
-                                                <li>Multi-Track Layering: Precise audio offset controls</li>
-                                                <li>Crossfade Engine: Automatic track-chaining and transitions</li>
-                                                <li>Collaborative Sharing: Multi-user real-time editing</li>
-                                            </ul>
-                                        </div>
-                                    </div>
-                                </section>
-
-                                <section className="md:col-span-2 bg-red-500/10 p-8 rounded-3xl border border-red-500/30">
-                                    <h3 className="text-lg font-black text-red-500 uppercase tracking-tight flex items-center gap-2 mb-4">
-                                        <VolumeOffIcon className="w-6 h-6"/> Content Disclaimer & Rules
-                                    </h3>
-                                    <div className="space-y-4 text-sm font-bold text-gray-300">
-                                        <p className="leading-relaxed">
-                                            Muziq Slides is dedicated to wholesome family storytelling and cinematic artistry. We maintain a zero-tolerance policy regarding illegal or harmful content.
+                                <div className="flex-1 overflow-y-auto p-8 sm:p-12 custom-scrollbar">
+                                    <div className="text-center mb-12">
+                                        <h2 className="text-4xl font-black uppercase tracking-tighter text-white mb-2">
+                                            Hello, {user.displayName || 'Creator'}!
+                                        </h2>
+                                        <p className="text-brand-purple font-bold uppercase tracking-[0.2em] text-xs">
+                                            Your Creative Studio Awaits
                                         </p>
-                                        <div className="bg-black/40 p-5 rounded-2xl border border-red-500/20 text-xs text-red-200 uppercase tracking-wide leading-loose">
-                                            THIS APP IS STRICTLY PROHIBITED FOR:
-                                            <ul className="mt-3 list-disc list-inside space-y-2">
-                                                <li className="font-black">No videos of a pornographic or explicit adult nature.</li>
-                                                <li className="font-black">Strictly NO sharing of any videos of underage children of a sexual nature.</li>
-                                                <li>No hosting of violence, hate speech, or targeted harassment.</li>
-                                                <li>No illegal material or infringement of intellectual property.</li>
-                                            </ul>
-                                        </div>
-                                        <p className="text-[10px] text-gray-500 italic mt-4 uppercase">Failure to comply will result in immediate permanent account termination and reporting to appropriate authorities.</p>
                                     </div>
-                                </section>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                                        <section className="space-y-4">
+                                            <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
+                                                <FilmIcon className="w-5 h-5 text-brand-purple"/> What is this?
+                                            </h3>
+                                            <p className="text-sm text-gray-400 leading-relaxed font-medium">
+                                                Muziq Slides is a high-fidelity cinematic slideshow engine. Its purpose is to bridge the gap between static photo albums and professional motion pictures, allowing you to preserve memories with orchestral-level multi-track audio and intelligent transitions.
+                                            </p>
+                                        </section>
+
+                                        <section className="space-y-4">
+                                            <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
+                                                <UsersIcon className="w-5 h-5 text-brand-purple"/> Who is it for?
+                                            </h3>
+                                            <p className="text-sm text-gray-400 leading-relaxed font-medium">
+                                                Perfect for families wanting to share high-quality visual stories, creators building ambient backgrounds for streaming, and anyone looking for a pro-grade screensaver for Roku or Amazon Fire TV devices.
+                                            </p>
+                                        </section>
+
+                                        <section className="space-y-6 md:col-span-2">
+                                            <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
+                                                <SparklesIcon className="w-5 h-5 text-brand-purple"/> Features & Advanced Studio
+                                            </h3>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                                <div className="bg-gray-800/30 p-6 rounded-3xl border border-gray-800/50">
+                                                    <h4 className="text-xs font-black text-white uppercase mb-3 tracking-widest">Standard Features</h4>
+                                                    <ul className="text-[11px] text-gray-500 space-y-2 list-disc list-inside font-bold">
+                                                        <li>Mixed Media Timeline (Photos & 60s Video Clips)</li>
+                                                        <li>Cinematic Styles: Ken Burns, Zoom, Glide & Fade</li>
+                                                        <li>Real-time HD Theater Preview Engine</li>
+                                                        <li>Cloud Persistence: Save & Archive Unlimited Projects</li>
+                                                        <li>One-click Cloning for templating projects</li>
+                                                    </ul>
+                                                </div>
+                                                <div className="bg-brand-purple/5 p-6 rounded-3xl border border-brand-purple/20">
+                                                    <h4 className="text-xs font-black text-brand-purple uppercase mb-3 tracking-widest">Advanced Studio</h4>
+                                                    <ul className="text-[11px] text-gray-400 space-y-2 list-disc list-inside font-bold">
+                                                        <li>AI Smart Captions: Powered by Gemini AI Vision</li>
+                                                        <li>Intelligent Audio Ducking (Music lowers for video clips)</li>
+                                                        <li>Multi-Track Layering: Precise audio offset controls</li>
+                                                        <li>Crossfade Engine: Automatic track-chaining and transitions</li>
+                                                        <li>Collaborative Sharing: Multi-user real-time editing</li>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        </section>
+
+                                        <section className="md:col-span-2 bg-red-500/10 p-8 rounded-3xl border border-red-500/30">
+                                            <h3 className="text-lg font-black text-red-500 uppercase tracking-tight flex items-center gap-2 mb-4">
+                                                <VolumeOffIcon className="w-6 h-6"/> Content Disclaimer & Rules
+                                            </h3>
+                                            <div className="space-y-4 text-sm font-bold text-gray-300">
+                                                <p className="leading-relaxed">
+                                                    Muziq Slides is dedicated to wholesome family storytelling and cinematic artistry. We maintain a zero-tolerance policy regarding illegal or harmful content.
+                                                </p>
+                                                <div className="bg-black/40 p-5 rounded-2xl border border-red-500/20 text-xs text-red-200 uppercase tracking-wide leading-loose">
+                                                    THIS APP IS STRICTLY PROHIBITED FOR:
+                                                    <ul className="mt-3 list-disc list-inside space-y-2">
+                                                        <li className="font-black">No videos of a pornographic or explicit adult nature.</li>
+                                                        <li className="font-black">Strictly NO sharing of any videos of underage children of a sexual nature.</li>
+                                                        <li>No hosting of violence, hate speech, or targeted harassment.</li>
+                                                        <li>No illegal material or infringement of intellectual property.</li>
+                                                    </ul>
+                                                </div>
+                                                <p className="text-[10px] text-gray-500 italic mt-4 uppercase">Failure to comply will result in immediate permanent account termination and reporting to appropriate authorities.</p>
+                                            </div>
+                                        </section>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </div>
+                    )}
+                </>
             )}
             
             <style>{`
