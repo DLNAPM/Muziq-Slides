@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp } from 'firebase/app';
@@ -196,6 +195,7 @@ const urlToBase64 = async (url: string): Promise<string> => {
     });
 };
 
+// --- AUDIO PLAYER COMPONENT (OPTIMIZED) ---
 const AudioPlayer: React.FC<{
     src: string;
     active: boolean;
@@ -203,17 +203,19 @@ const AudioPlayer: React.FC<{
     startTimeInFile: number;
 }> = ({ src, active, volume, startTimeInFile }) => {
     const audioRef = useRef<HTMLAudioElement>(null);
+    const lastVolumeRef = useRef(volume);
 
+    // Handle Playback and Seeking
     useEffect(() => {
         const audio = audioRef.current;
         if (!audio) return;
 
         if (active) {
-            audio.volume = volume;
             if (audio.paused) {
-                audio.play().catch((e) => console.error("Audio playback blocked", e));
+                audio.play().catch(() => {}); // Catch aborted playback
             }
-            if (Math.abs(audio.currentTime - startTimeInFile) > 0.3) {
+            // Increase threshold to 0.5 to prevent micro-stuttering seeking
+            if (Math.abs(audio.currentTime - startTimeInFile) > 0.5) {
                 audio.currentTime = startTimeInFile;
             }
         } else {
@@ -221,7 +223,19 @@ const AudioPlayer: React.FC<{
                 audio.pause();
             }
         }
-    }, [active, volume, startTimeInFile]);
+    }, [active, startTimeInFile]);
+
+    // Separate Volume Control to prevent zipper noise / distortion
+    useEffect(() => {
+        const audio = audioRef.current;
+        if (!audio) return;
+        
+        // Only update if difference is noticeable or ramping
+        if (Math.abs(lastVolumeRef.current - volume) > 0.01) {
+            audio.volume = Math.max(0, Math.min(1, volume));
+            lastVolumeRef.current = volume;
+        }
+    }, [volume]);
 
     return <audio ref={audioRef} src={src} preload="auto" />;
 };
@@ -292,7 +306,11 @@ const App: React.FC = () => {
     const videoPreviewRef = useRef<HTMLVideoElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
-    const playbackTimerRef = useRef<any>(null);
+    
+    // High-precision playback references
+    const requestRef = useRef<number>(0);
+    const startTimeRef = useRef<number>(0);
+    const lastTickTimeRef = useRef<number>(0);
 
     // Prevent body scroll when help or theater is open
     useEffect(() => {
@@ -456,27 +474,42 @@ const App: React.FC = () => {
         });
     }, [ownedSlideshows, sharedWithMeSlideshows]);
 
-    useEffect(() => {
-        if (!isPlaying) {
-            if (playbackTimerRef.current) clearInterval(playbackTimerRef.current);
-            return;
+    // High Precision RequestAnimationFrame Playback Clock
+    const animate = useCallback((time: number) => {
+        if (!startTimeRef.current) {
+            startTimeRef.current = time;
+            lastTickTimeRef.current = time;
         }
 
-        const TICK = 50; 
-        playbackTimerRef.current = setInterval(() => {
-            setElapsedTime(prev => {
-                const next = prev + (TICK / 1000);
-                if (next >= totalSlideshowDuration) {
-                    if (settings.repeatSlideshow) return 0;
-                    setIsPlaying(false);
-                    return 0;
-                }
-                return next;
-            });
-        }, TICK);
+        const delta = (time - lastTickTimeRef.current) / 1000;
+        lastTickTimeRef.current = time;
 
-        return () => clearInterval(playbackTimerRef.current);
-    }, [isPlaying, totalSlideshowDuration, settings.repeatSlideshow]);
+        setElapsedTime(prev => {
+            let next = prev + delta;
+            if (next >= totalSlideshowDuration) {
+                if (settings.repeatSlideshow) {
+                    return 0;
+                } else {
+                    setIsPlaying(false);
+                    return totalSlideshowDuration;
+                }
+            }
+            return next;
+        });
+
+        requestRef.current = requestAnimationFrame(animate);
+    }, [totalSlideshowDuration, settings.repeatSlideshow]);
+
+    useEffect(() => {
+        if (isPlaying) {
+            startTimeRef.current = 0;
+            lastTickTimeRef.current = performance.now();
+            requestRef.current = requestAnimationFrame(animate);
+        } else {
+            cancelAnimationFrame(requestRef.current);
+        }
+        return () => cancelAnimationFrame(requestRef.current);
+    }, [isPlaying, animate]);
 
     useEffect(() => {
         const activeIdx = mediaWithTimestamps.findIndex(m => elapsedTime >= m.timelineStart && elapsedTime < m.timelineEnd);
@@ -1246,7 +1279,7 @@ const App: React.FC = () => {
                                                 className={`h-full border-r border-gray-800 relative transition-all group/clip overflow-hidden ${m.type === 'image' ? 'bg-brand-purple/10' : 'bg-blue-500/10'}`}
                                                 style={{ width: `${(m.timelineEnd - m.timelineStart) * 20}px`, minWidth: '40px' }}
                                             >
-                                                {m.type === 'image' ? <img src={m.previewUrl} className="w-full h-full object-cover opacity-30"/> : <video src={m.previewUrl} className="w-full h-full object-cover opacity-30" muted/>}
+                                                {m.type === 'image' ? <img src={m.previewUrl} className="w-full h-full object-cover opacity-30" alt="clip"/> : <video src={m.previewUrl} className="w-full h-full object-cover opacity-30" muted/>}
                                                 <div className="absolute inset-0 flex flex-col items-center justify-center p-1 pointer-events-none">
                                                     <span className="text-[8px] font-black text-white/40 uppercase whitespace-nowrap">{m.type} #{idx+1}</span>
                                                     <span className="text-[8px] font-bold text-white/20 whitespace-nowrap">{formatDuration(m.timelineEnd - m.timelineStart)}</span>
@@ -1350,63 +1383,82 @@ const App: React.FC = () => {
                 <div className="fixed inset-0 bg-black z-[100] flex flex-col items-center justify-center animate-fade-in group/theater">
                     <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white bg-black/40 hover:bg-red-600/90 p-4 rounded-full z-[110] backdrop-blur-xl transition-all border border-white/10 shadow-2xl"><XIcon className="w-10 h-10"/></button>
                     
-                    {mediaWithTimestamps[currentSlide] && (
-                        <div className="w-full h-full relative flex items-center justify-center overflow-hidden">
-                            <div key={mediaWithTimestamps[currentSlide].id} className={`w-full h-full absolute flex items-center justify-center transition-all duration-[1500ms] animate-${settings.slideStyle}`}>
-                                {mediaWithTimestamps[currentSlide].type === 'image' ? (
-                                    <img src={mediaWithTimestamps[currentSlide].previewUrl} className="w-full h-full object-contain" alt="slide" />
-                                ) : (
-                                    <video 
-                                        ref={videoPreviewRef} 
-                                        src={mediaWithTimestamps[currentSlide].previewUrl} 
-                                        className="w-full h-full object-contain shadow-2xl" 
-                                        autoPlay 
-                                        muted={settings.muteVideos} 
-                                        onLoadedMetadata={e => {
-                                            const video = e.target as HTMLVideoElement;
-                                            video.volume = settings.muteVideos ? 0 : ((mediaWithTimestamps[currentSlide] as VideoFile).volume || 1.0);
-                                            video.muted = settings.muteVideos;
-                                            const offset = elapsedTime - mediaWithTimestamps[currentSlide].timelineStart;
-                                            if (offset > 0) video.currentTime = offset;
-                                        }}
-                                    />
-                                )}
-                            </div>
+                    {/* Double-Buffered Rendering Engine */}
+                    <div className="w-full h-full relative flex items-center justify-center overflow-hidden">
+                        {mediaWithTimestamps.map((media, index) => {
+                            const isVisible = index === currentSlide;
+                            const isPreloading = index === currentSlide + 1 || (settings.repeatSlideshow && currentSlide === mediaWithTimestamps.length - 1 && index === 0);
                             
-                            {(settings.showCaptions && ((mediaWithTimestamps[currentSlide] as any).caption || (mediaWithTimestamps[currentSlide] as any).aiCaption)) && (
-                                <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/30 backdrop-blur-lg px-10 py-4 rounded-xl border border-white/5 text-center w-[92%] max-w-6xl animate-fade-in shadow-2xl z-50">
-                                    <p className="text-white text-lg md:text-xl font-semibold tracking-wide leading-relaxed drop-shadow-md italic">
-                                        {(mediaWithTimestamps[currentSlide] as any).caption || (mediaWithTimestamps[currentSlide] as any).aiCaption}
-                                    </p>
-                                </div>
-                            )}
+                            // Only render the current and next slide to save memory but prevent flicker
+                            if (!isVisible && !isPreloading) return null;
 
-                            <div className="absolute bottom-0 left-0 right-0 p-8 pb-12 bg-gradient-to-t from-black/80 to-transparent transition-opacity duration-500 opacity-0 group-hover/theater:opacity-100 flex flex-col gap-6">
-                                <div className="flex items-center gap-6">
-                                    <span className="text-xs font-mono text-white/60 tracking-widest">{formatDuration(elapsedTime)}</span>
-                                    <div className="flex-1 relative flex items-center group/seekbar">
-                                        <input 
-                                            type="range" 
-                                            min="0" 
-                                            max={totalSlideshowDuration} 
-                                            step="0.1" 
-                                            value={elapsedTime} 
-                                            onChange={(e) => setElapsedTime(parseFloat(e.target.value))}
-                                            className="w-full h-1 bg-white/20 rounded-full appearance-none cursor-pointer accent-brand-purple relative z-10"
-                                        />
-                                        <div className="absolute top-0 left-0 h-1 bg-brand-purple rounded-full pointer-events-none" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }} />
+                            return (
+                                <div 
+                                    key={media.id} 
+                                    className={`w-full h-full absolute inset-0 flex items-center justify-center transition-opacity duration-700 ${isVisible ? 'opacity-100 z-20' : 'opacity-0 z-10'}`}
+                                >
+                                    <div className={`w-full h-full flex items-center justify-center animate-${isVisible ? settings.slideStyle : 'none'}`}>
+                                        {media.type === 'image' ? (
+                                            <img src={media.previewUrl} className="w-full h-full object-contain" alt="slide" />
+                                        ) : (
+                                            <video 
+                                                src={media.previewUrl} 
+                                                className="w-full h-full object-contain shadow-2xl" 
+                                                autoPlay={isVisible}
+                                                loop={false}
+                                                muted={settings.muteVideos || !isVisible} 
+                                                onLoadedMetadata={e => {
+                                                    const video = e.target as HTMLVideoElement;
+                                                    if (isVisible) {
+                                                        video.volume = settings.muteVideos ? 0 : ((media as VideoFile).volume || 1.0);
+                                                        const offset = elapsedTime - media.timelineStart;
+                                                        if (offset > 0) video.currentTime = offset;
+                                                    }
+                                                }}
+                                                ref={isVisible ? (el) => { if (el) { el.muted = settings.muteVideos; } } : null}
+                                            />
+                                        )}
                                     </div>
-                                    <span className="text-xs font-mono text-white/60 tracking-widest">{formatDuration(totalSlideshowDuration)}</span>
                                 </div>
-                                <div className="flex items-center justify-center gap-12">
-                                    <button onClick={skipBackward} className="text-white/60 hover:text-white transition-all transform hover:scale-125 active:scale-90"><RewindIcon className="w-10 h-10"/></button>
-                                    <button onClick={() => setIsPlaying(false)} className="bg-white text-black p-5 rounded-full hover:scale-110 active:scale-95 transition-all shadow-2xl"><PauseIcon className="w-8 h-8"/></button>
-                                    <button onClick={skipForward} className="text-white/60 hover:text-white transition-all transform hover:scale-125 active:scale-90"><FastForwardIcon className="w-10 h-10"/></button>
+                            );
+                        })}
+                        
+                        {/* Captions Layer */}
+                        {(settings.showCaptions && (mediaWithTimestamps[currentSlide] as any)?.caption || (mediaWithTimestamps[currentSlide] as any)?.aiCaption) && (
+                            <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/30 backdrop-blur-lg px-10 py-4 rounded-xl border border-white/5 text-center w-[92%] max-w-6xl animate-fade-in shadow-2xl z-50">
+                                <p className="text-white text-lg md:text-xl font-semibold tracking-wide leading-relaxed drop-shadow-md italic">
+                                    {(mediaWithTimestamps[currentSlide] as any).caption || (mediaWithTimestamps[currentSlide] as any).aiCaption}
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Controls Layer */}
+                        <div className="absolute bottom-0 left-0 right-0 p-8 pb-12 bg-gradient-to-t from-black/80 to-transparent transition-opacity duration-500 opacity-0 group-hover/theater:opacity-100 flex flex-col gap-6 z-[60]">
+                            <div className="flex items-center gap-6">
+                                <span className="text-xs font-mono text-white/60 tracking-widest">{formatDuration(elapsedTime)}</span>
+                                <div className="flex-1 relative flex items-center group/seekbar">
+                                    <input 
+                                        type="range" 
+                                        min="0" 
+                                        max={totalSlideshowDuration} 
+                                        step="0.01" 
+                                        value={elapsedTime} 
+                                        onChange={(e) => setElapsedTime(parseFloat(e.target.value))}
+                                        className="w-full h-1 bg-white/20 rounded-full appearance-none cursor-pointer accent-brand-purple relative z-10"
+                                    />
+                                    <div className="absolute top-0 left-0 h-1 bg-brand-purple rounded-full pointer-events-none" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }} />
                                 </div>
+                                <span className="text-xs font-mono text-white/60 tracking-widest">{formatDuration(totalSlideshowDuration)}</span>
+                            </div>
+                            <div className="flex items-center justify-center gap-12">
+                                <button onClick={skipBackward} className="text-white/60 hover:text-white transition-all transform hover:scale-125 active:scale-90"><RewindIcon className="w-10 h-10"/></button>
+                                <button onClick={() => setIsPlaying(false)} className="bg-white text-black p-5 rounded-full hover:scale-110 active:scale-95 transition-all shadow-2xl"><PauseIcon className="w-8 h-8"/></button>
+                                <button onClick={skipForward} className="text-white/60 hover:text-white transition-all transform hover:scale-125 active:scale-90"><FastForwardIcon className="w-10 h-10"/></button>
                             </div>
                         </div>
-                    )}
+                    </div>
                     
+                    {/* Synchronized Multi-Track Audio Engine */}
                     {audioFiles.map((a) => {
                         const isActive = elapsedTime >= a.startTime && elapsedTime < (a.startTime + a.duration);
                         const currentInClipTime = elapsedTime - a.startTime;
@@ -1428,7 +1480,7 @@ const App: React.FC = () => {
                                 key={a.id} 
                                 src={a.previewUrl} 
                                 active={isActive} 
-                                volume={Math.max(0, Math.min(1, vol))} 
+                                volume={vol} 
                                 startTimeInFile={currentInClipTime}
                             />
                         );
