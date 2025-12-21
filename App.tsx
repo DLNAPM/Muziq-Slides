@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp } from 'firebase/app';
@@ -831,7 +832,6 @@ const App: React.FC = () => {
         const timeOut = segment.timelineEnd - time;
 
         const segIdx = mediaWithTimestamps.indexOf(segment);
-        // FIX: Replaced 'prevSeg' with 'segIdx - 1' to avoid using a variable before its declaration.
         const prevSeg = segIdx > 0 ? mediaWithTimestamps[segIdx - 1] : null;
         const nextSeg = segIdx < mediaWithTimestamps.length - 1 ? mediaWithTimestamps[segIdx + 1] : null;
 
@@ -1075,6 +1075,21 @@ const App: React.FC = () => {
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
                             <h3 className="text-lg font-bold mb-4 text-white uppercase tracking-tighter">5. Project Archive</h3>
                             <div className="flex gap-2 mb-6">
+                                <button 
+                                    onClick={() => {
+                                        if (mediaFiles.length > 0 || audioFiles.length > 0 || slideshowName) {
+                                            if (window.confirm("Clear workspace and start a new project?")) {
+                                                resetWorkspace();
+                                            }
+                                        } else {
+                                            resetWorkspace();
+                                        }
+                                    }}
+                                    className="px-6 rounded-2xl font-black text-sm uppercase tracking-widest transition-all bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 flex items-center gap-2"
+                                    title="Start New Project"
+                                >
+                                    <PlusIcon className="w-5 h-5"/> <span className="hidden sm:inline">New</span>
+                                </button>
                                 <input value={slideshowName} onChange={e => setSlideshowName(e.target.value)} placeholder="Name your project..." className="flex-1 bg-gray-900/40 rounded-2xl px-5 py-4 border border-gray-700/50 outline-none focus:ring-2 focus:ring-brand-purple font-bold text-white shadow-inner" />
                                 <button 
                                     onClick={handleSave} 
