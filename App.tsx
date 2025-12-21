@@ -195,6 +195,79 @@ const urlToBase64 = async (url: string): Promise<string> => {
     });
 };
 
+// --- ROBUST MEDIA PLAYER COMPONENT ---
+const TheaterMedia: React.FC<{
+    media: MediaFile;
+    isVisible: boolean;
+    isPreloading: boolean;
+    muteVideos: boolean;
+    elapsedTime: number;
+    slideStyle: string;
+}> = ({ media, isVisible, isPreloading, muteVideos, elapsedTime, slideStyle }) => {
+    const videoRef = useRef<HTMLVideoElement>(null);
+
+    // Explicit Lifecycle Management for Videos
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video || media.type !== 'video') return;
+
+        if (isVisible) {
+            video.muted = muteVideos;
+            video.volume = muteVideos ? 0 : ((media as VideoFile).volume || 1.0);
+            
+            // Re-sync on becoming visible
+            const offset = elapsedTime - (media as any).timelineStart;
+            if (offset >= 0 && offset < (media as any).duration) {
+                video.currentTime = offset;
+                video.play().catch(err => console.error("Playback failed:", err));
+            } else if (offset >= (media as any).duration) {
+                video.pause();
+            }
+        } else {
+            video.pause();
+            // Pre-warm to start of clip if preloading
+            if (isPreloading) {
+                video.currentTime = 0;
+                video.load();
+            }
+        }
+    }, [isVisible, isPreloading, muteVideos, (media as any).timelineStart, (media as any).duration]);
+
+    // Continuous Sync Check during playback (every 2 seconds)
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video || !isVisible || media.type !== 'video') return;
+
+        const interval = setInterval(() => {
+            const offset = elapsedTime - (media as any).timelineStart;
+            if (Math.abs(video.currentTime - offset) > 0.8) {
+                video.currentTime = offset;
+            }
+        }, 2000);
+
+        return () => clearInterval(interval);
+    }, [isVisible, elapsedTime, (media as any).timelineStart]);
+
+    return (
+        <div className={`w-full h-full absolute inset-0 flex items-center justify-center transition-opacity duration-700 ${isVisible ? 'opacity-100 z-20' : 'opacity-0 z-10'}`}>
+            <div className={`w-full h-full flex items-center justify-center animate-${isVisible ? slideStyle : 'none'}`}>
+                {media.type === 'image' ? (
+                    <img src={media.previewUrl} className="w-full h-full object-contain" alt="slide" />
+                ) : (
+                    <video 
+                        ref={videoRef}
+                        src={media.previewUrl} 
+                        className="w-full h-full object-contain shadow-2xl" 
+                        playsInline
+                        preload="auto"
+                        loop={false}
+                    />
+                )}
+            </div>
+        </div>
+    );
+};
+
 // --- AUDIO PLAYER COMPONENT (OPTIMIZED) ---
 const AudioPlayer: React.FC<{
     src: string;
@@ -205,16 +278,14 @@ const AudioPlayer: React.FC<{
     const audioRef = useRef<HTMLAudioElement>(null);
     const lastVolumeRef = useRef(volume);
 
-    // Handle Playback and Seeking
     useEffect(() => {
         const audio = audioRef.current;
         if (!audio) return;
 
         if (active) {
             if (audio.paused) {
-                audio.play().catch(() => {}); // Catch aborted playback
+                audio.play().catch(() => {});
             }
-            // Increase threshold to 0.5 to prevent micro-stuttering seeking
             if (Math.abs(audio.currentTime - startTimeInFile) > 0.5) {
                 audio.currentTime = startTimeInFile;
             }
@@ -225,12 +296,9 @@ const AudioPlayer: React.FC<{
         }
     }, [active, startTimeInFile]);
 
-    // Separate Volume Control to prevent zipper noise / distortion
     useEffect(() => {
         const audio = audioRef.current;
         if (!audio) return;
-        
-        // Only update if difference is noticeable or ramping
         if (Math.abs(lastVolumeRef.current - volume) > 0.01) {
             audio.volume = Math.max(0, Math.min(1, volume));
             lastVolumeRef.current = volume;
@@ -303,7 +371,6 @@ const App: React.FC = () => {
     const [shareEmail, setShareEmail] = useState('');
     const [shareRole, setShareRole] = useState<'viewer' | 'editor'>('viewer');
 
-    const videoPreviewRef = useRef<HTMLVideoElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
     
@@ -1389,44 +1456,25 @@ const App: React.FC = () => {
                             const isVisible = index === currentSlide;
                             const isPreloading = index === currentSlide + 1 || (settings.repeatSlideshow && currentSlide === mediaWithTimestamps.length - 1 && index === 0);
                             
-                            // Only render the current and next slide to save memory but prevent flicker
                             if (!isVisible && !isPreloading) return null;
 
                             return (
-                                <div 
-                                    key={media.id} 
-                                    className={`w-full h-full absolute inset-0 flex items-center justify-center transition-opacity duration-700 ${isVisible ? 'opacity-100 z-20' : 'opacity-0 z-10'}`}
-                                >
-                                    <div className={`w-full h-full flex items-center justify-center animate-${isVisible ? settings.slideStyle : 'none'}`}>
-                                        {media.type === 'image' ? (
-                                            <img src={media.previewUrl} className="w-full h-full object-contain" alt="slide" />
-                                        ) : (
-                                            <video 
-                                                src={media.previewUrl} 
-                                                className="w-full h-full object-contain shadow-2xl" 
-                                                autoPlay={isVisible}
-                                                loop={false}
-                                                muted={settings.muteVideos || !isVisible} 
-                                                onLoadedMetadata={e => {
-                                                    const video = e.target as HTMLVideoElement;
-                                                    if (isVisible) {
-                                                        video.volume = settings.muteVideos ? 0 : ((media as VideoFile).volume || 1.0);
-                                                        const offset = elapsedTime - media.timelineStart;
-                                                        if (offset > 0) video.currentTime = offset;
-                                                    }
-                                                }}
-                                                ref={isVisible ? (el) => { if (el) { el.muted = settings.muteVideos; } } : null}
-                                            />
-                                        )}
-                                    </div>
-                                </div>
+                                <TheaterMedia 
+                                    key={media.id}
+                                    media={media as any}
+                                    isVisible={isVisible}
+                                    isPreloading={isPreloading}
+                                    muteVideos={settings.muteVideos}
+                                    elapsedTime={elapsedTime}
+                                    slideStyle={settings.slideStyle}
+                                />
                             );
                         })}
                         
-                        {/* Captions Layer */}
-                        {(settings.showCaptions && (mediaWithTimestamps[currentSlide] as any)?.caption || (mediaWithTimestamps[currentSlide] as any)?.aiCaption) && (
-                            <div className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-black/30 backdrop-blur-lg px-10 py-4 rounded-xl border border-white/5 text-center w-[92%] max-w-6xl animate-fade-in shadow-2xl z-50">
-                                <p className="text-white text-lg md:text-xl font-semibold tracking-wide leading-relaxed drop-shadow-md italic">
+                        {/* Captions Layer - Positioned Lower for Cinematic Effect */}
+                        {(settings.showCaptions && ((mediaWithTimestamps[currentSlide] as any)?.caption || (mediaWithTimestamps[currentSlide] as any)?.aiCaption)) && (
+                            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-black/20 backdrop-blur-md px-10 py-4 rounded-2xl border border-white/5 text-center w-[85%] max-w-5xl animate-fade-in shadow-2xl z-50 pointer-events-none">
+                                <p className="text-white text-base md:text-xl font-medium tracking-wide leading-relaxed drop-shadow-lg italic opacity-90">
                                     {(mediaWithTimestamps[currentSlide] as any).caption || (mediaWithTimestamps[currentSlide] as any).aiCaption}
                                 </p>
                             </div>
