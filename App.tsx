@@ -85,6 +85,8 @@ interface AppStateAudio {
     fadeIn: number;
     fadeOut: number;
     previewUrl: string; 
+    source: 'local' | 'apple-music';
+    appleMusicTrackId?: string;
     serverData?: { url: string; storagePath: string; };
 }
 
@@ -123,6 +125,8 @@ interface SerializedAudioFile {
     startTime?: number;
     fadeIn?: number;
     fadeOut?: number;
+    source: 'local' | 'apple-music';
+    appleMusicTrackId?: string;
 }
 
 interface SavedSlideshow {
@@ -138,6 +142,25 @@ interface SavedSlideshow {
     totalDuration?: number;
     collaborators?: Collaborator[];
     collaboratorEmails?: string[];
+}
+
+// --- APPLE MUSIC TYPES ---
+interface AppleMusicPlaylist {
+    id: string;
+    attributes: {
+        name: string;
+        artwork?: { url: string };
+    };
+}
+
+interface AppleMusicTrack {
+    id: string;
+    attributes: {
+        name: string;
+        artistName: string;
+        durationInMillis: number;
+        artwork?: { url: string };
+    };
 }
 
 // --- HELPER FUNCTIONS ---
@@ -195,6 +218,63 @@ const urlToBase64 = async (url: string): Promise<string> => {
     });
 };
 
+// --- APPLE MUSIC PLAYER COMPONENT ---
+const AppleMusicPlayer: React.FC<{
+    trackId: string;
+    active: boolean;
+    volume: number;
+    startTimeInFile: number;
+}> = ({ trackId, active, volume, startTimeInFile }) => {
+    const lastVolumeRef = useRef(volume);
+    const isReadyRef = useRef(false);
+
+    useEffect(() => {
+        const music = (window as any).MusicKit?.getInstance();
+        if (!music) return;
+
+        const handlePlayback = async () => {
+            if (active) {
+                try {
+                    // Avoid re-setting queue if already playing the right track
+                    if (music.nowPlayingItem?.id !== trackId) {
+                        await music.setQueue({ song: trackId });
+                    }
+                    
+                    if (music.playbackState !== 2) { // 2 = Playing
+                        await music.play();
+                    }
+
+                    // Sync seek time
+                    const diff = Math.abs(music.currentPlaybackTime - startTimeInFile);
+                    if (diff > 1.0) {
+                        await music.seekToTime(startTimeInFile);
+                    }
+                } catch (e) {
+                    console.error("Apple Music Playback Error", e);
+                }
+            } else {
+                if (music.nowPlayingItem?.id === trackId && music.playbackState === 2) {
+                    music.pause();
+                }
+            }
+        };
+
+        handlePlayback();
+    }, [active, trackId, startTimeInFile]);
+
+    useEffect(() => {
+        const music = (window as any).MusicKit?.getInstance();
+        if (!music) return;
+        
+        if (Math.abs(lastVolumeRef.current - volume) > 0.05) {
+            music.volume = Math.max(0, Math.min(1, volume));
+            lastVolumeRef.current = volume;
+        }
+    }, [volume]);
+
+    return null; // Apple MusicKit manages its own playback
+};
+
 // --- ROBUST MEDIA PLAYER COMPONENT ---
 const TheaterMedia: React.FC<{
     media: MediaFile;
@@ -206,7 +286,6 @@ const TheaterMedia: React.FC<{
 }> = ({ media, isVisible, isPreloading, muteVideos, elapsedTime, slideStyle }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
 
-    // Explicit Lifecycle Management for Videos
     useEffect(() => {
         const video = videoRef.current;
         if (!video || media.type !== 'video') return;
@@ -215,7 +294,6 @@ const TheaterMedia: React.FC<{
             video.muted = muteVideos;
             video.volume = muteVideos ? 0 : ((media as VideoFile).volume || 1.0);
             
-            // Re-sync on becoming visible
             const offset = elapsedTime - (media as any).timelineStart;
             if (offset >= 0 && offset < (media as any).duration) {
                 video.currentTime = offset;
@@ -225,7 +303,6 @@ const TheaterMedia: React.FC<{
             }
         } else {
             video.pause();
-            // Pre-warm to start of clip if preloading
             if (isPreloading) {
                 video.currentTime = 0;
                 video.load();
@@ -233,7 +310,6 @@ const TheaterMedia: React.FC<{
         }
     }, [isVisible, isPreloading, muteVideos, (media as any).timelineStart, (media as any).duration]);
 
-    // Continuous Sync Check during playback (every 2 seconds)
     useEffect(() => {
         const video = videoRef.current;
         if (!video || !isVisible || media.type !== 'video') return;
@@ -311,6 +387,7 @@ const AudioPlayer: React.FC<{
 // --- ICON COMPONENTS ---
 const UploadIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>;
 const MusicIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-13c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" /></svg>;
+const AppleIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="currentColor" viewBox="0 0 384 512"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>;
 const PlayIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const PauseIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 const RewindIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" /></svg>;
@@ -366,6 +443,12 @@ const App: React.FC = () => {
     const [isAdvancedEditorOpen, setIsAdvancedEditorOpen] = useState(false);
     const [isHelpOpen, setIsHelpOpen] = useState(false);
     
+    // --- APPLE MUSIC STATE ---
+    const [appleMusicAuthorized, setAppleMusicAuthorized] = useState(false);
+    const [appleMusicPlaylists, setAppleMusicPlaylists] = useState<AppleMusicPlaylist[]>([]);
+    const [appleMusicTracks, setAppleMusicTracks] = useState<AppleMusicTrack[]>([]);
+    const [selectedApplePlaylist, setSelectedApplePlaylist] = useState<string | null>(null);
+
     const [isShareModalOpen, setIsShareModalOpen] = useState(false);
     const [shareSlideshowTarget, setShareSlideshowTarget] = useState<SavedSlideshow | null>(null);
     const [shareEmail, setShareEmail] = useState('');
@@ -378,6 +461,80 @@ const App: React.FC = () => {
     const requestRef = useRef<number>(0);
     const startTimeRef = useRef<number>(0);
     const lastTickTimeRef = useRef<number>(0);
+
+    // Initialize MusicKit
+    useEffect(() => {
+        const initMusicKit = async () => {
+            if (!(window as any).MusicKit) return;
+            try {
+                // In a production app, the developerToken would be fetched from a secure backend.
+                // For this implementation, we assume the MusicKit JS is available.
+                const music = await (window as any).MusicKit.configure({
+                    developerToken: 'PLACEHOLDER_TOKEN', // This would normally be a valid JWT
+                    app: {
+                        name: 'Muziq Slides',
+                        build: '1.0.0'
+                    }
+                });
+                setAppleMusicAuthorized(music.isAuthorized);
+            } catch (e) {
+                console.warn("MusicKit initialization failed. Integration will run in mock/unauthorized mode.");
+            }
+        };
+        initMusicKit();
+    }, []);
+
+    const authorizeAppleMusic = async () => {
+        const music = (window as any).MusicKit?.getInstance();
+        if (!music) {
+            setError("Apple MusicKit not loaded.");
+            return;
+        }
+        try {
+            await music.authorize();
+            setAppleMusicAuthorized(true);
+            fetchApplePlaylists();
+        } catch (e) {
+            setError("Apple Music authorization failed.");
+        }
+    };
+
+    const fetchApplePlaylists = async () => {
+        const music = (window as any).MusicKit?.getInstance();
+        if (!music || !music.isAuthorized) return;
+        try {
+            const playlists = await music.api.library.playlists();
+            setAppleMusicPlaylists(playlists || []);
+        } catch (e) {
+            setError("Failed to fetch playlists.");
+        }
+    };
+
+    const fetchAppleTracks = async (playlistId: string) => {
+        const music = (window as any).MusicKit?.getInstance();
+        if (!music || !music.isAuthorized) return;
+        try {
+            const playlist = await music.api.library.playlist(playlistId);
+            setAppleMusicTracks(playlist.relationships.tracks.data || []);
+            setSelectedApplePlaylist(playlistId);
+        } catch (e) {
+            setError("Failed to fetch tracks.");
+        }
+    };
+
+    const addAppleMusicTrack = (track: AppleMusicTrack) => {
+        setAudioFiles(p => [...p, {
+            id: `am-${track.id}`,
+            name: track.attributes.name,
+            duration: track.attributes.durationInMillis / 1000,
+            startTime: 0,
+            fadeIn: 1,
+            fadeOut: 1,
+            previewUrl: track.attributes.artwork?.url.replace('{w}', '100').replace('{h}', '100') || '',
+            source: 'apple-music',
+            appleMusicTrackId: track.id
+        }]);
+    };
 
     // Prevent body scroll when help or theater is open
     useEffect(() => {
@@ -670,6 +827,7 @@ const App: React.FC = () => {
             startTime: 0, 
             fadeIn: 1, 
             fadeOut: 1,
+            source: 'local',
             previewUrl 
         }]);
     };
@@ -726,19 +884,26 @@ const App: React.FC = () => {
                     duration: a.duration || 0, 
                     startTime: a.startTime || 0, 
                     fadeIn: a.fadeIn || 1, 
-                    fadeOut: a.fadeOut || 1 
+                    fadeOut: a.fadeOut || 1,
+                    source: a.source,
+                    appleMusicTrackId: a.appleMusicTrackId || ""
                 };
                 
-                if (!a.serverData && a.file) {
-                    const path = `users/${user.uid}/${id}/a-${a.id}`;
-                    await uploadBytes(ref(storage, path), a.file);
-                    b.url = await getDownloadURL(ref(storage, path));
-                    b.storagePath = path;
-                } else if (a.serverData) {
-                    b.url = a.serverData.url; 
-                    b.storagePath = a.serverData.storagePath;
+                if (a.source === 'local') {
+                    if (!a.serverData && a.file) {
+                        const path = `users/${user.uid}/${id}/a-${a.id}`;
+                        await uploadBytes(ref(storage, path), a.file);
+                        b.url = await getDownloadURL(ref(storage, path));
+                        b.storagePath = path;
+                    } else if (a.serverData) {
+                        b.url = a.serverData.url; 
+                        b.storagePath = a.serverData.storagePath;
+                    } else {
+                        b.url = "";
+                        b.storagePath = "";
+                    }
                 } else {
-                    b.url = "";
+                    b.url = a.previewUrl;
                     b.storagePath = "";
                 }
                 serAudio.push(b);
@@ -804,7 +969,9 @@ const App: React.FC = () => {
             fadeIn: a.fadeIn || 1, 
             fadeOut: a.fadeOut || 1, 
             previewUrl: a.url, 
-            serverData: { url: a.url, storagePath: a.storagePath } 
+            source: a.source || 'local',
+            appleMusicTrackId: a.appleMusicTrackId,
+            serverData: a.storagePath ? { url: a.url, storagePath: a.storagePath } : undefined
         })));
 
         if (s.settings) setSettings(s.settings); 
@@ -1088,11 +1255,25 @@ const App: React.FC = () => {
                         </section>
 
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
-                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><MusicIcon className="w-5 h-5 text-brand-purple"/> 2. Add Music</h3>
-                            <button onClick={() => audioInputRef.current?.click()} className="w-full bg-gray-700/30 hover:bg-gray-700/50 py-4 rounded-2xl font-black text-sm flex justify-center gap-2 border border-gray-600/50 transition-all uppercase tracking-widest"><PlusIcon className="w-5 h-5"/> Add Audio Track</button>
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-bold flex items-center gap-2 text-white uppercase tracking-tighter"><MusicIcon className="w-5 h-5 text-brand-purple"/> 2. Add Music</h3>
+                                <div className="flex gap-2">
+                                    <button onClick={() => audioInputRef.current?.click()} className="bg-gray-700/30 hover:bg-gray-700/50 p-2 rounded-xl border border-gray-600/50 transition-all" title="Upload Local Audio"><PlusIcon className="w-5 h-5"/></button>
+                                </div>
+                            </div>
+                            <button onClick={() => audioInputRef.current?.click()} className="w-full bg-gray-700/30 hover:bg-gray-700/50 py-4 rounded-2xl font-black text-sm flex justify-center gap-2 border border-gray-600/50 transition-all uppercase tracking-widest"><PlusIcon className="w-5 h-5"/> Add Local Track</button>
                             <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*" className="hidden" />
+                            
                             <div className="mt-4 space-y-2">
-                                {audioFiles.map(a => <div key={a.id} className="bg-gray-900/40 p-5 rounded-2xl flex justify-between items-center text-sm font-medium border border-gray-700/50 group"><span>{a.name} <span className="text-gray-500 font-bold ml-2">({formatDuration(a.duration)})</span></span><button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))}><TrashIcon className="w-5 h-5 text-red-400 opacity-0 group-hover:opacity-100 transition-all"/></button></div>)}
+                                {audioFiles.map(a => (
+                                    <div key={a.id} className="bg-gray-900/40 p-5 rounded-2xl flex justify-between items-center text-sm font-medium border border-gray-700/50 group">
+                                        <div className="flex items-center gap-3">
+                                            {a.source === 'apple-music' ? <AppleIcon className="w-4 h-4 text-apple-red"/> : <MusicIcon className="w-4 h-4 text-gray-500"/>}
+                                            <span>{a.name} <span className="text-gray-500 font-bold ml-2">({formatDuration(a.duration)})</span></span>
+                                        </div>
+                                        <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))}><TrashIcon className="w-5 h-5 text-red-400 opacity-0 group-hover:opacity-100 transition-all"/></button>
+                                    </div>
+                                ))}
                             </div>
                         </section>
 
@@ -1287,6 +1468,79 @@ const App: React.FC = () => {
                     </header>
 
                     <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 pr-2 pb-20">
+                        {/* Apple Music Section */}
+                        <div className="bg-apple-red/10 p-6 rounded-3xl border border-apple-red/40 shadow-xl animate-fade-in">
+                            <div className="flex justify-between items-center mb-6">
+                                <div className="flex items-center gap-3">
+                                    <AppleIcon className="w-6 h-6 text-apple-red" />
+                                    <div>
+                                        <h3 className="text-lg font-black uppercase tracking-tighter">Apple Music Integration</h3>
+                                        <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Access your Created Playlists & Tracks</p>
+                                    </div>
+                                </div>
+                                {!appleMusicAuthorized ? (
+                                    <button 
+                                        onClick={authorizeAppleMusic}
+                                        className="bg-apple-red text-white py-2 px-6 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg hover:bg-red-700 transition-all"
+                                    >
+                                        Connect Apple Music
+                                    </button>
+                                ) : (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[10px] text-green-400 font-black uppercase">Connected</span>
+                                        <button onClick={fetchApplePlaylists} className="bg-gray-800 p-2 rounded-lg hover:bg-gray-700 transition-all"><SettingsIcon className="w-4 h-4 text-white"/></button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {appleMusicAuthorized && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
+                                    {/* Playlists Column */}
+                                    <div className="space-y-4">
+                                        <h4 className="text-[10px] text-gray-500 font-black uppercase tracking-widest border-b border-white/10 pb-2">My Library Playlists</h4>
+                                        <div className="grid grid-cols-2 gap-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                                            {appleMusicPlaylists.length > 0 ? appleMusicPlaylists.map(playlist => (
+                                                <button 
+                                                    key={playlist.id} 
+                                                    onClick={() => fetchAppleTracks(playlist.id)}
+                                                    className={`p-3 rounded-2xl flex flex-col items-center gap-2 transition-all border ${selectedApplePlaylist === playlist.id ? 'bg-apple-red/20 border-apple-red' : 'bg-gray-900/40 border-gray-800 hover:border-apple-red/50'}`}
+                                                >
+                                                    {playlist.attributes.artwork ? (
+                                                        <img src={playlist.attributes.artwork.url.replace('{w}', '100').replace('{h}', '100')} className="w-20 h-20 rounded-xl shadow-lg" alt="art"/>
+                                                    ) : <div className="w-20 h-20 bg-gray-800 rounded-xl flex items-center justify-center"><MusicIcon className="w-8 h-8 text-gray-600"/></div>}
+                                                    <span className="text-[10px] font-black text-white text-center truncate w-full">{playlist.attributes.name}</span>
+                                                </button>
+                                            )) : <div className="col-span-2 text-center py-10 text-gray-600 uppercase text-[10px] font-black">No playlists found</div>}
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Tracks Column */}
+                                    <div className="space-y-4">
+                                        <h4 className="text-[10px] text-gray-500 font-black uppercase tracking-widest border-b border-white/10 pb-2">Playlist Tracks</h4>
+                                        <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                                            {appleMusicTracks.length > 0 ? appleMusicTracks.map(track => (
+                                                <div key={track.id} className="bg-gray-950/40 p-3 rounded-xl border border-gray-800 flex justify-between items-center group">
+                                                    <div className="flex items-center gap-3">
+                                                        {track.attributes.artwork && <img src={track.attributes.artwork.url.replace('{w}', '40').replace('{h}', '40')} className="w-8 h-8 rounded-lg" alt="art"/>}
+                                                        <div>
+                                                            <p className="text-[10px] font-black text-white leading-none">{track.attributes.name}</p>
+                                                            <p className="text-[8px] text-gray-500 font-bold uppercase mt-1">{track.attributes.artistName}</p>
+                                                        </div>
+                                                    </div>
+                                                    <button 
+                                                        onClick={() => addAppleMusicTrack(track)}
+                                                        className="bg-apple-red/10 text-apple-red p-2 rounded-lg hover:bg-apple-red hover:text-white transition-all opacity-0 group-hover:opacity-100"
+                                                    >
+                                                        <PlusIcon className="w-4 h-4"/>
+                                                    </button>
+                                                </div>
+                                            )) : <div className="text-center py-10 text-gray-600 uppercase text-[10px] font-black">Select a playlist to see tracks</div>}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
                         <div className="bg-brand-purple/10 p-6 rounded-3xl border border-brand-purple/40 shadow-xl animate-fade-in">
                             <div className="flex justify-between items-center mb-6">
                                 <div className="flex items-center gap-3">
@@ -1365,17 +1619,17 @@ const App: React.FC = () => {
                                         {audioFiles.map((a, idx) => (
                                             <div key={a.id} className="relative group/audio">
                                                 <div 
-                                                    className="h-12 bg-blue-500/20 border border-blue-500/30 rounded-xl relative overflow-hidden flex items-center px-4"
+                                                    className={`h-12 border rounded-xl relative overflow-hidden flex items-center px-4 ${a.source === 'apple-music' ? 'bg-apple-red/20 border-apple-red/30' : 'bg-blue-500/20 border-blue-500/30'}`}
                                                     style={{ 
                                                         marginLeft: `${a.startTime * 20}px`, 
                                                         width: `${a.duration * 20}px` 
                                                     }}
                                                 >
-                                                    <div className="absolute inset-y-0 left-0 bg-blue-500/20" style={{ width: `${a.fadeIn * 20}px` }} title="Fade In Area"/>
-                                                    <div className="absolute inset-y-0 right-0 bg-red-500/20" style={{ width: `${a.fadeOut * 20}px` }} title="Fade Out Area"/>
-                                                    <MusicIcon className="w-4 h-4 text-blue-400 mr-3 shrink-0"/>
+                                                    <div className="absolute inset-y-0 left-0 bg-white/10" style={{ width: `${a.fadeIn * 20}px` }} title="Fade In Area"/>
+                                                    <div className="absolute inset-y-0 right-0 bg-black/10" style={{ width: `${a.fadeOut * 20}px` }} title="Fade Out Area"/>
+                                                    {a.source === 'apple-music' ? <AppleIcon className="w-4 h-4 text-apple-red mr-3 shrink-0"/> : <MusicIcon className="w-4 h-4 text-blue-400 mr-3 shrink-0"/>}
                                                     <span className="text-[10px] font-black text-white truncate shrink-0 max-w-[150px]">{a.name}</span>
-                                                    <span className="text-[8px] font-bold text-blue-500/60 ml-auto whitespace-nowrap">{formatDuration(a.duration)}</span>
+                                                    <span className={`text-[8px] font-bold ml-auto whitespace-nowrap ${a.source === 'apple-music' ? 'text-apple-red' : 'text-blue-500/60'}`}>{formatDuration(a.duration)}</span>
                                                 </div>
 
                                                 <div className="flex gap-4 mt-2 mb-4 bg-gray-900/40 p-3 rounded-xl border border-gray-800/30">
@@ -1390,7 +1644,7 @@ const App: React.FC = () => {
                                                                 updated[idx].startTime = parseInt(e.target.value);
                                                                 setAudioFiles(updated);
                                                             }}
-                                                            className={`w-full h-1 accent-blue-500 ${settings.autoFadeEnabled ? 'opacity-20 cursor-not-allowed' : ''}`} 
+                                                            className={`w-full h-1 ${a.source === 'apple-music' ? 'accent-apple-red' : 'accent-blue-500'} ${settings.autoFadeEnabled ? 'opacity-20 cursor-not-allowed' : ''}`} 
                                                         />
                                                     </div>
                                                     <div className="space-y-1">
@@ -1523,6 +1777,18 @@ const App: React.FC = () => {
                             vol *= duckFactor;
                         }
 
+                        if (a.source === 'apple-music' && a.appleMusicTrackId) {
+                            return (
+                                <AppleMusicPlayer 
+                                    key={a.id} 
+                                    trackId={a.appleMusicTrackId}
+                                    active={isActive}
+                                    volume={vol}
+                                    startTimeInFile={currentInClipTime}
+                                />
+                            );
+                        }
+
                         return (
                             <AudioPlayer 
                                 key={a.id} 
@@ -1579,10 +1845,10 @@ const App: React.FC = () => {
 
                                         <section className="space-y-4">
                                             <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
-                                                <UsersIcon className="w-5 h-5 text-brand-purple"/> Who is it for?
+                                                <AppleIcon className="w-5 h-5 text-apple-red"/> Apple Music Integration
                                             </h3>
                                             <p className="text-sm text-gray-400 leading-relaxed font-medium">
-                                                Perfect for families wanting to share high-quality visual stories, creators building ambient backgrounds for streaming, and anyone looking for a pro-grade screensaver for Roku or Amazon Fire TV devices.
+                                                In our Advanced Studio, you can now connect your Apple Music account to browse and use any track from your created playlists directly in your slideshow timeline.
                                             </p>
                                         </section>
 
@@ -1605,6 +1871,7 @@ const App: React.FC = () => {
                                                     <h4 className="text-xs font-black text-brand-purple uppercase mb-3 tracking-widest">Advanced Studio</h4>
                                                     <ul className="text-[11px] text-gray-400 space-y-2 list-disc list-inside font-bold">
                                                         <li>AI Smart Captions: Powered by Gemini AI Vision</li>
+                                                        <li>Apple Music: Browse and sync your personal library</li>
                                                         <li>Intelligent Audio Ducking (Music lowers for video clips)</li>
                                                         <li>Multi-Track Layering: Precise audio offset controls</li>
                                                         <li>Crossfade Engine: Automatic track-chaining and transitions</li>
