@@ -226,7 +226,6 @@ const AppleMusicPlayer: React.FC<{
     startTimeInFile: number;
 }> = ({ trackId, active, volume, startTimeInFile }) => {
     const lastVolumeRef = useRef(volume);
-    const isReadyRef = useRef(false);
 
     useEffect(() => {
         const music = (window as any).MusicKit?.getInstance();
@@ -235,16 +234,14 @@ const AppleMusicPlayer: React.FC<{
         const handlePlayback = async () => {
             if (active) {
                 try {
-                    // Avoid re-setting queue if already playing the right track
                     if (music.nowPlayingItem?.id !== trackId) {
                         await music.setQueue({ song: trackId });
                     }
                     
-                    if (music.playbackState !== 2) { // 2 = Playing
+                    if (music.playbackState !== 2) { 
                         await music.play();
                     }
 
-                    // Sync seek time
                     const diff = Math.abs(music.currentPlaybackTime - startTimeInFile);
                     if (diff > 1.0) {
                         await music.seekToTime(startTimeInFile);
@@ -272,7 +269,7 @@ const AppleMusicPlayer: React.FC<{
         }
     }, [volume]);
 
-    return null; // Apple MusicKit manages its own playback
+    return null; 
 };
 
 // --- ROBUST MEDIA PLAYER COMPONENT ---
@@ -444,6 +441,7 @@ const App: React.FC = () => {
     const [isHelpOpen, setIsHelpOpen] = useState(false);
     
     // --- APPLE MUSIC STATE ---
+    const [isMusicBrowserOpen, setIsMusicBrowserOpen] = useState(false);
     const [appleMusicAuthorized, setAppleMusicAuthorized] = useState(false);
     const [appleMusicPlaylists, setAppleMusicPlaylists] = useState<AppleMusicPlaylist[]>([]);
     const [appleMusicTracks, setAppleMusicTracks] = useState<AppleMusicTrack[]>([]);
@@ -467,10 +465,8 @@ const App: React.FC = () => {
         const initMusicKit = async () => {
             if (!(window as any).MusicKit) return;
             try {
-                // In a production app, the developerToken would be fetched from a secure backend.
-                // For this implementation, we assume the MusicKit JS is available.
                 const music = await (window as any).MusicKit.configure({
-                    developerToken: 'PLACEHOLDER_TOKEN', // This would normally be a valid JWT
+                    developerToken: 'APPLE_MUSIC_DEVELOPER_TOKEN', // Must be replaced with actual token in prod
                     app: {
                         name: 'Muziq Slides',
                         build: '1.0.0'
@@ -478,7 +474,7 @@ const App: React.FC = () => {
                 });
                 setAppleMusicAuthorized(music.isAuthorized);
             } catch (e) {
-                console.warn("MusicKit initialization failed. Integration will run in mock/unauthorized mode.");
+                console.warn("MusicKit initialization failed.");
             }
         };
         initMusicKit();
@@ -538,12 +534,12 @@ const App: React.FC = () => {
 
     // Prevent body scroll when help or theater is open
     useEffect(() => {
-        if (isHelpOpen || isPlaying) {
+        if (isHelpOpen || isPlaying || isMusicBrowserOpen) {
             document.body.style.overflow = 'hidden';
         } else {
             document.body.style.overflow = '';
         }
-    }, [isHelpOpen, isPlaying]);
+    }, [isHelpOpen, isPlaying, isMusicBrowserOpen]);
 
     useEffect(() => {
         return () => {
@@ -1257,19 +1253,33 @@ const App: React.FC = () => {
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
                             <div className="flex justify-between items-center mb-4">
                                 <h3 className="text-lg font-bold flex items-center gap-2 text-white uppercase tracking-tighter"><MusicIcon className="w-5 h-5 text-brand-purple"/> 2. Add Music</h3>
-                                <div className="flex gap-2">
-                                    <button onClick={() => audioInputRef.current?.click()} className="bg-gray-700/30 hover:bg-gray-700/50 p-2 rounded-xl border border-gray-600/50 transition-all" title="Upload Local Audio"><PlusIcon className="w-5 h-5"/></button>
-                                </div>
                             </div>
-                            <button onClick={() => audioInputRef.current?.click()} className="w-full bg-gray-700/30 hover:bg-gray-700/50 py-4 rounded-2xl font-black text-sm flex justify-center gap-2 border border-gray-600/50 transition-all uppercase tracking-widest"><PlusIcon className="w-5 h-5"/> Add Local Track</button>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button onClick={() => audioInputRef.current?.click()} className="bg-gray-700/30 hover:bg-gray-700/50 py-4 rounded-2xl font-black text-[10px] flex flex-col items-center justify-center gap-2 border border-gray-600/50 transition-all uppercase tracking-widest group">
+                                    <PlusIcon className="w-6 h-6 text-gray-500 group-hover:text-white transition-colors"/> 
+                                    <span>Local Audio</span>
+                                </button>
+                                <button onClick={() => { setIsMusicBrowserOpen(true); fetchApplePlaylists(); }} className="bg-apple-red/10 hover:bg-apple-red/20 py-4 rounded-2xl font-black text-[10px] flex flex-col items-center justify-center gap-2 border border-apple-red/30 transition-all uppercase tracking-widest group">
+                                    <AppleIcon className="w-6 h-6 text-apple-red"/> 
+                                    <span>Apple Music</span>
+                                </button>
+                            </div>
                             <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*" className="hidden" />
                             
                             <div className="mt-4 space-y-2">
                                 {audioFiles.map(a => (
                                     <div key={a.id} className="bg-gray-900/40 p-5 rounded-2xl flex justify-between items-center text-sm font-medium border border-gray-700/50 group">
                                         <div className="flex items-center gap-3">
-                                            {a.source === 'apple-music' ? <AppleIcon className="w-4 h-4 text-apple-red"/> : <MusicIcon className="w-4 h-4 text-gray-500"/>}
-                                            <span>{a.name} <span className="text-gray-500 font-bold ml-2">({formatDuration(a.duration)})</span></span>
+                                            {a.source === 'apple-music' ? (
+                                                <div className="relative">
+                                                    <img src={a.previewUrl} className="w-8 h-8 rounded-lg shadow-md" alt="art" />
+                                                    <AppleIcon className="w-2.5 h-2.5 text-apple-red absolute -bottom-1 -right-1" />
+                                                </div>
+                                            ) : <MusicIcon className="w-4 h-4 text-gray-500"/>}
+                                            <div className="flex flex-col">
+                                                <span className="text-xs font-bold truncate max-w-[150px]">{a.name}</span>
+                                                <span className="text-[10px] text-gray-500 font-bold">{formatDuration(a.duration)}</span>
+                                            </div>
                                         </div>
                                         <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))}><TrashIcon className="w-5 h-5 text-red-400 opacity-0 group-hover:opacity-100 transition-all"/></button>
                                     </div>
@@ -1414,6 +1424,98 @@ const App: React.FC = () => {
                 </main>
             )}
 
+            {/* Apple Music Browser Modal */}
+            {isMusicBrowserOpen && (
+                <div className="fixed inset-0 bg-black/95 z-[200] flex items-center justify-center p-4 sm:p-8 animate-fade-in backdrop-blur-xl">
+                    <div className="bg-gray-900 w-full max-w-4xl max-h-[90vh] rounded-[3rem] border border-apple-red/20 shadow-2xl flex flex-col relative overflow-hidden">
+                        <header className="p-8 border-b border-white/5 flex justify-between items-center bg-apple-red/5">
+                            <div className="flex items-center gap-4">
+                                <AppleIcon className="w-8 h-8 text-apple-red"/>
+                                <div>
+                                    <h2 className="text-2xl font-black uppercase tracking-tighter">Apple Music Library</h2>
+                                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-[0.2em]">Created Playlists & Downloads</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setIsMusicBrowserOpen(false)} className="text-gray-500 hover:text-white transition-colors p-2"><XIcon className="w-10 h-10"/></button>
+                        </header>
+
+                        {!appleMusicAuthorized ? (
+                            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-6">
+                                <div className="w-24 h-24 bg-apple-red/10 rounded-full flex items-center justify-center border border-apple-red/20">
+                                    <AppleIcon className="w-12 h-12 text-apple-red" />
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-black uppercase mb-2">Connect your Library</h3>
+                                    <p className="text-sm text-gray-400 max-w-sm">Authorization is required to browse your created playlists and add your favorite tracks to your slideshows.</p>
+                                </div>
+                                <button onClick={authorizeAppleMusic} className="bg-apple-red text-white py-4 px-12 rounded-full font-black text-sm uppercase tracking-widest shadow-2xl hover:scale-105 active:scale-95 transition-all">Authorize Now</button>
+                            </div>
+                        ) : (
+                            <div className="flex-1 overflow-hidden flex flex-col sm:flex-row">
+                                {/* Playlists Sidebar */}
+                                <aside className="w-full sm:w-72 border-r border-white/5 overflow-y-auto custom-scrollbar bg-gray-950/20 p-6 space-y-6">
+                                    <h3 className="text-[10px] text-gray-500 font-black uppercase tracking-widest border-b border-white/10 pb-2">My Created Playlists</h3>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        {appleMusicPlaylists.length > 0 ? appleMusicPlaylists.map(playlist => (
+                                            <button 
+                                                key={playlist.id} 
+                                                onClick={() => fetchAppleTracks(playlist.id)}
+                                                className={`p-3 rounded-2xl flex items-center gap-3 transition-all border text-left ${selectedApplePlaylist === playlist.id ? 'bg-apple-red/20 border-apple-red shadow-lg' : 'bg-gray-900/40 border-gray-800 hover:border-apple-red/50'}`}
+                                            >
+                                                {playlist.attributes.artwork ? (
+                                                    <img src={playlist.attributes.artwork.url.replace('{w}', '80').replace('{h}', '80')} className="w-12 h-12 rounded-xl shadow-lg" alt="art"/>
+                                                ) : <div className="w-12 h-12 bg-gray-800 rounded-xl flex items-center justify-center"><MusicIcon className="w-6 h-6 text-gray-600"/></div>}
+                                                <div className="min-w-0">
+                                                    <p className="text-[10px] font-black text-white truncate">{playlist.attributes.name}</p>
+                                                    <p className="text-[8px] text-gray-500 font-bold uppercase mt-0.5">Library Playlist</p>
+                                                </div>
+                                            </button>
+                                        )) : <div className="text-center py-10 text-gray-600 uppercase text-[10px] font-black italic">Syncing Playlists...</div>}
+                                    </div>
+                                </aside>
+
+                                {/* Tracks Main Area */}
+                                <section className="flex-1 overflow-y-auto custom-scrollbar p-8">
+                                    <div className="mb-6 flex justify-between items-end">
+                                        <h3 className="text-[10px] text-gray-500 font-black uppercase tracking-widest border-b border-white/10 pb-2 flex-1 mr-4">Tracks from Selected Playlist</h3>
+                                        <button onClick={fetchApplePlaylists} className="text-[10px] text-brand-purple font-black uppercase hover:underline">Refresh Library</button>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        {appleMusicTracks.length > 0 ? appleMusicTracks.map(track => (
+                                            <div key={track.id} className="bg-gray-950/40 p-4 rounded-3xl border border-gray-800 flex justify-between items-center group hover:border-apple-red/30 transition-all">
+                                                <div className="flex items-center gap-4 min-w-0">
+                                                    {track.attributes.artwork && <img src={track.attributes.artwork.url.replace('{w}', '60').replace('{h}', '60')} className="w-12 h-12 rounded-2xl shadow-xl" alt="art"/>}
+                                                    <div className="min-w-0">
+                                                        <p className="text-[11px] font-black text-white leading-tight truncate">{track.attributes.name}</p>
+                                                        <p className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{track.attributes.artistName}</p>
+                                                        <p className="text-[8px] text-gray-600 font-black mt-1">{formatDuration(track.attributes.durationInMillis / 1000)}</p>
+                                                    </div>
+                                                </div>
+                                                <button 
+                                                    onClick={() => { addAppleMusicTrack(track); setIsMusicBrowserOpen(false); }}
+                                                    className="bg-apple-red text-white p-3 rounded-2xl hover:scale-110 active:scale-90 transition-all shadow-xl opacity-0 group-hover:opacity-100"
+                                                >
+                                                    <PlusIcon className="w-5 h-5"/>
+                                                </button>
+                                            </div>
+                                        )) : (
+                                            <div className="col-span-2 text-center py-20">
+                                                <MusicIcon className="w-12 h-12 text-gray-800 mx-auto mb-4" />
+                                                <p className="text-gray-600 uppercase text-[10px] font-black">Select a playlist to browse your tracks</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </section>
+                            </div>
+                        )}
+                        
+                        <footer className="p-6 bg-black/40 border-t border-white/5 text-center">
+                            <p className="text-[8px] text-gray-600 font-black uppercase tracking-[0.3em]">Integrates seamlessly with your active Apple Music Subscription</p>
+                        </footer>
+                    </div>
+                </div>
+            )}
+
             {isShareModalOpen && shareSlideshowTarget && (
                 <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 animate-fade-in backdrop-blur-md">
                     <div className="bg-gray-900 w-full max-w-md rounded-[2.5rem] border border-gray-800 shadow-2xl flex flex-col p-8">
@@ -1468,79 +1570,6 @@ const App: React.FC = () => {
                     </header>
 
                     <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 pr-2 pb-20">
-                        {/* Apple Music Section */}
-                        <div className="bg-apple-red/10 p-6 rounded-3xl border border-apple-red/40 shadow-xl animate-fade-in">
-                            <div className="flex justify-between items-center mb-6">
-                                <div className="flex items-center gap-3">
-                                    <AppleIcon className="w-6 h-6 text-apple-red" />
-                                    <div>
-                                        <h3 className="text-lg font-black uppercase tracking-tighter">Apple Music Integration</h3>
-                                        <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Access your Created Playlists & Tracks</p>
-                                    </div>
-                                </div>
-                                {!appleMusicAuthorized ? (
-                                    <button 
-                                        onClick={authorizeAppleMusic}
-                                        className="bg-apple-red text-white py-2 px-6 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg hover:bg-red-700 transition-all"
-                                    >
-                                        Connect Apple Music
-                                    </button>
-                                ) : (
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[10px] text-green-400 font-black uppercase">Connected</span>
-                                        <button onClick={fetchApplePlaylists} className="bg-gray-800 p-2 rounded-lg hover:bg-gray-700 transition-all"><SettingsIcon className="w-4 h-4 text-white"/></button>
-                                    </div>
-                                )}
-                            </div>
-
-                            {appleMusicAuthorized && (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
-                                    {/* Playlists Column */}
-                                    <div className="space-y-4">
-                                        <h4 className="text-[10px] text-gray-500 font-black uppercase tracking-widest border-b border-white/10 pb-2">My Library Playlists</h4>
-                                        <div className="grid grid-cols-2 gap-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-                                            {appleMusicPlaylists.length > 0 ? appleMusicPlaylists.map(playlist => (
-                                                <button 
-                                                    key={playlist.id} 
-                                                    onClick={() => fetchAppleTracks(playlist.id)}
-                                                    className={`p-3 rounded-2xl flex flex-col items-center gap-2 transition-all border ${selectedApplePlaylist === playlist.id ? 'bg-apple-red/20 border-apple-red' : 'bg-gray-900/40 border-gray-800 hover:border-apple-red/50'}`}
-                                                >
-                                                    {playlist.attributes.artwork ? (
-                                                        <img src={playlist.attributes.artwork.url.replace('{w}', '100').replace('{h}', '100')} className="w-20 h-20 rounded-xl shadow-lg" alt="art"/>
-                                                    ) : <div className="w-20 h-20 bg-gray-800 rounded-xl flex items-center justify-center"><MusicIcon className="w-8 h-8 text-gray-600"/></div>}
-                                                    <span className="text-[10px] font-black text-white text-center truncate w-full">{playlist.attributes.name}</span>
-                                                </button>
-                                            )) : <div className="col-span-2 text-center py-10 text-gray-600 uppercase text-[10px] font-black">No playlists found</div>}
-                                        </div>
-                                    </div>
-                                    
-                                    {/* Tracks Column */}
-                                    <div className="space-y-4">
-                                        <h4 className="text-[10px] text-gray-500 font-black uppercase tracking-widest border-b border-white/10 pb-2">Playlist Tracks</h4>
-                                        <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-                                            {appleMusicTracks.length > 0 ? appleMusicTracks.map(track => (
-                                                <div key={track.id} className="bg-gray-950/40 p-3 rounded-xl border border-gray-800 flex justify-between items-center group">
-                                                    <div className="flex items-center gap-3">
-                                                        {track.attributes.artwork && <img src={track.attributes.artwork.url.replace('{w}', '40').replace('{h}', '40')} className="w-8 h-8 rounded-lg" alt="art"/>}
-                                                        <div>
-                                                            <p className="text-[10px] font-black text-white leading-none">{track.attributes.name}</p>
-                                                            <p className="text-[8px] text-gray-500 font-bold uppercase mt-1">{track.attributes.artistName}</p>
-                                                        </div>
-                                                    </div>
-                                                    <button 
-                                                        onClick={() => addAppleMusicTrack(track)}
-                                                        className="bg-apple-red/10 text-apple-red p-2 rounded-lg hover:bg-apple-red hover:text-white transition-all opacity-0 group-hover:opacity-100"
-                                                    >
-                                                        <PlusIcon className="w-4 h-4"/>
-                                                    </button>
-                                                </div>
-                                            )) : <div className="text-center py-10 text-gray-600 uppercase text-[10px] font-black">Select a playlist to see tracks</div>}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
                         <div className="bg-brand-purple/10 p-6 rounded-3xl border border-brand-purple/40 shadow-xl animate-fade-in">
                             <div className="flex justify-between items-center mb-6">
                                 <div className="flex items-center gap-3">
@@ -1848,7 +1877,7 @@ const App: React.FC = () => {
                                                 <AppleIcon className="w-5 h-5 text-apple-red"/> Apple Music Integration
                                             </h3>
                                             <p className="text-sm text-gray-400 leading-relaxed font-medium">
-                                                In our Advanced Studio, you can now connect your Apple Music account to browse and use any track from your created playlists directly in your slideshow timeline.
+                                                In Step 2, you can now connect your Apple Music account to browse and use any track from your created playlists directly in your slideshow timeline.
                                             </p>
                                         </section>
 
