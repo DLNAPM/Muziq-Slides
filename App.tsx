@@ -45,6 +45,10 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
+// --- APPLE MUSIC CONFIGURATION ---
+// In a production environment, this token must be a valid signed JWT from your Apple Developer account.
+const APPLE_MUSIC_TOKEN = 'APPLE_MUSIC_DEVELOPER_TOKEN'; 
+
 // --- TYPE DEFINITIONS ---
 interface Collaborator {
     email: string;
@@ -224,10 +228,12 @@ const AppleMusicPlayer: React.FC<{
     active: boolean;
     volume: number;
     startTimeInFile: number;
-}> = ({ trackId, active, volume, startTimeInFile }) => {
+    isDemo?: boolean;
+}> = ({ trackId, active, volume, startTimeInFile, isDemo }) => {
     const lastVolumeRef = useRef(volume);
 
     useEffect(() => {
+        if (isDemo) return;
         const music = (window as any).MusicKit?.getInstance();
         if (!music) return;
 
@@ -257,9 +263,10 @@ const AppleMusicPlayer: React.FC<{
         };
 
         handlePlayback();
-    }, [active, trackId, startTimeInFile]);
+    }, [active, trackId, startTimeInFile, isDemo]);
 
     useEffect(() => {
+        if (isDemo) return;
         const music = (window as any).MusicKit?.getInstance();
         if (!music) return;
         
@@ -267,7 +274,7 @@ const AppleMusicPlayer: React.FC<{
             music.volume = Math.max(0, Math.min(1, volume));
             lastVolumeRef.current = volume;
         }
-    }, [volume]);
+    }, [volume, isDemo]);
 
     return null; 
 };
@@ -404,7 +411,7 @@ const SettingsIcon = ({ className }: { className?: string }) => (
 );
 const ChevronLeftIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>;
 const ChevronRightIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>;
-const BeakerIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.673.337a4 4 0 01-2.506.326l-1.741-.348a2 2 0 11.774-3.925l1.74.348a6 6 0 003.759-.488l.673-.337a8 8 0 015.147-.689l2.387.477a4 4 0 012.988 4.766l-1.054 5.27a2 2 0 01-3.126 1.264l-2.383-1.588a4 4 0 00-4.431 0l-2.383 1.588a2 2 0 01-3.126-1.264l1.054-5.27a4 4 0 00-.747-3.411L3.834 11a2 2 0 011.264-3.126l5.27-1.054a4 4 0 003.411-.747l2.126-2.126a2 2 0 013.126 1.264l1.054 5.27a4 4 0 00.747 3.411l2.126 2.126a2 2 0 01.126 2.701z" /></svg>;
+const BeakerIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.673.337a4 4 0 01-2.506.326l-1.741-.348a2 2 0 11.774-3.925l1.74.348a6 6 0 003.759-.488l.673-.337a8 8 0 015.147-.689l2.387.477a4 4 0 012.988 4.766l-1.054 5.27a2 2 0 01-3.126 1.264l-2.383-1.588a4 4 0 00-4.431 0l-2.383 1.588a2 2 0 01-3.126-1.264l1.054-5.27a4 4 0 00-.747-3.411L3.834 11a2 2 0 011.264-3.126l5.27-1.054a4 4 0 003.411-.747l2.126-2.126a2 2 0 013.126 1.264l1.054 5.27a4 4 0 000.747 3.411l2.126 2.126a2 2 0 010.126 2.701z" /></svg>;
 const UsersIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>;
 const FilmIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>;
 const QuestionIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
@@ -443,6 +450,7 @@ const App: React.FC = () => {
     // --- APPLE MUSIC STATE ---
     const [isMusicBrowserOpen, setIsMusicBrowserOpen] = useState(false);
     const [appleMusicAuthorized, setAppleMusicAuthorized] = useState(false);
+    const [isDemoMode, setIsDemoMode] = useState(false);
     const [appleMusicPlaylists, setAppleMusicPlaylists] = useState<AppleMusicPlaylist[]>([]);
     const [appleMusicTracks, setAppleMusicTracks] = useState<AppleMusicTrack[]>([]);
     const [selectedApplePlaylist, setSelectedApplePlaylist] = useState<string | null>(null);
@@ -455,18 +463,17 @@ const App: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioInputRef = useRef<HTMLInputElement>(null);
     
-    // High-precision playback references
     const requestRef = useRef<number>(0);
     const startTimeRef = useRef<number>(0);
     const lastTickTimeRef = useRef<number>(0);
 
-    // Initialize MusicKit
+    // Initial MusicKit Configuration
     useEffect(() => {
         const initMusicKit = async () => {
             if (!(window as any).MusicKit) return;
             try {
                 const music = await (window as any).MusicKit.configure({
-                    developerToken: 'APPLE_MUSIC_DEVELOPER_TOKEN', // Must be replaced with actual token in prod
+                    developerToken: APPLE_MUSIC_TOKEN,
                     app: {
                         name: 'Muziq Slides',
                         build: '1.0.0'
@@ -474,53 +481,86 @@ const App: React.FC = () => {
                 });
                 setAppleMusicAuthorized(music.isAuthorized);
             } catch (e) {
-                console.warn("MusicKit initialization failed.");
+                console.warn("Apple MusicKit configuration failed. Likely due to invalid developer token.");
             }
         };
         initMusicKit();
     }, []);
 
     const authorizeAppleMusic = async () => {
-        const music = (window as any).MusicKit?.getInstance();
-        if (!music) {
-            setError("Apple MusicKit not loaded.");
+        setError(null);
+        
+        // --- DEMO MODE HANDLER ---
+        // If the token is still the placeholder, we simulate success for demo purposes.
+        if (APPLE_MUSIC_TOKEN === 'APPLE_MUSIC_DEVELOPER_TOKEN') {
+            setIsProcessing(true);
+            setTimeout(() => {
+                setIsDemoMode(true);
+                setAppleMusicAuthorized(true);
+                setAppleMusicPlaylists([
+                    { id: 'p1', attributes: { name: 'Summer Vibes 2024', artwork: { url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=200&h=200&fit=crop' } } },
+                    { id: 'p2', attributes: { name: 'Family Dinner Mix', artwork: { url: 'https://images.unsplash.com/photo-1493225255756-d9584f8606e9?w=200&h=200&fit=crop' } } },
+                    { id: 'p3', attributes: { name: 'Focus Beats', artwork: { url: 'https://images.unsplash.com/photo-1459749411177-042180ce673c?w=200&h=200&fit=crop' } } },
+                ]);
+                setIsProcessing(false);
+            }, 800);
             return;
         }
+
+        // --- REAL AUTHORIZATION ---
+        const music = (window as any).MusicKit?.getInstance();
+        if (!music) {
+            setError("MusicKit engine failed to initialize.");
+            return;
+        }
+
         try {
             await music.authorize();
             setAppleMusicAuthorized(true);
             fetchApplePlaylists();
-        } catch (e) {
-            setError("Apple Music authorization failed.");
+        } catch (e: any) {
+            setError(`Apple Music connection failed: ${e.message || 'Authorization rejected'}`);
+            console.error(e);
         }
     };
 
     const fetchApplePlaylists = async () => {
+        if (isDemoMode) return; // Playlists already set in demo mock
         const music = (window as any).MusicKit?.getInstance();
         if (!music || !music.isAuthorized) return;
         try {
             const playlists = await music.api.library.playlists();
             setAppleMusicPlaylists(playlists || []);
         } catch (e) {
-            setError("Failed to fetch playlists.");
+            setError("Could not retrieve library playlists.");
         }
     };
 
     const fetchAppleTracks = async (playlistId: string) => {
+        setSelectedApplePlaylist(playlistId);
+        
+        if (isDemoMode) {
+            setAppleMusicTracks([
+                { id: 't1', attributes: { name: 'Starlight Serenade', artistName: 'Demo Artist 1', durationInMillis: 180000, artwork: { url: 'https://images.unsplash.com/photo-1514525253344-f2501065c711?w=100&h=100&fit=crop' } } },
+                { id: 't2', attributes: { name: 'Neon Horizons', artistName: 'Demo Artist 2', durationInMillis: 215000, artwork: { url: 'https://images.unsplash.com/photo-1496293455970-f8581aae0e3c?w=100&h=100&fit=crop' } } },
+                { id: 't3', attributes: { name: 'Echoes of Home', artistName: 'Demo Artist 3', durationInMillis: 192000, artwork: { url: 'https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=100&h=100&fit=crop' } } },
+            ]);
+            return;
+        }
+
         const music = (window as any).MusicKit?.getInstance();
         if (!music || !music.isAuthorized) return;
         try {
             const playlist = await music.api.library.playlist(playlistId);
             setAppleMusicTracks(playlist.relationships.tracks.data || []);
-            setSelectedApplePlaylist(playlistId);
         } catch (e) {
-            setError("Failed to fetch tracks.");
+            setError("Failed to fetch tracks for this playlist.");
         }
     };
 
     const addAppleMusicTrack = (track: AppleMusicTrack) => {
         setAudioFiles(p => [...p, {
-            id: `am-${track.id}`,
+            id: `am-${track.id}-${Date.now()}`,
             name: track.attributes.name,
             duration: track.attributes.durationInMillis / 1000,
             startTime: 0,
@@ -532,7 +572,6 @@ const App: React.FC = () => {
         }]);
     };
 
-    // Prevent body scroll when help or theater is open
     useEffect(() => {
         if (isHelpOpen || isPlaying || isMusicBrowserOpen) {
             document.body.style.overflow = 'hidden';
@@ -543,12 +582,8 @@ const App: React.FC = () => {
 
     useEffect(() => {
         return () => {
-            mediaFiles.forEach(m => {
-                if (m.previewUrl.startsWith('blob:')) URL.revokeObjectURL(m.previewUrl);
-            });
-            audioFiles.forEach(a => {
-                if (a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl);
-            });
+            mediaFiles.forEach(m => { if (m.previewUrl.startsWith('blob:')) URL.revokeObjectURL(m.previewUrl); });
+            audioFiles.forEach(a => { if (a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl); });
         };
     }, [mediaFiles.length, audioFiles.length]);
 
@@ -568,16 +603,13 @@ const App: React.FC = () => {
 
     useEffect(() => {
         if (!settings.autoFadeEnabled || audioFiles.length === 0) return;
-
         let runningStart = 0;
         let changed = false;
-        
         const recalculated = audioFiles.map((track, i) => {
             const interval = settings.autoFadeInterval;
             let targetStart = 0;
             let targetFadeIn = 0.5;
             let targetFadeOut = 0.5;
-
             if (i === 0) {
                 targetStart = 0;
                 targetFadeIn = 0.5;
@@ -589,23 +621,18 @@ const App: React.FC = () => {
                 targetFadeOut = (i === audioFiles.length - 1) ? 1 : (interval || 0.5);
                 runningStart = targetStart + track.duration;
             }
-
             if (track.startTime !== targetStart || track.fadeIn !== targetFadeIn || track.fadeOut !== targetFadeOut) {
                 changed = true;
                 return { ...track, startTime: targetStart, fadeIn: targetFadeIn, fadeOut: targetFadeOut };
             }
             return track;
         });
-
-        if (changed) {
-            setAudioFiles(recalculated);
-        }
+        if (changed) setAudioFiles(recalculated);
     }, [settings.autoFadeEnabled, settings.autoFadeInterval, audioFiles.length]);
 
     const resetWorkspace = useCallback(() => {
         mediaFiles.forEach(m => { if (m.previewUrl.startsWith('blob:')) URL.revokeObjectURL(m.previewUrl); });
         audioFiles.forEach(a => { if (a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl); });
-
         setMediaFiles([]);
         setAudioFiles([]);
         setSlideshowName('');
@@ -621,10 +648,7 @@ const App: React.FC = () => {
         const found = ownedSlideshows.find(s => s.id === currentSlideshowId);
         if (found) return 'owner';
         const shared = sharedWithMeSlideshows.find(s => s.id === currentSlideshowId);
-        if (shared) {
-            const myCollab = shared.collaborators?.find(c => c.email.toLowerCase() === user.email?.toLowerCase());
-            return myCollab?.role || 'viewer';
-        }
+        if (shared) return shared.collaborators?.find(c => c.email.toLowerCase() === user.email?.toLowerCase())?.role || 'viewer';
         return 'owner';
     }, [user, currentSlideshowId, ownedSlideshows, sharedWithMeSlideshows]);
 
@@ -633,9 +657,7 @@ const App: React.FC = () => {
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (u) => { 
             setUser(u); 
-            if (!u) {
-                resetWorkspace();
-            }
+            if (!u) resetWorkspace();
             setIsLoading(false); 
         });
         return unsubscribe;
@@ -644,79 +666,48 @@ const App: React.FC = () => {
     useEffect(() => {
         const stableUserUid = user?.uid;
         const stableUserEmail = user?.email?.toLowerCase();
-
         if (!stableUserUid || !stableUserEmail) {
             setOwnedSlideshows([]);
             setSharedWithMeSlideshows([]);
             setIsFetchingData(false);
             return;
         }
-        
         setIsFetchingData(true);
         const slideshowsRef = collection(db, "slideshows");
-
         const qOwned = query(slideshowsRef, where("userId", "==", stableUserUid));
-        const unsubOwned = onSnapshot(qOwned, 
-            (snap) => {
-                setOwnedSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
-                setIsFetchingData(false);
-            },
-            (err) => {
-                console.error("Firestore Owned Fetch Error:", err);
-                setError("Gallery sync failed.");
-                setIsFetchingData(false);
-            }
-        );
-
+        const unsubOwned = onSnapshot(qOwned, (snap) => {
+            setOwnedSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
+            setIsFetchingData(false);
+        }, () => setIsFetchingData(false));
         const qShared = query(slideshowsRef, where("collaboratorEmails", "array-contains", stableUserEmail));
-        const unsubShared = onSnapshot(qShared, 
-            (snap) => {
-                setSharedWithMeSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
-            },
-            (err) => {
-                console.error("Firestore Shared Fetch Error:", err);
-            }
-        );
-
-        return () => { 
-            unsubOwned(); 
-            unsubShared(); 
-        };
+        const unsubShared = onSnapshot(qShared, (snap) => {
+            setSharedWithMeSlideshows(snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow)));
+        });
+        return () => { unsubOwned(); unsubShared(); };
     }, [user?.uid, user?.email]); 
 
     const allSlideshows = useMemo(() => {
         const combined = [...ownedSlideshows, ...sharedWithMeSlideshows];
         const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
-        return unique.sort((a, b) => {
-            const tA = getMillis(a.timestamp) || getMillis(a.createdAt) || 0;
-            const tB = getMillis(b.timestamp) || getMillis(b.createdAt) || 0;
-            return tB - tA;
-        });
+        return unique.sort((a, b) => (getMillis(b.timestamp) || getMillis(b.createdAt) || 0) - (getMillis(a.timestamp) || getMillis(a.createdAt) || 0));
     }, [ownedSlideshows, sharedWithMeSlideshows]);
 
-    // High Precision RequestAnimationFrame Playback Clock
     const animate = useCallback((time: number) => {
         if (!startTimeRef.current) {
             startTimeRef.current = time;
             lastTickTimeRef.current = time;
         }
-
         const delta = (time - lastTickTimeRef.current) / 1000;
         lastTickTimeRef.current = time;
-
         setElapsedTime(prev => {
             let next = prev + delta;
             if (next >= totalSlideshowDuration) {
-                if (settings.repeatSlideshow) {
-                    return 0;
-                } else {
-                    setIsPlaying(false);
-                    return totalSlideshowDuration;
-                }
+                if (settings.repeatSlideshow) return 0;
+                setIsPlaying(false);
+                return totalSlideshowDuration;
             }
             return next;
         });
-
         requestRef.current = requestAnimationFrame(animate);
     }, [totalSlideshowDuration, settings.repeatSlideshow]);
 
@@ -733,26 +724,17 @@ const App: React.FC = () => {
 
     useEffect(() => {
         const activeIdx = mediaWithTimestamps.findIndex(m => elapsedTime >= m.timelineStart && elapsedTime < m.timelineEnd);
-        if (activeIdx !== -1 && activeIdx !== currentSlide) {
-            setCurrentSlide(activeIdx);
-        }
+        if (activeIdx !== -1 && activeIdx !== currentSlide) setCurrentSlide(activeIdx);
     }, [elapsedTime, mediaWithTimestamps, currentSlide]);
 
     const generateSmartCaptions = async () => {
         if (!settings.smartCaptionsEnabled) return;
         setIsProcessing(true);
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        
         try {
             const updatedMedia = await Promise.all(mediaFiles.map(async (m) => {
                 if (m.type === 'image' && !m.caption && !m.aiCaption) {
-                    let base64Data = '';
-                    if (m.file) {
-                        base64Data = await fileToBase64(m.file);
-                    } else if (m.serverData) {
-                        base64Data = await urlToBase64(m.serverData.url);
-                    }
-
+                    let base64Data = m.file ? await fileToBase64(m.file) : (m.serverData ? await urlToBase64(m.serverData.url) : '');
                     if (base64Data) {
                         const response = await ai.models.generateContent({
                             model: 'gemini-3-flash-preview',
@@ -769,38 +751,23 @@ const App: React.FC = () => {
                 return m;
             }));
             setMediaFiles(updatedMedia as MediaFile[]);
-        } catch (e) {
-            console.error("AI Generation Error", e);
-        } finally {
-            setIsProcessing(false);
-        }
+        } catch (e) { console.error(e); } finally { setIsProcessing(false); }
     };
 
     const handleLogin = async () => {
         const provider = new GoogleAuthProvider();
         provider.setCustomParameters({ prompt: 'select_account' });
-        try { 
-            await signInWithPopup(auth, provider); 
-            resetWorkspace();
-        } catch (e: any) { 
-            setError("Sign in failed: " + e.message); 
-        }
+        try { await signInWithPopup(auth, provider); resetWorkspace(); } catch (e: any) { setError("Sign in failed: " + e.message); }
     };
 
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files) return;
         const files = (Array.from(e.target.files) as File[]).slice(0, 20 - mediaFiles.length);
         const resolved: MediaFile[] = [];
-        
         for (const f of files) {
             const isImg = f.type.startsWith('image/');
             const dur = isImg ? 0 : await getMediaDuration(f);
-            
-            if (!isImg && dur > 60) {
-                setError(`Video "${f.name}" is too long. Maximum allowed duration is 60 seconds.`);
-                continue;
-            }
-
+            if (!isImg && dur > 60) { setError(`Video "${f.name}" is too long (max 60s).`); continue; }
             resolved.push({
                 id: `m-${Math.random().toString(36).substr(2, 9)}`,
                 file: f, previewUrl: URL.createObjectURL(f), type: isImg ? 'image' : 'video',
@@ -814,18 +781,7 @@ const App: React.FC = () => {
         if (!e.target.files?.[0]) return;
         const file = e.target.files[0];
         const duration = await getMediaDuration(file);
-        const previewUrl = URL.createObjectURL(file); 
-        setAudioFiles(p => [...p, { 
-            id: `a-${Date.now()}`, 
-            file, 
-            name: file.name, 
-            duration, 
-            startTime: 0, 
-            fadeIn: 1, 
-            fadeOut: 1,
-            source: 'local',
-            previewUrl 
-        }]);
+        setAudioFiles(p => [...p, { id: `a-${Date.now()}`, file, name: file.name, duration, startTime: 0, fadeIn: 1, fadeOut: 1, source: 'local', previewUrl: URL.createObjectURL(file) }]);
     };
 
     const moveMedia = (index: number, direction: 'left' | 'right') => {
@@ -838,192 +794,65 @@ const App: React.FC = () => {
 
     const handleSave = async () => {
         if (!user || !mediaFiles.length || !canEdit || !user.email) return;
-        setIsSaving(true);
-        setError(null);
+        setIsSaving(true); setError(null);
         try {
             const id = currentSlideshowId || doc(collection(db, 'slideshows')).id;
-            
-            const serMedia = [];
-            for (const m of mediaFiles) {
-                const b: any = { 
-                    id: m.id || `m-${Math.random().toString(36).substr(2, 9)}`, 
-                    type: m.type, 
-                    name: m.id || 'unnamed', 
-                    rotation: m.rotation || 0, 
-                    caption: (m as any).caption || "", 
-                    aiCaption: (m as any).aiCaption || "", 
-                    duration: (m as any).duration || 0, 
-                    volume: (m as any).volume ?? 1.0, 
-                    duckBGM: (m as any).duckBGM ?? true 
-                };
-                
+            const serMedia = await Promise.all(mediaFiles.map(async m => {
+                const b: any = { id: m.id, type: m.type, name: m.id, rotation: m.rotation, caption: (m as any).caption, aiCaption: (m as any).aiCaption, duration: (m as any).duration, volume: (m as any).volume, duckBGM: (m as any).duckBGM };
                 if (!m.serverData && m.file) {
                     const path = `users/${user.uid}/${id}/${m.id}`;
                     await uploadBytes(ref(storage, path), m.file);
-                    b.url = await getDownloadURL(ref(storage, path));
-                    b.storagePath = path;
-                } else if (m.serverData) {
-                    b.url = m.serverData.url; 
-                    b.storagePath = m.serverData.storagePath;
-                } else {
-                    b.url = "";
-                    b.storagePath = "";
-                }
-                serMedia.push(b);
-            }
-
-            const serAudio = [];
-            for (const a of audioFiles) {
-                const b: any = { 
-                    id: a.id, 
-                    name: a.name || "Untitled", 
-                    duration: a.duration || 0, 
-                    startTime: a.startTime || 0, 
-                    fadeIn: a.fadeIn || 1, 
-                    fadeOut: a.fadeOut || 1,
-                    source: a.source,
-                    appleMusicTrackId: a.appleMusicTrackId || ""
-                };
-                
+                    b.url = await getDownloadURL(ref(storage, path)); b.storagePath = path;
+                } else { b.url = m.serverData?.url; b.storagePath = m.serverData?.storagePath; }
+                return b;
+            }));
+            const serAudio = await Promise.all(audioFiles.map(async a => {
+                const b: any = { id: a.id, name: a.name, duration: a.duration, startTime: a.startTime, fadeIn: a.fadeIn, fadeOut: a.fadeOut, source: a.source, appleMusicTrackId: a.appleMusicTrackId };
                 if (a.source === 'local') {
                     if (!a.serverData && a.file) {
                         const path = `users/${user.uid}/${id}/a-${a.id}`;
                         await uploadBytes(ref(storage, path), a.file);
-                        b.url = await getDownloadURL(ref(storage, path));
-                        b.storagePath = path;
-                    } else if (a.serverData) {
-                        b.url = a.serverData.url; 
-                        b.storagePath = a.serverData.storagePath;
-                    } else {
-                        b.url = "";
-                        b.storagePath = "";
-                    }
-                } else {
-                    b.url = a.previewUrl;
-                    b.storagePath = "";
-                }
-                serAudio.push(b);
-            }
-            
+                        b.url = await getDownloadURL(ref(storage, path)); b.storagePath = path;
+                    } else { b.url = a.serverData?.url; b.storagePath = a.serverData?.storagePath; }
+                } else { b.url = a.previewUrl; b.storagePath = ""; }
+                return b;
+            }));
             const existing = allSlideshows.find(s => s.id === id);
-            const collaborators = existing?.collaborators || [];
-            const ownerEmail = user.email.toLowerCase();
-            const collaboratorEmails = Array.from(new Set([
-                ownerEmail,
-                ...collaborators.map(c => c.email.toLowerCase())
-            ]));
-
-            const saveData = {
-                userId: existing?.userId || user.uid,
-                userEmail: existing?.userEmail || user.email,
-                name: slideshowName || 'My Slideshow', 
-                media: serMedia, 
-                audio: serAudio,
-                settings: settings, 
-                totalDuration: totalSlideshowDuration || 0, 
-                timestamp: serverTimestamp(), 
-                createdAt: existing?.createdAt || serverTimestamp(),
-                collaborators: collaborators,
-                collaboratorEmails: collaboratorEmails
-            };
-
-            await setDoc(doc(db, 'slideshows', id), saveData, { merge: true });
+            const collabEmails = Array.from(new Set([user.email.toLowerCase(), ...(existing?.collaboratorEmails || [])]));
+            await setDoc(doc(db, 'slideshows', id), { userId: existing?.userId || user.uid, userEmail: existing?.userEmail || user.email, name: slideshowName || 'My Slideshow', media: serMedia, audio: serAudio, settings, totalDuration: totalSlideshowDuration, timestamp: serverTimestamp(), createdAt: existing?.createdAt || serverTimestamp(), collaborators: existing?.collaborators || [], collaboratorEmails: collabEmails }, { merge: true });
             setCurrentSlideshowId(id);
-        } catch (e: any) { 
-            console.error("Save Error:", e);
-            setError("Cloud save failed: " + e.message); 
-        } finally { 
-            setIsSaving(false); 
-        }
+        } catch (e: any) { setError("Cloud save failed: " + e.message); } finally { setIsSaving(false); }
     };
 
     const handleLoad = (s: SavedSlideshow) => {
-        setIsPlaying(false);
-        setCurrentSlide(0);
-        setElapsedTime(0);
-
-        audioFiles.forEach(a => { if (a.previewUrl.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl); });
-
-        setMediaFiles((s.media || []).map(m => ({ 
-            id: m.id, 
-            type: m.type as any, 
-            previewUrl: m.url, 
-            rotation: m.rotation || 0, 
-            caption: m.caption || '', 
-            aiCaption: m.aiCaption || '', 
-            duration: m.duration || 0, 
-            volume: m.volume ?? 1.0,
-            duckBGM: m.duckBGM ?? true,
-            serverData: { url: m.url, storagePath: m.storagePath } 
-        })));
-
-        setAudioFiles((s.audio || []).map((a, i) => ({ 
-            id: a.id || `l-${i}`, 
-            name: a.name, 
-            duration: a.duration || 0, 
-            startTime: a.startTime || 0, 
-            fadeIn: a.fadeIn || 1, 
-            fadeOut: a.fadeOut || 1, 
-            previewUrl: a.url, 
-            source: a.source || 'local',
-            appleMusicTrackId: a.appleMusicTrackId,
-            serverData: a.storagePath ? { url: a.url, storagePath: a.storagePath } : undefined
-        })));
-
+        setIsPlaying(false); setCurrentSlide(0); setElapsedTime(0);
+        setMediaFiles((s.media || []).map(m => ({ id: m.id, type: m.type as any, previewUrl: m.url, rotation: m.rotation || 0, caption: m.caption || '', aiCaption: m.aiCaption || '', duration: m.duration || 0, volume: m.volume ?? 1.0, duckBGM: m.duckBGM ?? true, serverData: { url: m.url, storagePath: m.storagePath } })));
+        setAudioFiles((s.audio || []).map(a => ({ id: a.id, name: a.name, duration: a.duration || 0, startTime: a.startTime || 0, fadeIn: a.fadeIn || 1, fadeOut: a.fadeOut || 1, previewUrl: a.url, source: a.source || 'local', appleMusicTrackId: a.appleMusicTrackId, serverData: a.storagePath ? { url: a.url, storagePath: a.storagePath } : undefined })));
         if (s.settings) setSettings(s.settings); 
         if (s.name) setSlideshowName(s.name); 
-        setCurrentSlideshowId(s.id);
-        setError(null);
+        setCurrentSlideshowId(s.id); setError(null);
     };
 
     const handleClone = async (s: SavedSlideshow) => {
-        if (!user || !user.email) return;
+        if (!user?.email) return;
         setIsProcessing(true);
         try {
-            const cloneName = `Copy of ${s.name}`;
-            await addDoc(collection(db, 'slideshows'), {
-                userId: user.uid,
-                userEmail: user.email,
-                name: cloneName,
-                media: s.media,
-                audio: s.audio,
-                settings: s.settings,
-                totalDuration: s.totalDuration || 0,
-                timestamp: serverTimestamp(),
-                createdAt: serverTimestamp(),
-                collaborators: [],
-                collaboratorEmails: [user.email.toLowerCase()]
-            });
-            setError(`Project cloned as "${cloneName}"!`);
-        } catch (e: any) {
-            setError("Cloning failed: " + e.message);
-        } finally {
-            setIsProcessing(false);
-        }
+            await addDoc(collection(db, 'slideshows'), { userId: user.uid, userEmail: user.email, name: `Copy of ${s.name}`, media: s.media, audio: s.audio, settings: s.settings, totalDuration: s.totalDuration, timestamp: serverTimestamp(), createdAt: serverTimestamp(), collaborators: [], collaboratorEmails: [user.email.toLowerCase()] });
+            setError(`Cloned as "Copy of ${s.name}"!`);
+        } catch (e: any) { setError("Cloning failed: " + e.message); } finally { setIsProcessing(false); }
     };
 
     const handleDelete = async (s: SavedSlideshow) => {
-        if (!user || s.userId !== user.uid) return;
-        if (!window.confirm(`Delete "${s.name}"? This cannot be undone.`)) return;
+        if (s.userId !== user?.uid) return;
+        if (!window.confirm(`Delete "${s.name}"?`)) return;
         setIsProcessing(true);
-        try {
-            await deleteDoc(doc(db, 'slideshows', s.id));
-            if (currentSlideshowId === s.id) resetWorkspace();
-        } catch (e: any) { 
-            setError("Deletion error: " + e.message); 
-        } finally { 
-            setIsProcessing(false); 
-        }
+        try { await deleteDoc(doc(db, 'slideshows', s.id)); if (currentSlideshowId === s.id) resetWorkspace(); } catch (e: any) { setError("Deletion error: " + e.message); } finally { setIsProcessing(false); }
     };
 
     const startPlayback = async () => {
         if (mediaFiles.length === 0) return;
-        if (settings.smartCaptionsEnabled) {
-            await generateSmartCaptions();
-        }
-        setElapsedTime(0);
-        setCurrentSlide(0);
-        setIsPlaying(true);
+        if (settings.smartCaptionsEnabled) await generateSmartCaptions();
+        setElapsedTime(0); setCurrentSlide(0); setIsPlaying(true);
     };
 
     const skipForward = () => setElapsedTime(prev => Math.min(prev + 5, totalSlideshowDuration));
@@ -1031,25 +860,13 @@ const App: React.FC = () => {
 
     const handleShareSlideshow = async () => {
         if (!shareSlideshowTarget || !shareEmail) return;
-        const normalizedEmail = shareEmail.trim().toLowerCase();
         setIsProcessing(true);
         try {
-            const updatedCollabs = [...(shareSlideshowTarget.collaborators || []), { email: normalizedEmail, role: shareRole }];
-            const updatedEmails = Array.from(new Set([...(shareSlideshowTarget.collaboratorEmails || []), normalizedEmail]));
-            
-            await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { 
-                collaborators: updatedCollabs,
-                collaboratorEmails: updatedEmails
-            }, { merge: true });
-            
-            setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs, collaboratorEmails: updatedEmails });
-            setShareEmail('');
-            setError(`Shared with ${normalizedEmail}!`);
-        } catch (e: any) { 
-            setError("Sharing failed: " + e.message); 
-        } finally { 
-            setIsProcessing(false); 
-        }
+            const updatedCollabs = [...(shareSlideshowTarget.collaborators || []), { email: shareEmail.trim().toLowerCase(), role: shareRole }];
+            const updatedEmails = Array.from(new Set([...(shareSlideshowTarget.collaboratorEmails || []), shareEmail.trim().toLowerCase()]));
+            await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { collaborators: updatedCollabs, collaboratorEmails: updatedEmails }, { merge: true });
+            setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs, collaboratorEmails: updatedEmails }); setShareEmail(''); setError(`Shared with ${shareEmail}!`);
+        } catch (e: any) { setError("Sharing failed: " + e.message); } finally { setIsProcessing(false); }
     };
 
     const removeCollaborator = async (email: string) => {
@@ -1057,97 +874,36 @@ const App: React.FC = () => {
         setIsProcessing(true);
         try {
             const updatedCollabs = (shareSlideshowTarget.collaborators || []).filter(c => c.email !== email);
-            const ownerEmail = shareSlideshowTarget.userEmail?.toLowerCase() || "";
-            const updatedEmails = Array.from(new Set([
-                ownerEmail,
-                ...updatedCollabs.map(c => c.email.toLowerCase())
-            ])).filter(Boolean);
-            
-            await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { 
-                collaborators: updatedCollabs,
-                collaboratorEmails: updatedEmails
-            }, { merge: true });
-            
+            const updatedEmails = Array.from(new Set([shareSlideshowTarget.userEmail?.toLowerCase() || "", ...updatedCollabs.map(c => c.email.toLowerCase())])).filter(Boolean);
+            await setDoc(doc(db, 'slideshows', shareSlideshowTarget.id), { collaborators: updatedCollabs, collaboratorEmails: updatedEmails }, { merge: true });
             setShareSlideshowTarget({ ...shareSlideshowTarget, collaborators: updatedCollabs, collaboratorEmails: updatedEmails });
-        } catch (e: any) { 
-            setError("Removal failed: " + e.message); 
-        } finally { 
-            setIsProcessing(false); 
-        }
+        } catch (e: any) { setError("Removal failed: " + e.message); } finally { setIsProcessing(false); }
     };
 
     const getDuckingFactor = useCallback((time: number) => {
         if (settings.muteVideos) return 1.0;
-
-        const FADE_TIME = 0.8;
-        const DUCK_LEVEL = 0.15;
-        
-        const segment = mediaWithTimestamps.find(m => 
-            m.type === 'video' && 
-            (m as VideoFile).duckBGM && 
-            time >= m.timelineStart && 
-            time < m.timelineEnd
-        );
-
+        const segment = mediaWithTimestamps.find(m => m.type === 'video' && (m as VideoFile).duckBGM && time >= m.timelineStart && time < m.timelineEnd);
         if (!segment) return 1.0;
-
-        const timeIn = time - segment.timelineStart;
-        const timeOut = segment.timelineEnd - time;
-
-        const segIdx = mediaWithTimestamps.indexOf(segment);
-        const prevSeg = segIdx > 0 ? mediaWithTimestamps[segIdx - 1] : null;
-        const nextSeg = segIdx < mediaWithTimestamps.length - 1 ? mediaWithTimestamps[segIdx + 1] : null;
-
-        const prevIsDucking = prevSeg?.type === 'video' && (prevSeg as VideoFile).duckBGM;
-        const nextIsDucking = nextSeg?.type === 'video' && (nextSeg as VideoFile).duckBGM;
-
-        let duckFactor = DUCK_LEVEL;
-
-        if (!prevIsDucking && timeIn < FADE_TIME) {
-            const progress = timeIn / FADE_TIME;
-            duckFactor = 1.0 - (progress * (1.0 - DUCK_LEVEL));
-        }
-        
-        if (!nextIsDucking && timeOut < FADE_TIME) {
-            const progress = timeOut / FADE_TIME;
-            const endRamp = 1.0 - (progress * (1.0 - DUCK_LEVEL));
-            duckFactor = Math.max(duckFactor, endRamp);
-        }
-
+        const timeIn = time - segment.timelineStart, timeOut = segment.timelineEnd - time, FADE = 0.8, LEVEL = 0.15, segIdx = mediaWithTimestamps.indexOf(segment);
+        const prevDuck = segIdx > 0 && mediaWithTimestamps[segIdx - 1].type === 'video' && (mediaWithTimestamps[segIdx - 1] as VideoFile).duckBGM;
+        const nextDuck = segIdx < mediaWithTimestamps.length - 1 && mediaWithTimestamps[segIdx + 1].type === 'video' && (mediaWithTimestamps[segIdx + 1] as VideoFile).duckBGM;
+        let duckFactor = LEVEL;
+        if (!prevDuck && timeIn < FADE) duckFactor = 1.0 - (timeIn / FADE * (1.0 - LEVEL));
+        if (!nextDuck && timeOut < FADE) { const endRamp = 1.0 - (timeOut / FADE * (1.0 - LEVEL)); duckFactor = Math.max(duckFactor, endRamp); }
         return duckFactor;
     }, [mediaWithTimestamps, settings.muteVideos]);
 
-    if (isLoading) return (
-        <div className="min-h-screen bg-brand-dark flex items-center justify-center">
-            <div className="w-12 h-12 border-4 border-brand-purple border-t-transparent rounded-full animate-spin"></div>
-        </div>
-    );
+    if (isLoading) return <div className="min-h-screen bg-brand-dark flex items-center justify-center"><div className="w-12 h-12 border-4 border-brand-purple border-t-transparent rounded-full animate-spin"></div></div>;
 
     return (
         <div className={`min-h-screen font-sans ${user ? 'bg-brand-dark text-gray-200' : 'bg-white text-gray-900'}`}>
-            {(isSaving || isProcessing) && (
-                <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center backdrop-blur-sm">
-                    <div className="text-center p-8 bg-gray-900/80 rounded-[2rem] border border-gray-800 shadow-2xl">
-                        <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-brand-purple mx-auto"></div>
-                        <p className="text-white text-xl mt-6 font-black tracking-tight uppercase">Processing...</p>
-                    </div>
-                </div>
-            )}
+            {(isSaving || isProcessing) && <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center backdrop-blur-sm"><div className="text-center p-8 bg-gray-900/80 rounded-[2rem] border border-gray-800 shadow-2xl"><div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-brand-purple mx-auto"></div><p className="text-white text-xl mt-6 font-black tracking-tight uppercase">Processing...</p></div></div>}
 
             <header className={`p-4 flex justify-between items-center border-b sticky top-0 z-40 backdrop-blur-md ${user ? 'bg-gray-900/50 border-gray-800' : 'bg-white/90 border-gray-100'}`}>
                 <h1 className="text-2xl font-bold tracking-tight"><span className="text-brand-purple">Muziq</span> Slides</h1>
                 <div className="flex gap-4 items-center">
-                    {user && <div className="hidden sm:flex flex-col items-end">
-                        <span className="text-xs text-white font-medium">{user.displayName || user.email}</span>
-                    </div>}
-                    {user ? (
-                        <div className="flex gap-2">
-                            <button onClick={handleLogin} className="bg-gray-800 text-white py-2 px-4 rounded-lg text-sm font-bold shadow-sm transition-all hover:bg-gray-700 border border-gray-700">Switch Account</button>
-                            <button onClick={() => signOut(auth)} className="bg-brand-purple text-white py-2 px-6 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Logout</button>
-                        </div>
-                    ) : (
-                        <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-6 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Sign In</button>
-                    )}
+                    {user && <div className="hidden sm:flex flex-col items-end"><span className="text-xs text-white font-medium">{user.displayName || user.email}</span></div>}
+                    {user ? <div className="flex gap-2"><button onClick={handleLogin} className="bg-gray-800 text-white py-2 px-4 rounded-lg text-sm font-bold transition-all hover:bg-gray-700 border border-gray-700">Switch</button><button onClick={() => signOut(auth)} className="bg-brand-purple text-white py-2 px-6 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Logout</button></div> : <button onClick={handleLogin} className="bg-brand-purple text-white py-2 px-6 rounded-lg text-sm font-bold shadow-md transition-all hover:bg-purple-700">Sign In</button>}
                 </div>
             </header>
 
@@ -1158,266 +914,64 @@ const App: React.FC = () => {
                         <p className="text-xl text-gray-600 mb-10 font-medium">Create beautiful photo slideshows with your favorite music. Perfect for Roku or Amazon Fire TV screensavers.</p>
                         <button onClick={handleLogin} className="bg-brand-purple text-white py-4 px-12 rounded-full text-lg font-bold shadow-2xl hover:scale-105 transition-transform active:scale-95">Get Started for Free</button>
                     </div>
-
-                    <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
-                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
-                                <UploadIcon className="w-8 h-8" />
-                            </div>
-                            <h3 className="text-xl font-bold mb-3 text-gray-900">Upload Media</h3>
-                            <p className="text-gray-500 text-sm leading-relaxed">Easily upload up to 20 high-quality images or video clips. Reorder them on a timeline with simple drag-and-drop controls.</p>
-                        </div>
-                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
-                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
-                                <MusicIcon className="w-8 h-8" />
-                            </div>
-                            <h3 className="text-xl font-bold mb-3 text-gray-900">Background Music</h3>
-                            <p className="text-gray-500 text-sm leading-relaxed">Add multiple background tracks. Our engine handles multi-track layering with precise start offsets for every song.</p>
-                        </div>
-                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
-                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
-                                <SparklesIcon className="w-8 h-8" />
-                            </div>
-                            <h3 className="text-xl font-bold mb-3 text-gray-900">Smart Audio Ducking</h3>
-                            <p className="text-gray-500 text-sm leading-relaxed">Professional audio mix that automatically lowers music volume when video clips play, or keeps it full-volume if videos are muted.</p>
-                        </div>
-                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
-                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
-                                <BeakerIcon className="w-8 h-8" />
-                            </div>
-                            <h3 className="text-xl font-bold mb-3 text-gray-900">AI Smart Captions</h3>
-                            <p className="text-gray-500 text-sm leading-relaxed">Let Gemini AI analyze your photos and generate beautiful, poetic captions automatically based on your visual story.</p>
-                        </div>
-                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
-                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
-                                <UsersIcon className="w-8 h-8" />
-                            </div>
-                            <h3 className="text-xl font-bold mb-3 text-gray-900">Collaborative Sharing</h3>
-                            <p className="text-gray-500 text-sm leading-relaxed">Share your projects with family. Work together in real-time to organize photos and choose the perfect soundtrack.</p>
-                        </div>
-                        <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-xl hover:shadow-2xl transition-all border-b-4 border-b-purple-100">
-                            <div className="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center mb-6 text-brand-purple">
-                                <FilmIcon className="w-8 h-8" />
-                            </div>
-                            <h3 className="text-xl font-bold mb-3 text-gray-900">Cinematic Transitions</h3>
-                            <p className="text-gray-500 text-sm leading-relaxed">Apply professional styles like Ken Burns (Pan & Zoom), Classic Fade, Slide, and Zoom for a pro-grade cinematic look.</p>
-                        </div>
-                    </div>
                 </main>
             ) : (
                 <main className="p-4 sm:p-8 grid lg:grid-cols-2 gap-8 max-w-7xl mx-auto">
                     <div className="space-y-6">
-                        {error && (
-                            <div className="bg-red-500/20 border border-red-500/40 text-red-200 px-4 py-4 rounded-2xl text-sm flex justify-between items-center animate-fade-in">
-                                <span className="font-medium">{error}</span>
-                                <button onClick={() => setError(null)} className="p-1"><XIcon className="w-5 h-5"/></button>
-                            </div>
-                        )}
+                        {error && <div className="bg-red-500/20 border border-red-500/40 text-red-200 px-4 py-4 rounded-2xl text-sm flex justify-between items-center animate-fade-in"><span className="font-medium">{error}</span><button onClick={() => setError(null)} className="p-1"><XIcon className="w-5 h-5"/></button></div>}
 
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
                             <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><UploadIcon className="w-5 h-5 text-brand-purple"/> 1. Upload & Organize</h3>
-                            <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-700 rounded-[1.5rem] p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-brand-purple/5 transition-all group">
-                                <UploadIcon className="w-12 h-12 mx-auto text-gray-500 mb-2 group-hover:scale-110 transition-transform group-hover:text-brand-purple"/>
-                                <p className="text-sm text-gray-400 font-bold">Upload Photos or Videos (Max 20)</p>
-                            </div>
+                            <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-gray-700 rounded-[1.5rem] p-8 text-center cursor-pointer hover:border-brand-purple hover:bg-brand-purple/5 transition-all group"><UploadIcon className="w-12 h-12 mx-auto text-gray-500 mb-2 group-hover:scale-110 transition-transform group-hover:text-brand-purple"/><p className="text-sm text-gray-400 font-bold">Upload Photos or Videos (Max 20)</p></div>
                             <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple accept="image/*,video/*" className="hidden" />
-                            
                             <div className="mt-4 grid grid-cols-4 gap-3">
                                 {mediaFiles.map((m, idx) => (
                                     <div key={m.id} className="aspect-square bg-black rounded-2xl overflow-hidden relative group border border-gray-700 shadow-lg">
-                                        {m.type === 'image' ? (
-                                            <img src={m.previewUrl} className="w-full h-full object-cover transition-transform group-hover:scale-110" alt="preview" />
-                                        ) : (
-                                            <div className="w-full h-full relative">
-                                                <video src={m.previewUrl} className="w-full h-full object-cover opacity-60" muted />
-                                                <div className="absolute inset-0 flex items-center justify-center">
-                                                    <PlayIcon className="w-8 h-8 text-white opacity-80" />
-                                                </div>
-                                            </div>
-                                        )}
-                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
-                                            <div className="flex justify-end">
-                                                <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="bg-red-600/90 p-1 rounded-lg hover:bg-red-500 transition-colors"><XIcon className="w-4 h-4 text-white"/></button>
-                                            </div>
-                                            <div className="flex justify-between items-center gap-1">
-                                                <button onClick={() => moveMedia(idx, 'left')} disabled={idx === 0} className="bg-white/20 p-1.5 rounded-lg backdrop-blur-md hover:bg-white/40 disabled:opacity-20"><ChevronLeftIcon className="w-4 h-4 text-white"/></button>
-                                                <span className="text-[10px] font-black text-white bg-brand-purple/60 px-2 py-0.5 rounded-full">{idx + 1}</span>
-                                                <button onClick={() => moveMedia(idx, 'right')} disabled={idx === mediaFiles.length - 1} className="bg-white/20 p-1.5 rounded-lg backdrop-blur-md hover:bg-white/40 disabled:opacity-20"><ChevronRightIcon className="w-4 h-4 text-white"/></button>
-                                            </div>
-                                        </div>
+                                        {m.type === 'image' ? <img src={m.previewUrl} className="w-full h-full object-cover transition-transform group-hover:scale-110" alt="preview" /> : <div className="w-full h-full relative"><video src={m.previewUrl} className="w-full h-full object-cover opacity-60" muted /><div className="absolute inset-0 flex items-center justify-center"><PlayIcon className="w-8 h-8 text-white opacity-80" /></div></div>}
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2"><div className="flex justify-end"><button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="bg-red-600/90 p-1 rounded-lg hover:bg-red-500 transition-colors"><XIcon className="w-4 h-4 text-white"/></button></div><div className="flex justify-between items-center gap-1"><button onClick={() => moveMedia(idx, 'left')} disabled={idx === 0} className="bg-white/20 p-1.5 rounded-lg backdrop-blur-md hover:bg-white/40 disabled:opacity-20"><ChevronLeftIcon className="w-4 h-4 text-white"/></button><span className="text-[10px] font-black text-white bg-brand-purple/60 px-2 py-0.5 rounded-full">{idx + 1}</span><button onClick={() => moveMedia(idx, 'right')} disabled={idx === mediaFiles.length - 1} className="bg-white/20 p-1.5 rounded-lg backdrop-blur-md hover:bg-white/40 disabled:opacity-20"><ChevronRightIcon className="w-4 h-4 text-white"/></button></div></div>
                                     </div>
                                 ))}
                             </div>
                         </section>
 
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-bold flex items-center gap-2 text-white uppercase tracking-tighter"><MusicIcon className="w-5 h-5 text-brand-purple"/> 2. Add Music</h3>
-                            </div>
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><MusicIcon className="w-5 h-5 text-brand-purple"/> 2. Add Music</h3>
                             <div className="grid grid-cols-2 gap-3">
-                                <button onClick={() => audioInputRef.current?.click()} className="bg-gray-700/30 hover:bg-gray-700/50 py-4 rounded-2xl font-black text-[10px] flex flex-col items-center justify-center gap-2 border border-gray-600/50 transition-all uppercase tracking-widest group">
-                                    <PlusIcon className="w-6 h-6 text-gray-500 group-hover:text-white transition-colors"/> 
-                                    <span>Local Audio</span>
-                                </button>
-                                <button onClick={() => { setIsMusicBrowserOpen(true); fetchApplePlaylists(); }} className="bg-apple-red/10 hover:bg-apple-red/20 py-4 rounded-2xl font-black text-[10px] flex flex-col items-center justify-center gap-2 border border-apple-red/30 transition-all uppercase tracking-widest group">
-                                    <AppleIcon className="w-6 h-6 text-apple-red"/> 
-                                    <span>Apple Music</span>
-                                </button>
+                                <button onClick={() => audioInputRef.current?.click()} className="bg-gray-700/30 hover:bg-gray-700/50 py-4 rounded-2xl font-black text-[10px] flex flex-col items-center justify-center gap-2 border border-gray-600/50 transition-all uppercase tracking-widest group"><PlusIcon className="w-6 h-6 text-gray-500 group-hover:text-white transition-colors"/><span>Local Audio</span></button>
+                                <button onClick={() => { setIsMusicBrowserOpen(true); if (!appleMusicAuthorized) authorizeAppleMusic(); else fetchApplePlaylists(); }} className="bg-apple-red/10 hover:bg-apple-red/20 py-4 rounded-2xl font-black text-[10px] flex flex-col items-center justify-center gap-2 border border-apple-red/30 transition-all uppercase tracking-widest group"><AppleIcon className="w-6 h-6 text-apple-red"/><span>Apple Music</span></button>
                             </div>
                             <input type="file" ref={audioInputRef} onChange={handleAudioChange} accept="audio/*" className="hidden" />
-                            
                             <div className="mt-4 space-y-2">
                                 {audioFiles.map(a => (
-                                    <div key={a.id} className="bg-gray-900/40 p-5 rounded-2xl flex justify-between items-center text-sm font-medium border border-gray-700/50 group">
-                                        <div className="flex items-center gap-3">
-                                            {a.source === 'apple-music' ? (
-                                                <div className="relative">
-                                                    <img src={a.previewUrl} className="w-8 h-8 rounded-lg shadow-md" alt="art" />
-                                                    <AppleIcon className="w-2.5 h-2.5 text-apple-red absolute -bottom-1 -right-1" />
-                                                </div>
-                                            ) : <MusicIcon className="w-4 h-4 text-gray-500"/>}
-                                            <div className="flex flex-col">
-                                                <span className="text-xs font-bold truncate max-w-[150px]">{a.name}</span>
-                                                <span className="text-[10px] text-gray-500 font-bold">{formatDuration(a.duration)}</span>
-                                            </div>
-                                        </div>
-                                        <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))}><TrashIcon className="w-5 h-5 text-red-400 opacity-0 group-hover:opacity-100 transition-all"/></button>
-                                    </div>
+                                    <div key={a.id} className="bg-gray-900/40 p-5 rounded-2xl flex justify-between items-center text-sm font-medium border border-gray-700/50 group"><div className="flex items-center gap-3">{a.source === 'apple-music' ? <div className="relative"><img src={a.previewUrl} className="w-8 h-8 rounded-lg shadow-md" alt="art"/><AppleIcon className="w-2.5 h-2.5 text-apple-red absolute -bottom-1 -right-1" /></div> : <MusicIcon className="w-4 h-4 text-gray-500"/>}<div className="flex flex-col"><span className="text-xs font-bold truncate max-w-[150px]">{a.name}</span><span className="text-[10px] text-gray-500 font-bold">{formatDuration(a.duration)}</span></div></div><button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))}><TrashIcon className="w-5 h-5 text-red-400 opacity-0 group-hover:opacity-100 transition-all"/></button></div>
                                 ))}
                             </div>
                         </section>
 
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
-                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><SettingsIcon className="w-5 h-5 text-brand-purple"/> 3. Slideshow Settings</h3>
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white uppercase tracking-tighter"><SettingsIcon className="w-5 h-5 text-brand-purple"/> 3. Settings</h3>
                             <div className="space-y-6">
-                                <div className="space-y-3">
-                                    <div className="flex justify-between items-center">
-                                        <label className="text-xs text-gray-500 font-black uppercase tracking-widest">Slide Duration (Seconds)</label>
-                                        <span className="text-brand-purple font-black text-sm">{settings.interval}s</span>
-                                    </div>
-                                    <input type="range" min="1" max="60" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
-                                </div>
-                                <div className="space-y-3">
-                                    <label className="text-xs text-gray-500 font-black uppercase tracking-widest block">Transition Style</label>
-                                    <select 
-                                        value={settings.slideStyle} 
-                                        onChange={e => setSettings(s => ({...s, slideStyle: e.target.value}))}
-                                        className="w-full bg-gray-900/50 border border-gray-700/50 rounded-2xl px-5 py-3 text-sm text-white font-bold focus:ring-2 focus:ring-brand-purple outline-none appearance-none cursor-pointer transition-all"
-                                    >
-                                        <option value="ken-burns">Ken Burns (Pan & Zoom)</option>
-                                        <option value="fade-in">Classic Fade</option>
-                                        <option value="slide-from-right">Side Slide</option>
-                                        <option value="slide-from-bottom">Bottom Entry</option>
-                                        <option value="zoom-in">Focus Zoom</option>
-                                        <option value="zoom-out">Deep Pull</option>
-                                    </select>
-                                </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <label className="flex items-center gap-3 cursor-pointer group bg-gray-900/20 p-4 rounded-2xl border border-gray-800 hover:border-brand-purple/50 transition-all">
-                                        <input type="checkbox" className="w-4 h-4 accent-brand-purple" checked={settings.repeatSlideshow} onChange={() => setSettings(s => ({...s, repeatSlideshow: !s.repeatSlideshow}))} />
-                                        <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Loop Slideshow</span>
-                                    </label>
-                                    <label className="flex items-center gap-3 cursor-pointer group bg-gray-900/20 p-4 rounded-2xl border border-gray-800 hover:border-brand-purple/50 transition-all">
-                                        <input type="checkbox" className="w-4 h-4 accent-brand-purple" checked={settings.smartCaptionsEnabled} onChange={() => setSettings(s => ({...s, smartCaptionsEnabled: !s.smartCaptionsEnabled}))} />
-                                        <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Smart Captions</span>
-                                    </label>
-                                    <label className="flex items-center gap-3 cursor-pointer group bg-gray-900/20 p-4 rounded-2xl border border-gray-800 hover:border-brand-purple/50 transition-all sm:col-span-2">
-                                        <input type="checkbox" className="w-4 h-4 accent-brand-purple" checked={settings.muteVideos} onChange={() => setSettings(s => ({...s, muteVideos: !s.muteVideos}))} />
-                                        <div className="flex flex-col">
-                                            <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Mute Video Clips Audio</span>
-                                            <span className="text-[8px] text-gray-600 font-bold uppercase">Background music volume stays at 100% when video is muted</span>
-                                        </div>
-                                    </label>
-                                </div>
+                                <div className="space-y-3"><div className="flex justify-between items-center"><label className="text-xs text-gray-500 font-black uppercase tracking-widest">Slide Duration</label><span className="text-brand-purple font-black text-sm">{settings.interval}s</span></div><input type="range" min="1" max="60" value={settings.interval} onChange={e => setSettings(s => ({...s, interval: +e.target.value}))} className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" /></div>
+                                <div className="space-y-3"><label className="text-xs text-gray-500 font-black uppercase tracking-widest block">Style</label><select value={settings.slideStyle} onChange={e => setSettings(s => ({...s, slideStyle: e.target.value}))} className="w-full bg-gray-900/50 border border-gray-700/50 rounded-2xl px-5 py-3 text-sm text-white font-bold outline-none appearance-none cursor-pointer"><option value="ken-burns">Ken Burns</option><option value="fade-in">Classic Fade</option><option value="zoom-in">Focus Zoom</option></select></div>
                             </div>
                         </section>
                     </div>
 
                     <div className="space-y-6">
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-bold flex items-center gap-2 text-white uppercase tracking-tighter"><PlayIcon className="w-5 h-5 text-brand-purple"/> 4. Preview Theater</h3>
-                                {canEdit && (
-                                    <button 
-                                        onClick={() => setIsAdvancedEditorOpen(true)}
-                                        className="text-[10px] bg-brand-purple/20 hover:bg-brand-purple/40 text-brand-purple px-4 py-2 rounded-xl font-black uppercase tracking-widest border border-brand-purple/30 transition-all flex items-center gap-2"
-                                    >
-                                        <BeakerIcon className="w-4 h-4"/> Advanced Studio
-                                    </button>
-                                )}
-                            </div>
-                            <div className="aspect-video bg-black rounded-[2rem] relative flex items-center justify-center overflow-hidden border border-gray-700/50 shadow-2xl group">
-                                {mediaFiles.length > 0 ? (
-                                    <>
-                                        <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-                                            {mediaFiles[0].type === 'image' ? (
-                                                <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-2xl opacity-20" alt="bg" />
-                                            ) : (
-                                                <video src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-2xl opacity-20" muted />
-                                            )}
-                                        </div>
-                                        <button onClick={startPlayback} className="relative z-10 flex items-center justify-center bg-brand-purple p-8 rounded-full shadow-2xl hover:scale-110 active:scale-95 transition-all"><PlayIcon className="w-16 h-16 text-white"/></button>
-                                        <div className="absolute bottom-4 left-4 text-[10px] font-black uppercase tracking-[0.2em] text-white/40">{mediaFiles.length} Assets Loaded</div>
-                                    </>
-                                ) : <p className="text-gray-600 font-black uppercase tracking-[0.2em] italic">No Media Assets</p>}
-                            </div>
+                            <div className="flex justify-between items-center mb-4"><h3 className="text-lg font-bold flex items-center gap-2 text-white uppercase tracking-tighter"><PlayIcon className="w-5 h-5 text-brand-purple"/> 4. Theater</h3><button onClick={() => setIsAdvancedEditorOpen(true)} className="text-[10px] bg-brand-purple/20 hover:bg-brand-purple/40 text-brand-purple px-4 py-2 rounded-xl font-black uppercase tracking-widest border border-brand-purple/30 flex items-center gap-2"><BeakerIcon className="w-4 h-4"/> Studio</button></div>
+                            <div className="aspect-video bg-black rounded-[2rem] relative flex items-center justify-center overflow-hidden border border-gray-700/50 shadow-2xl group">{mediaFiles.length > 0 ? <><div className="absolute inset-0 flex items-center justify-center bg-gray-900">{mediaFiles[0].type === 'image' ? <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-2xl opacity-20" alt="bg" /> : <video src={mediaFiles[0].previewUrl} className="w-full h-full object-cover blur-2xl opacity-20" muted />}</div><button onClick={startPlayback} className="relative z-10 flex items-center justify-center bg-brand-purple p-8 rounded-full shadow-2xl hover:scale-110 active:scale-95 transition-all"><PlayIcon className="w-16 h-16 text-white"/></button></> : <p className="text-gray-600 font-black uppercase tracking-[0.2em] italic">No Media</p>}</div>
                         </section>
 
                         <section className="bg-gray-800/40 p-6 rounded-[2.5rem] border border-gray-700/50 shadow-2xl">
                             <h3 className="text-lg font-bold mb-4 text-white uppercase tracking-tighter">5. Project Archive</h3>
                             <div className="flex gap-2 mb-6">
-                                <button 
-                                    onClick={() => {
-                                        if (mediaFiles.length > 0 || audioFiles.length > 0 || slideshowName) {
-                                            if (window.confirm("Clear workspace and start a new project?")) {
-                                                resetWorkspace();
-                                            }
-                                        } else {
-                                            resetWorkspace();
-                                        }
-                                    }}
-                                    className="px-6 rounded-2xl font-black text-sm uppercase tracking-widest transition-all bg-gray-800 hover:bg-gray-700 text-gray-400 border border-gray-700 flex items-center gap-2"
-                                    title="Start New Project"
-                                >
-                                    <PlusIcon className="w-5 h-5"/> <span className="hidden sm:inline">New</span>
-                                </button>
-                                <input value={slideshowName} onChange={e => setSlideshowName(e.target.value)} placeholder="Name your project..." className="flex-1 bg-gray-900/40 rounded-2xl px-5 py-4 border border-gray-700/50 outline-none focus:ring-2 focus:ring-brand-purple font-bold text-white shadow-inner" />
-                                <button 
-                                    onClick={handleSave} 
-                                    disabled={isSaving || !canEdit} 
-                                    className={`px-8 rounded-2xl font-black text-sm uppercase tracking-widest transition-all ${canEdit ? 'bg-brand-purple hover:bg-purple-700 shadow-brand-purple/20' : 'bg-gray-700 opacity-50'}`}>
-                                    {isSaving ? 'Saving...' : 'Save'}
-                                </button>
+                                <input value={slideshowName} onChange={e => setSlideshowName(e.target.value)} placeholder="Name your project..." className="flex-1 bg-gray-900/40 rounded-2xl px-5 py-4 border border-gray-700/50 outline-none focus:ring-2 focus:ring-brand-purple font-bold text-white shadow-inner" /><button onClick={handleSave} disabled={isSaving || !canEdit} className={`px-8 rounded-2xl font-black text-sm uppercase tracking-widest transition-all ${canEdit ? 'bg-brand-purple hover:bg-purple-700 shadow-brand-purple/20' : 'bg-gray-700 opacity-50'}`}>{isSaving ? '...' : 'Save'}</button>
                             </div>
-                            
                             <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                                {isFetchingData ? (
-                                    <div className="py-12 text-center text-gray-500 uppercase text-[10px] tracking-widest">Fetching Gallery...</div>
-                                ) : allSlideshows.length > 0 ? allSlideshows.map(s => (
-                                    <div key={s.id} className={`bg-gray-900/30 p-5 rounded-[1.5rem] flex flex-col sm:flex-row justify-between items-start sm:items-center group border transition-all gap-4 ${currentSlideshowId === s.id ? 'border-brand-purple bg-brand-purple/10' : 'border-gray-800/50 hover:border-gray-600'}`}>
-                                        <div className="flex-1 min-w-0">
-                                            <h4 className="font-black text-sm text-white truncate uppercase tracking-tight">{s.name}</h4>
-                                            <div className="flex gap-3 mt-1">
-                                                <p className="text-[9px] text-gray-500 font-bold uppercase">{formatDuration(s.totalDuration || 0)}</p>
-                                                <p className="text-[9px] text-gray-400 font-bold uppercase">• {s.media?.length || 0} Media</p>
-                                                {s.userId !== user?.uid && <p className="text-[9px] text-brand-purple font-black uppercase underline">Shared with me</p>}
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                            <button onClick={() => handleLoad(s)} className="text-[9px] bg-white text-black py-2 px-5 rounded-xl font-black uppercase tracking-widest hover:scale-105 transition-transform active:scale-95 shadow-xl">Load</button>
-                                            
-                                            <div className="flex items-center bg-black/40 rounded-xl border border-gray-800 p-0.5">
-                                                <button title="Clone Project" onClick={() => handleClone(s)} className="p-2 text-gray-400 hover:text-white transition-colors"><DuplicateIcon className="w-4 h-4"/></button>
-                                                <button title="Share Slideshow" onClick={() => { setShareSlideshowTarget(s); setIsShareModalOpen(true); }} className="p-2 text-gray-400 hover:text-white transition-colors"><ShareIcon className="w-4 h-4"/></button>
-                                                {s.userId === user?.uid && (
-                                                    <button title="Delete Project" onClick={() => handleDelete(s)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><TrashIcon className="w-4 h-4"/></button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                )) : (
-                                    <div className="text-center py-12 text-gray-600 font-black text-xs uppercase tracking-widest border border-dashed border-gray-800 rounded-3xl">Archive Empty</div>
-                                )}
+                                {allSlideshows.map(s => (
+                                    <div key={s.id} className={`bg-gray-900/30 p-5 rounded-[1.5rem] flex justify-between items-center group border transition-all ${currentSlideshowId === s.id ? 'border-brand-purple bg-brand-purple/10' : 'border-gray-800/50 hover:border-gray-600'}`}><div className="flex-1 min-w-0"><h4 className="font-black text-sm text-white truncate uppercase tracking-tight">{s.name}</h4><p className="text-[9px] text-gray-500 font-bold uppercase">{formatDuration(s.totalDuration || 0)} • {s.media?.length || 0} Media</p></div><button onClick={() => handleLoad(s)} className="text-[9px] bg-white text-black py-2 px-5 rounded-xl font-black uppercase tracking-widest hover:scale-105 active:scale-95 shadow-xl">Load</button></div>
+                                ))}
                             </div>
                         </section>
                     </div>
@@ -1429,283 +983,57 @@ const App: React.FC = () => {
                 <div className="fixed inset-0 bg-black/95 z-[200] flex items-center justify-center p-4 sm:p-8 animate-fade-in backdrop-blur-xl">
                     <div className="bg-gray-900 w-full max-w-4xl max-h-[90vh] rounded-[3rem] border border-apple-red/20 shadow-2xl flex flex-col relative overflow-hidden">
                         <header className="p-8 border-b border-white/5 flex justify-between items-center bg-apple-red/5">
-                            <div className="flex items-center gap-4">
-                                <AppleIcon className="w-8 h-8 text-apple-red"/>
-                                <div>
-                                    <h2 className="text-2xl font-black uppercase tracking-tighter">Apple Music Library</h2>
-                                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-[0.2em]">Created Playlists & Downloads</p>
-                                </div>
-                            </div>
+                            <div className="flex items-center gap-4"><AppleIcon className="w-8 h-8 text-apple-red"/><div><h2 className="text-2xl font-black uppercase tracking-tighter">Apple Music Library</h2><p className="text-[10px] text-gray-500 font-bold uppercase tracking-[0.2em]">{isDemoMode ? 'SIMULATED DEMO MODE' : 'Created Playlists'}</p></div></div>
                             <button onClick={() => setIsMusicBrowserOpen(false)} className="text-gray-500 hover:text-white transition-colors p-2"><XIcon className="w-10 h-10"/></button>
                         </header>
 
                         {!appleMusicAuthorized ? (
                             <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-6">
-                                <div className="w-24 h-24 bg-apple-red/10 rounded-full flex items-center justify-center border border-apple-red/20">
-                                    <AppleIcon className="w-12 h-12 text-apple-red" />
-                                </div>
-                                <div>
-                                    <h3 className="text-xl font-black uppercase mb-2">Connect your Library</h3>
-                                    <p className="text-sm text-gray-400 max-w-sm">Authorization is required to browse your created playlists and add your favorite tracks to your slideshows.</p>
-                                </div>
+                                <div className="w-24 h-24 bg-apple-red/10 rounded-full flex items-center justify-center border border-apple-red/20"><AppleIcon className="w-12 h-12 text-apple-red" /></div>
+                                <div><h3 className="text-xl font-black uppercase mb-2">Connect your Library</h3><p className="text-sm text-gray-400 max-w-sm">Connect to browse your created playlists and tracks.</p></div>
                                 <button onClick={authorizeAppleMusic} className="bg-apple-red text-white py-4 px-12 rounded-full font-black text-sm uppercase tracking-widest shadow-2xl hover:scale-105 active:scale-95 transition-all">Authorize Now</button>
                             </div>
                         ) : (
                             <div className="flex-1 overflow-hidden flex flex-col sm:flex-row">
-                                {/* Playlists Sidebar */}
                                 <aside className="w-full sm:w-72 border-r border-white/5 overflow-y-auto custom-scrollbar bg-gray-950/20 p-6 space-y-6">
-                                    <h3 className="text-[10px] text-gray-500 font-black uppercase tracking-widest border-b border-white/10 pb-2">My Created Playlists</h3>
+                                    <h3 className="text-[10px] text-gray-500 font-black uppercase tracking-widest border-b border-white/10 pb-2">Playlists</h3>
                                     <div className="grid grid-cols-1 gap-2">
-                                        {appleMusicPlaylists.length > 0 ? appleMusicPlaylists.map(playlist => (
-                                            <button 
-                                                key={playlist.id} 
-                                                onClick={() => fetchAppleTracks(playlist.id)}
-                                                className={`p-3 rounded-2xl flex items-center gap-3 transition-all border text-left ${selectedApplePlaylist === playlist.id ? 'bg-apple-red/20 border-apple-red shadow-lg' : 'bg-gray-900/40 border-gray-800 hover:border-apple-red/50'}`}
-                                            >
-                                                {playlist.attributes.artwork ? (
-                                                    <img src={playlist.attributes.artwork.url.replace('{w}', '80').replace('{h}', '80')} className="w-12 h-12 rounded-xl shadow-lg" alt="art"/>
-                                                ) : <div className="w-12 h-12 bg-gray-800 rounded-xl flex items-center justify-center"><MusicIcon className="w-6 h-6 text-gray-600"/></div>}
-                                                <div className="min-w-0">
-                                                    <p className="text-[10px] font-black text-white truncate">{playlist.attributes.name}</p>
-                                                    <p className="text-[8px] text-gray-500 font-bold uppercase mt-0.5">Library Playlist</p>
-                                                </div>
-                                            </button>
-                                        )) : <div className="text-center py-10 text-gray-600 uppercase text-[10px] font-black italic">Syncing Playlists...</div>}
+                                        {appleMusicPlaylists.map(playlist => (
+                                            <button key={playlist.id} onClick={() => fetchAppleTracks(playlist.id)} className={`p-3 rounded-2xl flex items-center gap-3 transition-all border text-left ${selectedApplePlaylist === playlist.id ? 'bg-apple-red/20 border-apple-red shadow-lg' : 'bg-gray-900/40 border-gray-800 hover:border-apple-red/50'}`}>{playlist.attributes.artwork ? <img src={playlist.attributes.artwork.url.replace('{w}', '80').replace('{h}', '80')} className="w-12 h-12 rounded-xl shadow-lg" alt="art"/> : <div className="w-12 h-12 bg-gray-800 rounded-xl flex items-center justify-center"><MusicIcon className="w-6 h-6 text-gray-600"/></div>}<div className="min-w-0"><p className="text-[10px] font-black text-white truncate">{playlist.attributes.name}</p></div></button>
+                                        ))}
                                     </div>
                                 </aside>
-
-                                {/* Tracks Main Area */}
                                 <section className="flex-1 overflow-y-auto custom-scrollbar p-8">
-                                    <div className="mb-6 flex justify-between items-end">
-                                        <h3 className="text-[10px] text-gray-500 font-black uppercase tracking-widest border-b border-white/10 pb-2 flex-1 mr-4">Tracks from Selected Playlist</h3>
-                                        <button onClick={fetchApplePlaylists} className="text-[10px] text-brand-purple font-black uppercase hover:underline">Refresh Library</button>
-                                    </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        {appleMusicTracks.length > 0 ? appleMusicTracks.map(track => (
-                                            <div key={track.id} className="bg-gray-950/40 p-4 rounded-3xl border border-gray-800 flex justify-between items-center group hover:border-apple-red/30 transition-all">
-                                                <div className="flex items-center gap-4 min-w-0">
-                                                    {track.attributes.artwork && <img src={track.attributes.artwork.url.replace('{w}', '60').replace('{h}', '60')} className="w-12 h-12 rounded-2xl shadow-xl" alt="art"/>}
-                                                    <div className="min-w-0">
-                                                        <p className="text-[11px] font-black text-white leading-tight truncate">{track.attributes.name}</p>
-                                                        <p className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{track.attributes.artistName}</p>
-                                                        <p className="text-[8px] text-gray-600 font-black mt-1">{formatDuration(track.attributes.durationInMillis / 1000)}</p>
-                                                    </div>
-                                                </div>
-                                                <button 
-                                                    onClick={() => { addAppleMusicTrack(track); setIsMusicBrowserOpen(false); }}
-                                                    className="bg-apple-red text-white p-3 rounded-2xl hover:scale-110 active:scale-90 transition-all shadow-xl opacity-0 group-hover:opacity-100"
-                                                >
-                                                    <PlusIcon className="w-5 h-5"/>
-                                                </button>
-                                            </div>
-                                        )) : (
-                                            <div className="col-span-2 text-center py-20">
-                                                <MusicIcon className="w-12 h-12 text-gray-800 mx-auto mb-4" />
-                                                <p className="text-gray-600 uppercase text-[10px] font-black">Select a playlist to browse your tracks</p>
-                                            </div>
-                                        )}
+                                        {appleMusicTracks.map(track => (
+                                            <div key={track.id} className="bg-gray-950/40 p-4 rounded-3xl border border-gray-800 flex justify-between items-center group hover:border-apple-red/30 transition-all"><div className="flex items-center gap-4 min-w-0">{track.attributes.artwork && <img src={track.attributes.artwork.url.replace('{w}', '60').replace('{h}', '60')} className="w-12 h-12 rounded-2xl shadow-xl" alt="art"/><div className="min-w-0"><p className="text-[11px] font-black text-white leading-tight truncate">{track.attributes.name}</p><p className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{track.attributes.artistName}</p></div>}</div><button onClick={() => { addAppleMusicTrack(track); setIsMusicBrowserOpen(false); }} className="bg-apple-red text-white p-3 rounded-2xl hover:scale-110 active:scale-90 transition-all shadow-xl opacity-0 group-hover:opacity-100"><PlusIcon className="w-5 h-5"/></button></div>
+                                        ))}
                                     </div>
                                 </section>
                             </div>
                         )}
-                        
-                        <footer className="p-6 bg-black/40 border-t border-white/5 text-center">
-                            <p className="text-[8px] text-gray-600 font-black uppercase tracking-[0.3em]">Integrates seamlessly with your active Apple Music Subscription</p>
-                        </footer>
-                    </div>
-                </div>
-            )}
-
-            {isShareModalOpen && shareSlideshowTarget && (
-                <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 animate-fade-in backdrop-blur-md">
-                    <div className="bg-gray-900 w-full max-w-md rounded-[2.5rem] border border-gray-800 shadow-2xl flex flex-col p-8">
-                        <div className="flex justify-between items-center mb-8">
-                            <div>
-                                <h2 className="text-xl font-black uppercase tracking-tighter">Share Project</h2>
-                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">Project: {shareSlideshowTarget.name}</p>
-                            </div>
-                            <button onClick={() => setIsShareModalOpen(false)} className="text-gray-500 hover:text-white"><XIcon className="w-8 h-8"/></button>
-                        </div>
-                        <div className="space-y-6">
-                            <div className="flex gap-2">
-                                <input 
-                                    value={shareEmail} 
-                                    onChange={e => setShareEmail(e.target.value)} 
-                                    placeholder="email@example.com" 
-                                    className="flex-1 bg-gray-950 border border-gray-800 rounded-2xl px-5 py-4 text-sm font-bold text-white shadow-inner outline-none focus:ring-1 focus:ring-brand-purple" 
-                                />
-                                <button onClick={handleShareSlideshow} className="bg-brand-purple text-white px-5 py-4 rounded-2xl hover:bg-purple-700 active:scale-90 transition-all"><PlusIcon className="w-6 h-6"/></button>
-                            </div>
-                            <div className="max-h-60 overflow-y-auto space-y-3 custom-scrollbar pr-2">
-                                <p className="text-[10px] text-gray-500 font-black uppercase tracking-widest">Collaborators</p>
-                                <div className="bg-gray-800/30 p-4 rounded-2xl border border-gray-700/50 flex justify-between items-center">
-                                    <div className="flex flex-col">
-                                        <span className="text-sm font-black text-white">{shareSlideshowTarget.userEmail || 'Owner'}</span>
-                                        <span className="text-[8px] text-gray-500 font-bold uppercase">Original Creator</span>
-                                    </div>
-                                    <span className="text-[9px] text-brand-purple font-black uppercase tracking-widest bg-brand-purple/10 px-2 py-0.5 rounded-full">Owner</span>
-                                </div>
-                                {shareSlideshowTarget.collaborators?.map(c => (
-                                    <div key={c.email} className="bg-gray-800/30 p-4 rounded-2xl border border-gray-700/50 flex justify-between items-center group">
-                                        <span className="text-sm font-black text-white">{c.email}</span>
-                                        {user?.uid === shareSlideshowTarget.userId && (
-                                            <button onClick={() => removeCollaborator(c.email)} className="text-gray-600 hover:text-red-400 transition-colors"><TrashIcon className="w-4 h-4"/></button>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
+                        <footer className="p-4 bg-black/40 border-t border-white/5 text-center"><p className="text-[8px] text-gray-600 font-black uppercase tracking-[0.3em]">{isDemoMode ? 'DEMO MODE - No Real Apple ID Required' : 'Requires active Apple Music Subscription'}</p></footer>
                     </div>
                 </div>
             )}
 
             {isAdvancedEditorOpen && (
                 <div className="fixed inset-0 bg-brand-dark z-[100] flex flex-col p-6 animate-fade-in overflow-hidden">
-                    <header className="flex justify-between items-center mb-8 shrink-0">
-                        <div>
-                            <h2 className="text-3xl font-black uppercase tracking-tighter flex items-center gap-4"><BeakerIcon className="w-8 h-8 text-brand-purple"/> Advanced Studio</h2>
-                            <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">Multi-Track Timeline Editor</p>
-                        </div>
-                        <button onClick={() => setIsAdvancedEditorOpen(false)} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-full transition-all border border-gray-700 shadow-xl"><XIcon className="w-6 h-6"/></button>
-                    </header>
-
+                    <header className="flex justify-between items-center mb-8 shrink-0"><div><h2 className="text-3xl font-black uppercase tracking-tighter flex items-center gap-4"><BeakerIcon className="w-8 h-8 text-brand-purple"/> Studio</h2></div><button onClick={() => setIsAdvancedEditorOpen(false)} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-full transition-all border border-gray-700 shadow-xl"><XIcon className="w-6 h-6"/></button></header>
                     <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 pr-2 pb-20">
-                        <div className="bg-brand-purple/10 p-6 rounded-3xl border border-brand-purple/40 shadow-xl animate-fade-in">
-                            <div className="flex justify-between items-center mb-6">
-                                <div className="flex items-center gap-3">
-                                    <SparklesIcon className="w-6 h-6 text-brand-purple" />
-                                    <div>
-                                        <h3 className="text-lg font-black uppercase tracking-tighter">AI Auto-Fade Engine</h3>
-                                        <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Intelligent Track Chaining & Crossfading</p>
-                                    </div>
-                                </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" className="sr-only peer" checked={settings.autoFadeEnabled} onChange={() => setSettings(s => ({...s, autoFadeEnabled: !s.autoFadeEnabled}))} />
-                                    <div className="w-14 h-7 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-brand-purple"></div>
-                                </label>
-                            </div>
-
-                            {settings.autoFadeEnabled && (
-                                <div className="flex items-center gap-4 animate-fade-in">
-                                    <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Crossfade Controls (Overlap):</span>
-                                    <div className="flex bg-gray-900 p-1 rounded-2xl border border-gray-800">
-                                        {[0, 3, 5].map(interval => (
-                                            <button 
-                                                key={interval}
-                                                onClick={() => setSettings(s => ({...s, autoFadeInterval: interval}))}
-                                                className={`px-6 py-2 rounded-xl text-xs font-black transition-all ${settings.autoFadeInterval === interval ? 'bg-brand-purple text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}
-                                            >
-                                                {interval}s
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <div className="ml-auto text-[9px] text-brand-purple font-bold bg-brand-purple/10 px-3 py-1 rounded-lg border border-brand-purple/20">AI MANAGED CROSSFADE ACTIVE</div>
-                                </div>
-                            )}
-                        </div>
-
                         <div className="bg-gray-950/50 rounded-3xl p-6 border border-gray-800/50 shadow-2xl relative">
-                            <div className="absolute top-0 left-[180px] right-6 h-6 border-b border-gray-800 flex justify-between px-1">
-                                {Array.from({ length: Math.ceil(Math.max(totalSlideshowDuration, 0) / 5) + 1 }).map((_, i) => (
-                                    <span key={i} className="text-[8px] text-gray-600 font-black">{i * 5}s</span>
-                                ))}
-                            </div>
-
                             <div className="space-y-6 mt-4">
                                 <div className="flex gap-4 group">
-                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center relative">
-                                        <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Track 1: Visuals</span>
-                                        <span className="text-[8px] text-brand-purple font-bold">Images & Clips</span>
-                                        {settings.muteVideos && (
-                                            <div className="absolute top-2 right-2 bg-red-500/20 text-red-500 p-1 rounded-lg">
-                                                <VolumeOffIcon className="w-3 h-3" />
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="flex-1 h-20 bg-gray-950/40 rounded-2xl border border-gray-800/50 flex relative overflow-x-auto custom-scrollbar">
-                                        {mediaWithTimestamps.map((m, idx) => (
-                                            <div 
-                                                key={m.id} 
-                                                className={`h-full border-r border-gray-800 relative transition-all group/clip overflow-hidden ${m.type === 'image' ? 'bg-brand-purple/10' : 'bg-blue-500/10'}`}
-                                                style={{ width: `${(m.timelineEnd - m.timelineStart) * 20}px`, minWidth: '40px' }}
-                                            >
-                                                {m.type === 'image' ? <img src={m.previewUrl} className="w-full h-full object-cover opacity-30" alt="clip"/> : <video src={m.previewUrl} className="w-full h-full object-cover opacity-30" muted/>}
-                                                <div className="absolute inset-0 flex flex-col items-center justify-center p-1 pointer-events-none">
-                                                    <span className="text-[8px] font-black text-white/40 uppercase whitespace-nowrap">{m.type} #{idx+1}</span>
-                                                    <span className="text-[8px] font-bold text-white/20 whitespace-nowrap">{formatDuration(m.timelineEnd - m.timelineStart)}</span>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
+                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">Track 1: Visuals</div>
+                                    <div className="flex-1 h-20 bg-gray-950/40 rounded-2xl border border-gray-800/50 flex relative overflow-x-auto custom-scrollbar">{mediaWithTimestamps.map((m, idx) => <div key={m.id} className="h-full border-r border-gray-800 relative transition-all bg-brand-purple/10" style={{ width: `${(m.timelineEnd - m.timelineStart) * 20}px`, minWidth: '40px' }}><div className="absolute inset-0 flex flex-col items-center justify-center p-1"><span className="text-[8px] font-black text-white/40">{idx+1}</span></div></div>)}</div>
                                 </div>
-
                                 <div className="flex gap-4">
-                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
-                                        <span className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Track 2: Audio</span>
-                                        <span className="text-[8px] text-blue-400 font-bold">Music & Voice</span>
-                                    </div>
+                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">Track 2: Audio</div>
                                     <div className="flex-1 min-h-[160px] bg-gray-950/40 rounded-2xl border border-gray-800/50 p-4 space-y-3 relative overflow-x-auto custom-scrollbar">
                                         {audioFiles.map((a, idx) => (
                                             <div key={a.id} className="relative group/audio">
-                                                <div 
-                                                    className={`h-12 border rounded-xl relative overflow-hidden flex items-center px-4 ${a.source === 'apple-music' ? 'bg-apple-red/20 border-apple-red/30' : 'bg-blue-500/20 border-blue-500/30'}`}
-                                                    style={{ 
-                                                        marginLeft: `${a.startTime * 20}px`, 
-                                                        width: `${a.duration * 20}px` 
-                                                    }}
-                                                >
-                                                    <div className="absolute inset-y-0 left-0 bg-white/10" style={{ width: `${a.fadeIn * 20}px` }} title="Fade In Area"/>
-                                                    <div className="absolute inset-y-0 right-0 bg-black/10" style={{ width: `${a.fadeOut * 20}px` }} title="Fade Out Area"/>
-                                                    {a.source === 'apple-music' ? <AppleIcon className="w-4 h-4 text-apple-red mr-3 shrink-0"/> : <MusicIcon className="w-4 h-4 text-blue-400 mr-3 shrink-0"/>}
-                                                    <span className="text-[10px] font-black text-white truncate shrink-0 max-w-[150px]">{a.name}</span>
-                                                    <span className={`text-[8px] font-bold ml-auto whitespace-nowrap ${a.source === 'apple-music' ? 'text-apple-red' : 'text-blue-500/60'}`}>{formatDuration(a.duration)}</span>
-                                                </div>
-
-                                                <div className="flex gap-4 mt-2 mb-4 bg-gray-900/40 p-3 rounded-xl border border-gray-800/30">
-                                                    <div className="space-y-1 flex-1">
-                                                        <label className="text-[7px] text-gray-500 font-black uppercase tracking-widest">Start Time Offset ({a.startTime}s)</label>
-                                                        <input 
-                                                            type="range" min="0" max={Math.max(totalSlideshowDuration, a.startTime + a.duration)} step="1" 
-                                                            value={a.startTime} 
-                                                            disabled={settings.autoFadeEnabled}
-                                                            onChange={e => {
-                                                                const updated = [...audioFiles];
-                                                                updated[idx].startTime = parseInt(e.target.value);
-                                                                setAudioFiles(updated);
-                                                            }}
-                                                            className={`w-full h-1 ${a.source === 'apple-music' ? 'accent-apple-red' : 'accent-blue-500'} ${settings.autoFadeEnabled ? 'opacity-20 cursor-not-allowed' : ''}`} 
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-1">
-                                                        <label className="text-[7px] text-gray-500 font-black uppercase tracking-widest">Fade In ({a.fadeIn}s)</label>
-                                                        <input 
-                                                            type="number" min="0" max="10" 
-                                                            value={a.fadeIn} 
-                                                            disabled={settings.autoFadeEnabled}
-                                                            onChange={e => {
-                                                                const updated = [...audioFiles];
-                                                                updated[idx].fadeIn = parseFloat(e.target.value);
-                                                                setAudioFiles(updated);
-                                                            }}
-                                                            className={`w-12 bg-gray-950 text-white text-[9px] font-bold p-1 rounded border border-gray-800 ${settings.autoFadeEnabled ? 'opacity-30' : ''}`}
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-1">
-                                                        <label className="text-[7px] text-gray-500 font-black uppercase tracking-widest">Fade Out ({a.fadeOut}s)</label>
-                                                        <input 
-                                                            type="number" min="0" max="10" 
-                                                            value={a.fadeOut} 
-                                                            disabled={settings.autoFadeEnabled}
-                                                            onChange={e => {
-                                                                const updated = [...audioFiles];
-                                                                updated[idx].fadeOut = parseFloat(e.target.value);
-                                                                setAudioFiles(updated);
-                                                            }}
-                                                            className={`w-12 bg-gray-950 text-white text-[9px] font-bold p-1 rounded border border-gray-800 ${settings.autoFadeEnabled ? 'opacity-30' : ''}`}
-                                                        />
-                                                    </div>
-                                                    <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="self-end pb-1"><TrashIcon className="w-4 h-4 text-red-500 hover:scale-110 transition-transform"/></button>
-                                                </div>
+                                                <div className={`h-12 border rounded-xl relative overflow-hidden flex items-center px-4 ${a.source === 'apple-music' ? 'bg-apple-red/20 border-apple-red/30' : 'bg-blue-500/20 border-blue-500/30'}`} style={{ marginLeft: `${a.startTime * 20}px`, width: `${a.duration * 20}px` }}>{a.source === 'apple-music' ? <AppleIcon className="w-4 h-4 text-apple-red mr-3 shrink-0"/> : <MusicIcon className="w-4 h-4 text-blue-400 mr-3 shrink-0"/>}<span className="text-[10px] font-black text-white truncate shrink-0 max-w-[150px]">{a.name}</span></div>
+                                                <div className="flex gap-4 mt-2 bg-gray-900/40 p-3 rounded-xl"><input type="range" min="0" max={Math.max(totalSlideshowDuration, a.startTime + a.duration)} step="1" value={a.startTime} onChange={e => { const updated = [...audioFiles]; updated[idx].startTime = parseInt(e.target.value); setAudioFiles(updated); }} className={`flex-1 ${a.source === 'apple-music' ? 'accent-apple-red' : 'accent-blue-500'}`} /><button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))}><TrashIcon className="w-4 h-4 text-red-500"/></button></div>
                                             </div>
                                         ))}
                                     </div>
@@ -1713,238 +1041,35 @@ const App: React.FC = () => {
                             </div>
                         </div>
                     </div>
-
-                    <footer className="shrink-0 bg-gray-950 p-6 rounded-t-[2.5rem] border-t border-gray-800 flex justify-between items-center shadow-inner mt-auto">
-                        <div className="flex items-center gap-6">
-                            <div className="flex flex-col">
-                                <span className="text-[10px] text-gray-500 font-black uppercase tracking-widest">Total Master Length</span>
-                                <span className="text-2xl font-black text-brand-purple tracking-tighter">{formatDuration(totalSlideshowDuration)}</span>
-                            </div>
-                        </div>
-                        <div className="flex gap-4">
-                            <button onClick={startPlayback} className="bg-brand-purple text-white px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-purple-700 shadow-xl transition-all active:scale-95 flex items-center gap-2"><PlayIcon className="w-5 h-5"/> Studio Preview</button>
-                            <button onClick={handleSave} className="bg-white text-black px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-gray-200 shadow-xl transition-all active:scale-95">Commit Changes</button>
-                        </div>
-                    </footer>
+                    <footer className="shrink-0 bg-gray-950 p-6 rounded-t-[2.5rem] border-t border-gray-800 flex justify-between items-center shadow-inner mt-auto"><div className="text-2xl font-black text-brand-purple">{formatDuration(totalSlideshowDuration)}</div><div className="flex gap-4"><button onClick={startPlayback} className="bg-brand-purple text-white px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-purple-700 shadow-xl transition-all active:scale-95 flex items-center gap-2"><PlayIcon className="w-5 h-5"/> Preview</button></div></footer>
                 </div>
             )}
 
             {isPlaying && (
                 <div className="fixed inset-0 bg-black z-[100] flex flex-col items-center justify-center animate-fade-in group/theater">
-                    <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white bg-black/40 hover:bg-red-600/90 p-4 rounded-full z-[110] backdrop-blur-xl transition-all border border-white/10 shadow-2xl"><XIcon className="w-10 h-10"/></button>
-                    
-                    {/* Double-Buffered Rendering Engine */}
+                    <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white bg-black/40 hover:bg-red-600/90 p-4 rounded-full z-[110] backdrop-blur-xl border border-white/10 shadow-2xl"><XIcon className="w-10 h-10"/></button>
                     <div className="w-full h-full relative flex items-center justify-center overflow-hidden">
                         {mediaWithTimestamps.map((media, index) => {
                             const isVisible = index === currentSlide;
                             const isPreloading = index === currentSlide + 1 || (settings.repeatSlideshow && currentSlide === mediaWithTimestamps.length - 1 && index === 0);
-                            
                             if (!isVisible && !isPreloading) return null;
-
-                            return (
-                                <TheaterMedia 
-                                    key={media.id}
-                                    media={media as any}
-                                    isVisible={isVisible}
-                                    isPreloading={isPreloading}
-                                    muteVideos={settings.muteVideos}
-                                    elapsedTime={elapsedTime}
-                                    slideStyle={settings.slideStyle}
-                                />
-                            );
+                            return <TheaterMedia key={media.id} media={media as any} isVisible={isVisible} isPreloading={isPreloading} muteVideos={settings.muteVideos} elapsedTime={elapsedTime} slideStyle={settings.slideStyle} />;
                         })}
-                        
-                        {/* Captions Layer - Positioned Lower for Cinematic Effect */}
-                        {(settings.showCaptions && ((mediaWithTimestamps[currentSlide] as any)?.caption || (mediaWithTimestamps[currentSlide] as any)?.aiCaption)) && (
-                            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-black/20 backdrop-blur-md px-10 py-4 rounded-2xl border border-white/5 text-center w-[85%] max-w-5xl animate-fade-in shadow-2xl z-50 pointer-events-none">
-                                <p className="text-white text-base md:text-xl font-medium tracking-wide leading-relaxed drop-shadow-lg italic opacity-90">
-                                    {(mediaWithTimestamps[currentSlide] as any).caption || (mediaWithTimestamps[currentSlide] as any).aiCaption}
-                                </p>
-                            </div>
+                        {settings.showCaptions && ((mediaWithTimestamps[currentSlide] as any)?.caption || (mediaWithTimestamps[currentSlide] as any)?.aiCaption) && (
+                            <div className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-black/20 backdrop-blur-md px-10 py-4 rounded-2xl border border-white/5 text-center w-[85%] max-w-5xl shadow-2xl z-50 pointer-events-none"><p className="text-white text-base md:text-xl font-medium drop-shadow-lg italic">{(mediaWithTimestamps[currentSlide] as any).caption || (mediaWithTimestamps[currentSlide] as any).aiCaption}</p></div>
                         )}
-
-                        {/* Controls Layer */}
-                        <div className="absolute bottom-0 left-0 right-0 p-8 pb-12 bg-gradient-to-t from-black/80 to-transparent transition-opacity duration-500 opacity-0 group-hover/theater:opacity-100 flex flex-col gap-6 z-[60]">
-                            <div className="flex items-center gap-6">
-                                <span className="text-xs font-mono text-white/60 tracking-widest">{formatDuration(elapsedTime)}</span>
-                                <div className="flex-1 relative flex items-center group/seekbar">
-                                    <input 
-                                        type="range" 
-                                        min="0" 
-                                        max={totalSlideshowDuration} 
-                                        step="0.01" 
-                                        value={elapsedTime} 
-                                        onChange={(e) => setElapsedTime(parseFloat(e.target.value))}
-                                        className="w-full h-1 bg-white/20 rounded-full appearance-none cursor-pointer accent-brand-purple relative z-10"
-                                    />
-                                    <div className="absolute top-0 left-0 h-1 bg-brand-purple rounded-full pointer-events-none" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }} />
-                                </div>
-                                <span className="text-xs font-mono text-white/60 tracking-widest">{formatDuration(totalSlideshowDuration)}</span>
-                            </div>
-                            <div className="flex items-center justify-center gap-12">
-                                <button onClick={skipBackward} className="text-white/60 hover:text-white transition-all transform hover:scale-125 active:scale-90"><RewindIcon className="w-10 h-10"/></button>
-                                <button onClick={() => setIsPlaying(false)} className="bg-white text-black p-5 rounded-full hover:scale-110 active:scale-95 transition-all shadow-2xl"><PauseIcon className="w-8 h-8"/></button>
-                                <button onClick={skipForward} className="text-white/60 hover:text-white transition-all transform hover:scale-125 active:scale-90"><FastForwardIcon className="w-10 h-10"/></button>
-                            </div>
-                        </div>
                     </div>
-                    
-                    {/* Synchronized Multi-Track Audio Engine */}
                     {audioFiles.map((a) => {
                         const isActive = elapsedTime >= a.startTime && elapsedTime < (a.startTime + a.duration);
-                        const currentInClipTime = elapsedTime - a.startTime;
-                        
-                        let vol = 1.0;
-                        if (isActive) {
-                            if (a.fadeIn > 0 && currentInClipTime < a.fadeIn) {
-                                vol = currentInClipTime / a.fadeIn;
-                            } else if (a.fadeOut > 0 && currentInClipTime > (a.duration - a.fadeOut)) {
-                                vol = (a.duration - currentInClipTime) / a.fadeOut;
-                            }
-                            
-                            const duckFactor = getDuckingFactor(elapsedTime);
-                            vol *= duckFactor;
-                        }
-
-                        if (a.source === 'apple-music' && a.appleMusicTrackId) {
-                            return (
-                                <AppleMusicPlayer 
-                                    key={a.id} 
-                                    trackId={a.appleMusicTrackId}
-                                    active={isActive}
-                                    volume={vol}
-                                    startTimeInFile={currentInClipTime}
-                                />
-                            );
-                        }
-
-                        return (
-                            <AudioPlayer 
-                                key={a.id} 
-                                src={a.previewUrl} 
-                                active={isActive} 
-                                volume={vol} 
-                                startTimeInFile={currentInClipTime}
-                            />
-                        );
+                        const inTime = elapsedTime - a.startTime;
+                        let vol = isActive ? (a.fadeIn > 0 && inTime < a.fadeIn ? inTime / a.fadeIn : (a.fadeOut > 0 && inTime > (a.duration - a.fadeOut) ? (a.duration - inTime) / a.fadeOut : 1.0)) * getDuckingFactor(elapsedTime) : 0;
+                        if (a.source === 'apple-music') return <AppleMusicPlayer key={a.id} trackId={a.appleMusicTrackId!} active={isActive} volume={vol} startTimeInFile={inTime} isDemo={isDemoMode} />;
+                        return <AudioPlayer key={a.id} src={a.previewUrl} active={isActive} volume={vol} startTimeInFile={inTime} />;
                     })}
                 </div>
             )}
-
-            {/* DYNAMIC HELPER UI - ONLY SHOWN WHEN USER LOGGED IN */}
-            {user && (
-                <>
-                    <button 
-                        onClick={() => setIsHelpOpen(true)}
-                        className="fixed bottom-8 left-8 w-14 h-14 bg-brand-purple text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-purple-600 active:scale-90 transition-all z-[150] border-4 border-white/20 group"
-                        aria-label="App Help Guide"
-                    >
-                        <QuestionIcon className="w-8 h-8 group-hover:rotate-12 transition-transform" />
-                    </button>
-
-                    {isHelpOpen && (
-                        <div className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center p-4 sm:p-8 animate-fade-in backdrop-blur-md overflow-hidden">
-                            <div className="bg-gray-900 w-full max-w-4xl max-h-[90vh] rounded-[3rem] border border-gray-800 shadow-2xl flex flex-col relative overflow-hidden">
-                                <button 
-                                    onClick={() => setIsHelpOpen(false)} 
-                                    className="absolute top-6 right-8 text-gray-500 hover:text-white transition-colors z-[210] p-2"
-                                >
-                                    <XIcon className="w-10 h-10"/>
-                                </button>
-
-                                <div className="flex-1 overflow-y-auto p-8 sm:p-12 custom-scrollbar">
-                                    <div className="text-center mb-12">
-                                        <h2 className="text-4xl font-black uppercase tracking-tighter text-white mb-2">
-                                            Hello, {user.displayName || 'Creator'}!
-                                        </h2>
-                                        <p className="text-brand-purple font-bold uppercase tracking-[0.2em] text-xs">
-                                            Your Creative Studio Awaits
-                                        </p>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                                        <section className="space-y-4">
-                                            <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
-                                                <FilmIcon className="w-5 h-5 text-brand-purple"/> What is this?
-                                            </h3>
-                                            <p className="text-sm text-gray-400 leading-relaxed font-medium">
-                                                Muziq Slides is a high-fidelity cinematic slideshow engine. Its purpose is to bridge the gap between static photo albums and professional motion pictures, allowing you to preserve memories with orchestral-level multi-track audio and intelligent transitions.
-                                            </p>
-                                        </section>
-
-                                        <section className="space-y-4">
-                                            <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
-                                                <AppleIcon className="w-5 h-5 text-apple-red"/> Apple Music Integration
-                                            </h3>
-                                            <p className="text-sm text-gray-400 leading-relaxed font-medium">
-                                                In Step 2, you can now connect your Apple Music account to browse and use any track from your created playlists directly in your slideshow timeline.
-                                            </p>
-                                        </section>
-
-                                        <section className="space-y-6 md:col-span-2">
-                                            <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2 border-b border-gray-800 pb-2">
-                                                <SparklesIcon className="w-5 h-5 text-brand-purple"/> Features & Advanced Studio
-                                            </h3>
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                                <div className="bg-gray-800/30 p-6 rounded-3xl border border-gray-800/50">
-                                                    <h4 className="text-xs font-black text-white uppercase mb-3 tracking-widest">Standard Features</h4>
-                                                    <ul className="text-[11px] text-gray-500 space-y-2 list-disc list-inside font-bold">
-                                                        <li>Mixed Media Timeline (Photos & 60s Video Clips)</li>
-                                                        <li>Cinematic Styles: Ken Burns, Zoom, Glide & Fade</li>
-                                                        <li>Real-time HD Theater Preview Engine</li>
-                                                        <li>Cloud Persistence: Save & Archive Unlimited Projects</li>
-                                                        <li>One-click Cloning for templating projects</li>
-                                                    </ul>
-                                                </div>
-                                                <div className="bg-brand-purple/5 p-6 rounded-3xl border border-brand-purple/20">
-                                                    <h4 className="text-xs font-black text-brand-purple uppercase mb-3 tracking-widest">Advanced Studio</h4>
-                                                    <ul className="text-[11px] text-gray-400 space-y-2 list-disc list-inside font-bold">
-                                                        <li>AI Smart Captions: Powered by Gemini AI Vision</li>
-                                                        <li>Apple Music: Browse and sync your personal library</li>
-                                                        <li>Intelligent Audio Ducking (Music lowers for video clips)</li>
-                                                        <li>Multi-Track Layering: Precise audio offset controls</li>
-                                                        <li>Crossfade Engine: Automatic track-chaining and transitions</li>
-                                                        <li>Collaborative Sharing: Multi-user real-time editing</li>
-                                                    </ul>
-                                                </div>
-                                            </div>
-                                        </section>
-
-                                        <section className="md:col-span-2 bg-red-500/10 p-8 rounded-3xl border border-red-500/30">
-                                            <h3 className="text-lg font-black text-red-500 uppercase tracking-tight flex items-center gap-2 mb-4">
-                                                <VolumeOffIcon className="w-6 h-6"/> Content Disclaimer & Rules
-                                            </h3>
-                                            <div className="space-y-4 text-sm font-bold text-gray-300">
-                                                <p className="leading-relaxed">
-                                                    Muziq Slides is dedicated to wholesome family storytelling and cinematic artistry. We maintain a zero-tolerance policy regarding illegal or harmful content.
-                                                </p>
-                                                <div className="bg-black/40 p-5 rounded-2xl border border-red-500/20 text-xs text-red-200 uppercase tracking-wide leading-loose">
-                                                    THIS APP IS STRICTLY PROHIBITED FOR:
-                                                    <ul className="mt-3 list-disc list-inside space-y-2">
-                                                        <li className="font-black">No videos of a pornographic or explicit adult nature.</li>
-                                                        <li className="font-black">Strictly NO sharing of any videos of underage children of a sexual nature.</li>
-                                                        <li>No hosting of violence, hate speech, or targeted harassment.</li>
-                                                        <li>No illegal material or infringement of intellectual property.</li>
-                                                    </ul>
-                                                </div>
-                                                <p className="text-[10px] text-gray-500 italic mt-4 uppercase">Failure to comply will result in immediate permanent account termination and reporting to appropriate authorities.</p>
-                                            </div>
-                                        </section>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </>
-            )}
             
-            <style>{`
-                .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
-                .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(109, 40, 217, 0.4); border-radius: 20px; }
-                input[type='range'] { -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
-                input[type='range']::-webkit-slider-runnable-track { background: rgba(255,255,255,0.1); height: 0.25rem; border-radius: 0.5rem; }
-                input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; margin-top: -6px; background-color: #6d28d9; height: 1rem; width: 1rem; border-radius: 9999px; box-shadow: 0 0 10px rgba(109, 40, 217, 0.5); border: 2px solid white; }
-            `}</style>
+            <style>{`.custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(109, 40, 217, 0.4); border-radius: 20px; } input[type='range'] { -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; } input[type='range']::-webkit-slider-runnable-track { background: rgba(255,255,255,0.1); height: 0.25rem; border-radius: 0.5rem; } input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; margin-top: -6px; background-color: #6d28d9; height: 1rem; width: 1rem; border-radius: 9999px; box-shadow: 0 0 10px rgba(109, 40, 217, 0.5); border: 2px solid white; }`}</style>
         </div>
     );
 };
