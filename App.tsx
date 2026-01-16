@@ -46,7 +46,6 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 
 // --- APPLE MUSIC CONFIGURATION ---
-// In a production environment, this token must be a valid signed JWT from your Apple Developer account.
 const APPLE_MUSIC_TOKEN = 'APPLE_MUSIC_DEVELOPER_TOKEN'; 
 
 // --- TYPE DEFINITIONS ---
@@ -148,7 +147,6 @@ interface SavedSlideshow {
     collaboratorEmails?: string[];
 }
 
-// --- APPLE MUSIC TYPES ---
 interface AppleMusicPlaylist {
     id: string;
     attributes: {
@@ -167,7 +165,6 @@ interface AppleMusicTrack {
     };
 }
 
-// --- HELPER FUNCTIONS ---
 const getMediaDuration = (file: File): Promise<number> => {
     return new Promise((resolve) => {
         const objectUrl = URL.createObjectURL(file);
@@ -222,7 +219,6 @@ const urlToBase64 = async (url: string): Promise<string> => {
     });
 };
 
-// --- APPLE MUSIC PLAYER COMPONENT ---
 const AppleMusicPlayer: React.FC<{
     trackId: string;
     active: boolean;
@@ -243,11 +239,9 @@ const AppleMusicPlayer: React.FC<{
                     if (music.nowPlayingItem?.id !== trackId) {
                         await music.setQueue({ song: trackId });
                     }
-                    
                     if (music.playbackState !== 2) { 
                         await music.play();
                     }
-
                     const diff = Math.abs(music.currentPlaybackTime - startTimeInFile);
                     if (diff > 1.0) {
                         await music.seekToTime(startTimeInFile);
@@ -261,7 +255,6 @@ const AppleMusicPlayer: React.FC<{
                 }
             }
         };
-
         handlePlayback();
     }, [active, trackId, startTimeInFile, isDemo]);
 
@@ -269,7 +262,6 @@ const AppleMusicPlayer: React.FC<{
         if (isDemo) return;
         const music = (window as any).MusicKit?.getInstance();
         if (!music) return;
-        
         if (Math.abs(lastVolumeRef.current - volume) > 0.05) {
             music.volume = Math.max(0, Math.min(1, volume));
             lastVolumeRef.current = volume;
@@ -279,7 +271,6 @@ const AppleMusicPlayer: React.FC<{
     return null; 
 };
 
-// --- ROBUST MEDIA PLAYER COMPONENT ---
 const TheaterMedia: React.FC<{
     media: MediaFile;
     isVisible: boolean;
@@ -293,11 +284,9 @@ const TheaterMedia: React.FC<{
     useEffect(() => {
         const video = videoRef.current;
         if (!video || media.type !== 'video') return;
-
         if (isVisible) {
             video.muted = muteVideos;
             video.volume = muteVideos ? 0 : ((media as VideoFile).volume || 1.0);
-            
             const offset = elapsedTime - (media as any).timelineStart;
             if (offset >= 0 && offset < (media as any).duration) {
                 video.currentTime = offset;
@@ -317,14 +306,12 @@ const TheaterMedia: React.FC<{
     useEffect(() => {
         const video = videoRef.current;
         if (!video || !isVisible || media.type !== 'video') return;
-
         const interval = setInterval(() => {
             const offset = elapsedTime - (media as any).timelineStart;
             if (Math.abs(video.currentTime - offset) > 0.8) {
                 video.currentTime = offset;
             }
         }, 2000);
-
         return () => clearInterval(interval);
     }, [isVisible, elapsedTime, (media as any).timelineStart]);
 
@@ -348,7 +335,6 @@ const TheaterMedia: React.FC<{
     );
 };
 
-// --- AUDIO PLAYER COMPONENT (OPTIMIZED) ---
 const AudioPlayer: React.FC<{
     src: string;
     active: boolean;
@@ -361,7 +347,6 @@ const AudioPlayer: React.FC<{
     useEffect(() => {
         const audio = audioRef.current;
         if (!audio) return;
-
         if (active) {
             if (audio.paused) {
                 audio.play().catch(() => {});
@@ -388,7 +373,6 @@ const AudioPlayer: React.FC<{
     return <audio ref={audioRef} src={src} preload="auto" />;
 };
 
-// --- ICON COMPONENTS ---
 const UploadIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>;
 const MusicIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-13c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" /></svg>;
 const AppleIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="currentColor" viewBox="0 0 384 512"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>;
@@ -416,7 +400,6 @@ const UsersIcon = ({ className }: { className?: string }) => <svg xmlns="http://
 const FilmIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>;
 const QuestionIcon = ({ className }: { className?: string }) => <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
 
-// --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
     const [user, setUser] = useState<User | null>(null);
     const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
@@ -447,7 +430,6 @@ const App: React.FC = () => {
     const [isAdvancedEditorOpen, setIsAdvancedEditorOpen] = useState(false);
     const [isHelpOpen, setIsHelpOpen] = useState(false);
     
-    // --- APPLE MUSIC STATE ---
     const [isMusicBrowserOpen, setIsMusicBrowserOpen] = useState(false);
     const [appleMusicAuthorized, setAppleMusicAuthorized] = useState(false);
     const [isDemoMode, setIsDemoMode] = useState(false);
@@ -467,7 +449,6 @@ const App: React.FC = () => {
     const startTimeRef = useRef<number>(0);
     const lastTickTimeRef = useRef<number>(0);
 
-    // Initial MusicKit Configuration
     useEffect(() => {
         const initMusicKit = async () => {
             if (!(window as any).MusicKit) return;
@@ -481,7 +462,7 @@ const App: React.FC = () => {
                 });
                 setAppleMusicAuthorized(music.isAuthorized);
             } catch (e) {
-                console.warn("Apple MusicKit configuration failed. Likely due to invalid developer token.");
+                console.warn("Apple MusicKit configuration failed.");
             }
         };
         initMusicKit();
@@ -489,9 +470,6 @@ const App: React.FC = () => {
 
     const authorizeAppleMusic = async () => {
         setError(null);
-        
-        // --- DEMO MODE HANDLER ---
-        // If the token is still the placeholder, we simulate success for demo purposes.
         if (APPLE_MUSIC_TOKEN === 'APPLE_MUSIC_DEVELOPER_TOKEN') {
             setIsProcessing(true);
             setTimeout(() => {
@@ -506,26 +484,22 @@ const App: React.FC = () => {
             }, 800);
             return;
         }
-
-        // --- REAL AUTHORIZATION ---
         const music = (window as any).MusicKit?.getInstance();
         if (!music) {
             setError("MusicKit engine failed to initialize.");
             return;
         }
-
         try {
             await music.authorize();
             setAppleMusicAuthorized(true);
             fetchApplePlaylists();
         } catch (e: any) {
             setError(`Apple Music connection failed: ${e.message || 'Authorization rejected'}`);
-            console.error(e);
         }
     };
 
     const fetchApplePlaylists = async () => {
-        if (isDemoMode) return; // Playlists already set in demo mock
+        if (isDemoMode) return;
         const music = (window as any).MusicKit?.getInstance();
         if (!music || !music.isAuthorized) return;
         try {
@@ -538,7 +512,6 @@ const App: React.FC = () => {
 
     const fetchAppleTracks = async (playlistId: string) => {
         setSelectedApplePlaylist(playlistId);
-        
         if (isDemoMode) {
             setAppleMusicTracks([
                 { id: 't1', attributes: { name: 'Starlight Serenade', artistName: 'Demo Artist 1', durationInMillis: 180000, artwork: { url: 'https://images.unsplash.com/photo-1514525253344-f2501065c711?w=100&h=100&fit=crop' } } },
@@ -547,14 +520,13 @@ const App: React.FC = () => {
             ]);
             return;
         }
-
         const music = (window as any).MusicKit?.getInstance();
         if (!music || !music.isAuthorized) return;
         try {
             const playlist = await music.api.library.playlist(playlistId);
             setAppleMusicTracks(playlist.relationships.tracks.data || []);
         } catch (e) {
-            setError("Failed to fetch tracks for this playlist.");
+            setError("Failed to fetch tracks.");
         }
     };
 
@@ -767,7 +739,7 @@ const App: React.FC = () => {
         for (const f of files) {
             const isImg = f.type.startsWith('image/');
             const dur = isImg ? 0 : await getMediaDuration(f);
-            if (!isImg && dur > 60) { setError(`Video "${f.name}" is too long (max 60s).`); continue; }
+            if (!isImg && dur > 60) { setError(`Video "${f.name}" is too long.`); continue; }
             resolved.push({
                 id: `m-${Math.random().toString(36).substr(2, 9)}`,
                 file: f, previewUrl: URL.createObjectURL(f), type: isImg ? 'image' : 'video',
@@ -978,7 +950,6 @@ const App: React.FC = () => {
                 </main>
             )}
 
-            {/* Apple Music Browser Modal */}
             {isMusicBrowserOpen && (
                 <div className="fixed inset-0 bg-black/95 z-[200] flex items-center justify-center p-4 sm:p-8 animate-fade-in backdrop-blur-xl">
                     <div className="bg-gray-900 w-full max-w-4xl max-h-[90vh] rounded-[3rem] border border-apple-red/20 shadow-2xl flex flex-col relative overflow-hidden">
@@ -1006,13 +977,33 @@ const App: React.FC = () => {
                                 <section className="flex-1 overflow-y-auto custom-scrollbar p-8">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         {appleMusicTracks.map(track => (
-                                            <div key={track.id} className="bg-gray-950/40 p-4 rounded-3xl border border-gray-800 flex justify-between items-center group hover:border-apple-red/30 transition-all"><div className="flex items-center gap-4 min-w-0">{track.attributes.artwork && <img src={track.attributes.artwork.url.replace('{w}', '60').replace('{h}', '60')} className="w-12 h-12 rounded-2xl shadow-xl" alt="art"/><div className="min-w-0"><p className="text-[11px] font-black text-white leading-tight truncate">{track.attributes.name}</p><p className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{track.attributes.artistName}</p></div>}</div><button onClick={() => { addAppleMusicTrack(track); setIsMusicBrowserOpen(false); }} className="bg-apple-red text-white p-3 rounded-2xl hover:scale-110 active:scale-90 transition-all shadow-xl opacity-0 group-hover:opacity-100"><PlusIcon className="w-5 h-5"/></button></div>
+                                            <div key={track.id} className="bg-gray-950/40 p-4 rounded-3xl border border-gray-800 flex justify-between items-center group hover:border-apple-red/30 transition-all">
+                                                <div className="flex items-center gap-4 min-w-0">
+                                                    {track.attributes.artwork && (
+                                                        <img 
+                                                            src={track.attributes.artwork.url.replace('{w}', '60').replace('{h}', '60')} 
+                                                            className="w-12 h-12 rounded-2xl shadow-xl" 
+                                                            alt="art"
+                                                        />
+                                                    )}
+                                                    <div className="min-w-0">
+                                                        <p className="text-[11px] font-black text-white leading-tight truncate">{track.attributes.name}</p>
+                                                        <p className="text-[9px] text-gray-500 font-bold uppercase mt-1 truncate">{track.attributes.artistName}</p>
+                                                    </div>
+                                                </div>
+                                                <button 
+                                                    onClick={() => { addAppleMusicTrack(track); setIsMusicBrowserOpen(false); }} 
+                                                    className="bg-apple-red text-white p-3 rounded-2xl hover:scale-110 active:scale-90 transition-all shadow-xl opacity-0 group-hover:opacity-100"
+                                                >
+                                                    <PlusIcon className="w-5 h-5"/>
+                                                </button>
+                                            </div>
                                         ))}
                                     </div>
                                 </section>
                             </div>
                         )}
-                        <footer className="p-4 bg-black/40 border-t border-white/5 text-center"><p className="text-[8px] text-gray-600 font-black uppercase tracking-[0.3em]">{isDemoMode ? 'DEMO MODE - No Real Apple ID Required' : 'Requires active Apple Music Subscription'}</p></footer>
+                        <footer className="p-4 bg-black/40 border-t border-white/5 text-center"><p className="text-[8px] text-gray-600 font-black uppercase tracking-[0.3em]">{isDemoMode ? 'DEMO MODE' : 'Active Subscription Required'}</p></footer>
                     </div>
                 </div>
             )}
@@ -1024,11 +1015,11 @@ const App: React.FC = () => {
                         <div className="bg-gray-950/50 rounded-3xl p-6 border border-gray-800/50 shadow-2xl relative">
                             <div className="space-y-6 mt-4">
                                 <div className="flex gap-4 group">
-                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">Track 1: Visuals</div>
+                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">Visuals</div>
                                     <div className="flex-1 h-20 bg-gray-950/40 rounded-2xl border border-gray-800/50 flex relative overflow-x-auto custom-scrollbar">{mediaWithTimestamps.map((m, idx) => <div key={m.id} className="h-full border-r border-gray-800 relative transition-all bg-brand-purple/10" style={{ width: `${(m.timelineEnd - m.timelineStart) * 20}px`, minWidth: '40px' }}><div className="absolute inset-0 flex flex-col items-center justify-center p-1"><span className="text-[8px] font-black text-white/40">{idx+1}</span></div></div>)}</div>
                                 </div>
                                 <div className="flex gap-4">
-                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">Track 2: Audio</div>
+                                    <div className="w-40 shrink-0 bg-gray-900 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">Audio</div>
                                     <div className="flex-1 min-h-[160px] bg-gray-950/40 rounded-2xl border border-gray-800/50 p-4 space-y-3 relative overflow-x-auto custom-scrollbar">
                                         {audioFiles.map((a, idx) => (
                                             <div key={a.id} className="relative group/audio">
