@@ -49,13 +49,14 @@ const MOCK_TRACKS = [
 ];
 
 // --- IMAGE COMPRESSION UTILITY ---
+// Targeted at 640px to ensure 20 images fit comfortably under 1MB Firestore limit
 const compressImage = (base64Str: string): Promise<string> => {
     return new Promise((resolve) => {
         const img = new Image();
         img.src = `data:image/jpeg;base64,${base64Str}`;
         img.onload = () => {
             const canvas = document.createElement('canvas');
-            const MAX_WIDTH = 720; 
+            const MAX_WIDTH = 640; 
             let width = img.width;
             let height = img.height;
             if (width > MAX_WIDTH) {
@@ -66,8 +67,8 @@ const compressImage = (base64Str: string): Promise<string> => {
             canvas.height = height;
             const ctx = canvas.getContext('2d');
             ctx?.drawImage(img, 0, 0, width, height);
-            // 0.4 quality keeps 20 images comfortably under the 1MB Firestore limit
-            resolve(canvas.toDataURL('image/jpeg', 0.4).split(',')[1]);
+            // 0.3 quality is safe for 1MB Firestore limit with 20 photos
+            resolve(canvas.toDataURL('image/jpeg', 0.3).split(',')[1]);
         };
         img.onerror = () => resolve(base64Str);
     });
@@ -143,6 +144,7 @@ const TheaterMedia: React.FC<{
     slideStyle: string;
     showCaptions: boolean;
 }> = ({ media, isVisible, slideStyle, showCaptions }) => {
+    // Unique key triggers animation on change
     const animationClass = isVisible ? `animate-${slideStyle}` : 'opacity-0 pointer-events-none';
     
     return (
@@ -205,8 +207,8 @@ const HelpModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen,
             <div className="bg-gray-900 border border-gray-800 max-w-2xl w-full rounded-[2.5rem] p-10 overflow-y-auto max-h-[85vh] shadow-2xl">
                 <div className="flex justify-between items-start mb-8">
                     <div>
-                        <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Build Guide & Safety</h2>
-                        <p className="text-xs text-brand-purple font-black uppercase tracking-widest mt-1">Getting Started</p>
+                        <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Guide & Limitations</h2>
+                        <p className="text-xs text-brand-purple font-black uppercase tracking-widest mt-1">Cloud Syncing Explained</p>
                     </div>
                     <button onClick={onClose} className="w-10 h-10 bg-gray-800 hover:bg-gray-700 text-white rounded-full flex items-center justify-center transition-all">✕</button>
                 </div>
@@ -215,28 +217,26 @@ const HelpModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen,
                     <section>
                         <h4 className="text-white font-bold uppercase text-xs mb-3 tracking-widest">How to Use the App</h4>
                         <ol className="list-decimal list-inside space-y-2">
-                            <li><b>Step 1:</b> Upload up to 20 photos or short clips. Photos are auto-compressed to ensure they save to your cloud library.</li>
-                            <li><b>Step 2:</b> Connect Apple Music or use Simulated tracks to set the mood.</li>
-                            <li><b>Step 3:</b> Use the Studio tab to precisely time when each song starts.</li>
-                            <li><b>Step 4:</b> Enable AI Smart Captions for poetic storytelling.</li>
-                            <li><b>Step 5:</b> Hit "Save" to keep your project in your personal cloud collection.</li>
+                            <li><b>Photos:</b> Add up to 20 images. These are auto-compressed to ensure they fit in your cloud library.</li>
+                            <li><b>Videos:</b> Short clips can be used, but high-quality videos may exceed Firestore's 1MB limit. If a video won't save, try a shorter clip.</li>
+                            <li><b>Audio Tracks:</b> Connect Apple Music for full library sync. Local MP3s are session-based and won't persist across devices.</li>
+                            <li><b>AI Smart Captions:</b> Let Gemini analyze each slide to create evocative poetry.</li>
                         </ol>
                     </section>
 
                     <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl">
                         <h4 className="text-red-400 font-bold uppercase text-[10px] mb-2 tracking-widest flex items-center gap-2">
-                            <span>⚠️</span> Prohibited Use & Disclaimer
+                            <span>⚠️</span> Storage Limitations
                         </h4>
                         <ul className="list-disc list-inside space-y-1 text-red-400/80 text-[11px] font-medium">
-                            <li><b>NOT for high-res backup:</b> Images are compressed for performance. Always keep your originals.</li>
-                            <li><b>Video Storage:</b> Firestore documents have a 1MB limit. High-res videos cannot be saved to the cloud; use short clips only.</li>
-                            <li><b>Copyright:</b> Respect music and image licenses. This app is for personal, nostalgic creation.</li>
-                            <li><b>Not for Critical Use:</b> Do not use for emergency or medical signaling.</li>
+                            <li><b>Not a Backup:</b> We use heavy compression. Always keep your original high-res files.</li>
+                            <li><b>Firestore Limits:</b> Documents are limited to 1MB. This is why we compress images aggressively and limit video storage.</li>
+                            <li><b>Music Sync:</b> Apple Music tracks sync by ID, but recipients must have their own Apple Music access to hear the real songs.</li>
                         </ul>
                     </div>
                 </div>
                 
-                <button onClick={onClose} className="w-full mt-10 bg-brand-purple py-4 rounded-2xl font-black uppercase text-xs text-white shadow-xl shadow-brand-purple/20 hover:scale-[1.02] active:scale-95 transition-all">Return to Editor</button>
+                <button onClick={onClose} className="w-full mt-10 bg-brand-purple py-4 rounded-2xl font-black uppercase text-xs text-white shadow-xl shadow-brand-purple/20 hover:scale-[1.02] active:scale-95 transition-all">Start Building</button>
             </div>
         </div>
     );
@@ -274,6 +274,7 @@ const App: React.FC = () => {
 
     const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.API_KEY }), []);
 
+    // Restoration Utility: Converts base64 strings back to viewable URLs
     const reconstructMedia = useCallback((media: MediaFile[]) => {
         return (media || []).map(m => {
             if (m.base64 && (!m.previewUrl || m.previewUrl.startsWith('blob:'))) {
@@ -304,7 +305,7 @@ const App: React.FC = () => {
                 setIsPlaying(true);
             }
         } catch (e) {
-            setError("Failed to load collection.");
+            setError("Could not load collection.");
         }
     };
 
@@ -333,7 +334,7 @@ const App: React.FC = () => {
                 .then(token => {
                     const mkInit = () => {
                         if (!(window as any).MusicKit) return false;
-                        (window as any).MusicKit.configure({ developerToken: token, app: { name: 'Muziq Slides', build: '1.1.0' } });
+                        (window as any).MusicKit.configure({ developerToken: token, app: { name: 'Muziq Slides', build: '1.1.1' } });
                         return true;
                     };
                     if (!mkInit()) {
@@ -348,13 +349,14 @@ const App: React.FC = () => {
         }
     }, []);
 
+    // Sync Library when User Logs In
     useEffect(() => {
         if (!user) { setOwnedSlideshows([]); return; }
         const q = query(collection(db, "slideshows"), where("userId", "==", user.uid));
         return onSnapshot(q, (snap) => {
             const projects = snap.docs.map(d => {
                 const data = d.data() as SavedSlideshow;
-                // RECONSTRUCT: Critical for showing images in the "Saved Collections" cards
+                // Crucial: Reconstruct thumbnails immediately for the card view
                 const media = reconstructMedia(data.media);
                 return { id: d.id, ...data, media } as SavedSlideshow;
             });
@@ -466,7 +468,7 @@ const App: React.FC = () => {
             }));
             setMediaFiles(updatedMedia);
         } catch (e) {
-            setError("Smart Captions failed. Check your Gemini API key.");
+            setError("Smart Captions failed. Check API key.");
         } finally {
             setIsProcessingCaptions(false);
         }
@@ -474,16 +476,18 @@ const App: React.FC = () => {
 
     const saveSlideshow = async () => {
         if (!user || !Array.isArray(mediaFiles) || mediaFiles.length === 0) { setError("Add content first."); return; }
+        
+        // Strict Size Check (950KB safe buffer)
         const totalSize = mediaFiles.reduce((acc, curr) => acc + (curr.base64?.length || 0), 0);
         if (totalSize > 950000) { 
-            setError("Project too large for cloud sync (1MB Firestore limit). Try using fewer images."); 
+            setError("Collection data too large for cloud sync (1MB limit). Using fewer photos or shorter video clips usually fixes this."); 
             return; 
         }
 
         const projectData = {
             userId: user.uid,
             name: slideshowName || `Slideshow ${new Date().toLocaleDateString()}`,
-            media: mediaFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), 
+            media: mediaFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), // Wipe blobs, keep base64
             audio: audioFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), 
             settings: settings,
             timestamp: serverTimestamp()
@@ -495,17 +499,17 @@ const App: React.FC = () => {
             } else { 
                 const docRef = await addDoc(collection(db, "slideshows"), projectData); 
                 setCurrentProjectId(docRef.id); 
-                alert("Saved to cloud library!"); 
+                alert("Collection saved to your library!"); 
             }
         } catch (e: any) { 
-            setError("Save Failed: " + (e.message || "Unknown Error")); 
+            setError("Cloud Save Error: " + (e.message || "Unknown error")); 
         }
     };
 
     const shareSlideshow = (id: string) => { const url = `${window.location.origin}?id=${id}`; navigator.clipboard.writeText(url); alert("Share link copied!"); };
 
     const deleteSlideshow = async (id: string) => {
-        if (confirm("Permanently delete this project?")) {
+        if (confirm("Delete this project permanently?")) {
             await deleteDoc(doc(db, "slideshows", id));
             if (currentProjectId === id) { setCurrentProjectId(null); setMediaFiles([]); setAudioFiles([]); setSlideshowName(''); }
         }
@@ -518,10 +522,10 @@ const App: React.FC = () => {
     const handleAuthorizeApple = async () => {
         try {
             const music = (window as any).MusicKit?.getInstance();
-            if (!music) { setError("Apple Music kit error."); return; }
+            if (!music) { setError("Apple Music loading..."); return; }
             await music.authorize();
             setAppleMusicAuthorized(music.isAuthorized);
-        } catch (err) { setError("Apple Music auth failed."); setIsSimulationMode(true); }
+        } catch (err) { setError("Authorization failed."); setIsSimulationMode(true); }
     };
 
     const addMockTrack = (track: typeof MOCK_TRACKS[0]) => {
@@ -561,30 +565,30 @@ const App: React.FC = () => {
             {!user ? (
                 <main>
                     <section className="text-center pt-32 pb-24 px-4 bg-gradient-to-b from-brand-light to-white">
-                        <h2 className="text-7xl font-black mb-8 tracking-tighter text-brand-dark leading-none">Memories,<br/>In <span className="text-brand-purple underline decoration-apple-red decoration-8 underline-offset-8">Perfect Sync</span></h2>
+                        <h2 className="text-7xl font-black mb-8 tracking-tighter text-brand-dark leading-none">Your Life,<br/>In <span className="text-brand-purple underline decoration-apple-red decoration-8 underline-offset-8">Rhythm</span></h2>
                         <p className="text-gray-500 mb-12 max-w-xl mx-auto text-xl leading-relaxed">The only cinematic slideshow builder perfectly synced with Apple Music.</p>
                         <div className="flex flex-col sm:flex-row gap-6 justify-center">
                             <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="bg-brand-purple text-white px-12 py-5 rounded-full font-bold shadow-2xl hover:scale-105 transition-transform text-lg">Sign In with Google</button>
-                            <a href="#guide" className="px-12 py-5 rounded-full font-bold text-brand-dark border-2 border-brand-dark/10 hover:bg-brand-dark/5 transition-colors text-lg">Read the Guide</a>
+                            <a href="#guide" className="px-12 py-5 rounded-full font-bold text-brand-dark border-2 border-brand-dark/10 hover:bg-brand-dark/5 transition-colors text-lg">See How it Works</a>
                         </div>
                     </section>
 
                     <section id="guide" className="py-24 px-4 bg-white border-y border-gray-100">
                         <div className="max-w-4xl mx-auto">
-                            <h3 className="text-4xl font-black mb-12 text-brand-dark uppercase tracking-tighter text-center">User Guide & Safety</h3>
+                            <h3 className="text-4xl font-black mb-12 text-brand-dark uppercase tracking-tighter text-center">User Guide & Feature Set</h3>
                             <div className="grid md:grid-cols-2 gap-12 mb-16">
                                 <div className="space-y-6">
                                     <div className="flex gap-4">
                                         <div className="w-10 h-10 bg-brand-purple rounded-2xl flex items-center justify-center text-white font-black flex-shrink-0 shadow-lg shadow-brand-purple/20">1</div>
                                         <div>
-                                            <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-2">Create Your Collection</h4>
-                                            <p className="text-gray-500 text-sm leading-relaxed">Upload up to 20 media files. Images are auto-compressed for cloud sync. Use short video clips for the best performance.</p>
+                                            <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-2">Upload Collection</h4>
+                                            <p className="text-gray-500 text-sm leading-relaxed">Add up to 20 media files. Images are auto-compressed for cloud sync. Use short video clips for best results.</p>
                                         </div>
                                     </div>
                                     <div className="flex gap-4">
                                         <div className="w-10 h-10 bg-brand-purple rounded-2xl flex items-center justify-center text-white font-black flex-shrink-0 shadow-lg shadow-brand-purple/20">2</div>
                                         <div>
-                                            <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-2">Sync the Vibe</h4>
+                                            <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-2">Sync the Soundtrack</h4>
                                             <p className="text-gray-500 text-sm leading-relaxed">Connect Apple Music or use curated simulated tracks. Precisely time audio in the Studio Timeline.</p>
                                         </div>
                                     </div>
@@ -601,10 +605,10 @@ const App: React.FC = () => {
                                     <div className="space-y-4 text-xs text-gray-500 font-medium leading-relaxed">
                                         <p><b>Muziq Slides</b> is a creative tool for personal storytelling. It is <u>not</u> for:</p>
                                         <ul className="list-disc list-inside space-y-2">
-                                            <li><b>High-Res Storage:</b> Media is compressed for performance. Do not delete your local originals.</li>
-                                            <li><b>Professional Post-Production:</b> For 4K cinematic editing, use desktop software.</li>
-                                            <li><b>Medical/Critical Signals:</b> Not for real-time safety or medical information.</li>
-                                            <li><b>Public Redistribution:</b> Apple Music integration respects personal subscription limits.</li>
+                                            <li><b>High-Res Storage:</b> Media is compressed for performance. Always keep original local files.</li>
+                                            <li><b>Professional Video Work:</b> Not designed for broadcast-grade 4K post-production editing.</li>
+                                            <li><b>Critical Communications:</b> Not for real-time safety, medical, or emergency information.</li>
+                                            <li><b>Music Distribution:</b> Apple Music integration respects personal subscription limits.</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -722,7 +726,7 @@ const App: React.FC = () => {
                                             <input type="file" accept="audio/*" onChange={handleAudioUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
                                         </div>
                                         <button onClick={() => setIsMusicBrowserOpen(true)} className="w-full bg-apple-red/10 py-4 rounded-2xl text-[10px] font-black uppercase text-apple-red border border-apple-red/30 flex items-center justify-center gap-2 hover:bg-apple-red hover:text-white transition-all">
-                                            Library
+                                            MusicKit
                                         </button>
                                     </div>
                                     <div className="mt-4 space-y-2">
@@ -730,7 +734,7 @@ const App: React.FC = () => {
                                             <div key={a.id} className={`bg-gray-900/50 border p-3 rounded-2xl text-[10px] flex justify-between items-center ${a.missing ? 'border-red-500/50' : 'border-gray-700'}`}>
                                                 <div className="truncate pr-4 flex flex-col gap-0.5">
                                                     <span className="text-gray-500 block uppercase tracking-tighter text-[8px] font-black">{a.source}</span>
-                                                    <span className={`font-bold ${a.missing ? 'text-red-400' : ''}`}>{a.missing ? '⚠️ Re-upload Required' : a.name}</span>
+                                                    <span className={`font-bold ${a.missing ? 'text-red-400' : ''}`}>{a.missing ? '⚠️ Re-upload Local File' : a.name}</span>
                                                 </div>
                                                 <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-gray-600 hover:text-red-500 transition-colors">🗑️</button>
                                             </div>
@@ -763,14 +767,14 @@ const App: React.FC = () => {
                                         <input 
                                             value={slideshowName} 
                                             onChange={(e) => setSlideshowName(e.target.value)} 
-                                            placeholder="Collection Name..."
+                                            placeholder="Collection Title..."
                                             className="bg-transparent text-3xl font-black text-white outline-none placeholder:text-gray-800 w-full"
                                         />
                                         <div className="flex gap-2">
                                             <button onClick={saveSlideshow} className="bg-gray-800 text-white px-8 py-3 rounded-full text-xs font-bold border border-gray-700 hover:bg-gray-700 transition-colors">
                                                 {currentProjectId ? 'Update' : 'Save'}
                                             </button>
-                                            <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl shadow-brand-purple/30 hover:bg-brand-purple/80 transition-all">Preview Fullscreen</button>
+                                            <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl shadow-brand-purple/30 hover:bg-brand-purple/80 transition-all">Preview All</button>
                                         </div>
                                     </div>
                                     
@@ -778,7 +782,7 @@ const App: React.FC = () => {
                                         {mediaFiles.length > 0 ? (
                                             <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover opacity-20 blur-sm" alt="" />
                                         ) : (
-                                            <p className="text-gray-700 text-xs uppercase font-black tracking-widest">Collection Empty</p>
+                                            <p className="text-gray-700 text-xs uppercase font-black tracking-widest">Workspace Empty</p>
                                         )}
                                         <div className="absolute inset-0 flex items-center justify-center">
                                             <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-24 h-24 bg-brand-purple rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-transform active:scale-95 group-hover:bg-brand-purple/80">
@@ -789,7 +793,7 @@ const App: React.FC = () => {
                                 </section>
 
                                 <section>
-                                    <h3 className="text-xs font-black uppercase mb-8 text-gray-600 tracking-widest">Saved Collections</h3>
+                                    <h3 className="text-xs font-black uppercase mb-8 text-gray-600 tracking-widest">Your Cloud Collections</h3>
                                     <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-6">
                                         {ownedSlideshows.map(ss => (
                                             <div key={ss.id} className="bg-gray-800/20 border border-gray-800 p-6 rounded-[2.5rem] group hover:border-brand-purple/40 transition-all">
@@ -821,8 +825,8 @@ const App: React.FC = () => {
                     <div className="bg-gray-950 w-full max-w-2xl h-[85vh] rounded-[3.5rem] border border-gray-800 flex flex-col overflow-hidden shadow-2xl">
                         <header className="p-10 border-b border-gray-900 flex justify-between items-center">
                             <div>
-                                <h2 className="font-black text-white text-2xl uppercase tracking-tighter">Music Browser</h2>
-                                {isSimulationMode && <span className="text-[8px] bg-yellow-500/20 text-yellow-500 px-2 py-0.5 rounded-full uppercase tracking-widest">Simulation Mode Active</span>}
+                                <h2 className="font-black text-white text-2xl uppercase tracking-tighter">Soundtrack Browser</h2>
+                                {isSimulationMode && <span className="text-[8px] bg-yellow-500/20 text-yellow-500 px-2 py-0.5 rounded-full uppercase tracking-widest">Simulated Mode Active</span>}
                             </div>
                             <button onClick={() => setIsMusicBrowserOpen(false)} className="w-12 h-12 bg-gray-900 rounded-full flex items-center justify-center hover:bg-gray-800 text-gray-400 transition-all">✕</button>
                         </header>
@@ -832,15 +836,15 @@ const App: React.FC = () => {
                                 <div className="w-24 h-24 bg-apple-red rounded-[2rem] flex items-center justify-center mb-10 shadow-2xl shadow-apple-red/40 animate-pulse">
                                     <svg className="w-12 h-12 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14.5v-9l6 4.5-6 4.5z"/></svg>
                                 </div>
-                                <h3 className="text-2xl font-black mb-4 uppercase tracking-tighter">Authorize Apple Music</h3>
+                                <h3 className="text-2xl font-black mb-4 uppercase tracking-tighter">Connect Apple Music</h3>
                                 <div className="flex flex-col gap-4">
-                                    <button onClick={handleAuthorizeApple} className="bg-apple-red text-white py-5 px-16 rounded-full font-black uppercase text-xs shadow-2xl shadow-apple-red/30 active:scale-95 hover:scale-105 transition-all">Connect Music Account</button>
-                                    <button onClick={() => setIsSimulationMode(true)} className="text-gray-500 hover:text-white transition-colors text-xs uppercase font-black tracking-widest">Or Browse Simulated Catalog</button>
+                                    <button onClick={handleAuthorizeApple} className="bg-apple-red text-white py-5 px-16 rounded-full font-black uppercase text-xs shadow-2xl shadow-apple-red/30 active:scale-95 hover:scale-105 transition-all">Sign In with Apple Music</button>
+                                    <button onClick={() => setIsSimulationMode(true)} className="text-gray-500 hover:text-white transition-colors text-xs uppercase font-black tracking-widest">Or Use Simulated Library</button>
                                 </div>
                             </div>
                         ) : (
                             <div className="flex-1 overflow-y-auto p-8 space-y-4">
-                                <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-4">{isSimulationMode ? 'Simulated Catalog' : 'Your Personal Library'}</h4>
+                                <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-4">{isSimulationMode ? 'Vibe Selection' : 'Your Music Library'}</h4>
                                 {isSimulationMode ? (
                                     <div className="grid gap-3">
                                         {MOCK_TRACKS.map(track => (
@@ -849,7 +853,7 @@ const App: React.FC = () => {
                                                     <div className="w-10 h-10 bg-gray-800 rounded-xl flex items-center justify-center text-xl group-hover:scale-110 transition-transform">🎵</div>
                                                     <div>
                                                         <p className="font-bold text-sm text-white">{track.name}</p>
-                                                        <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Simulation Track • {Math.floor(track.duration / 60)}:{String(track.duration % 60).padStart(2, '0')}</p>
+                                                        <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Simulated • {Math.floor(track.duration / 60)}:{String(track.duration % 60).padStart(2, '0')}</p>
                                                     </div>
                                                 </div>
                                                 <button className="bg-brand-purple/10 text-brand-purple text-[10px] font-black uppercase px-4 py-2 rounded-xl group-hover:bg-brand-purple group-hover:text-white transition-all">Add Track</button>
