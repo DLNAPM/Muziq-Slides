@@ -48,6 +48,31 @@ const MOCK_TRACKS = [
     { id: 'sim-4', name: 'Cinematic Piano Dreams', duration: 300, source: 'apple-music' as const },
 ];
 
+// --- IMAGE COMPRESSION UTILITY ---
+const compressImage = (base64Str: string): Promise<string> => {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.src = `data:image/jpeg;base64,${base64Str}`;
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 1200; // Optimal for web slideshows
+            let width = img.width;
+            let height = img.height;
+            if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+            }
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0, width, height);
+            // 0.6 quality keeps most photos around 50-100KB, well within Firestore's 1MB limit for 20 photos
+            resolve(canvas.toDataURL('image/jpeg', 0.6).split(',')[1]);
+        };
+        img.onerror = () => resolve(base64Str);
+    });
+};
+
 // --- JWT UTILITY FOR APPLE MUSIC ---
 async function generateAppleMusicJWT(keyId: string, teamId: string, privateKeyPEM: string): Promise<string> {
     const header = { alg: 'ES256', kid: keyId };
@@ -277,7 +302,7 @@ const App: React.FC = () => {
                         if (!(window as any).MusicKit) return false;
                         (window as any).MusicKit.configure({
                             developerToken: token,
-                            app: { name: 'Muziq Slides', build: '1.0.5' }
+                            app: { name: 'Muziq Slides', build: '1.0.6' }
                         });
                         return true;
                     };
@@ -384,15 +409,17 @@ const App: React.FC = () => {
             let base64 = '';
             if (f.type.startsWith('image')) {
                 const reader = new FileReader();
-                base64 = await new Promise((resolve) => {
+                const rawBase64: string = await new Promise((resolve) => {
                     reader.onload = () => resolve((reader.result as string).split(',')[1]);
                     reader.readAsDataURL(f);
                 });
+                // COMPRESS: Shrink the image so it fits in Firestore
+                base64 = await compressImage(rawBase64);
             }
             return {
                 id: Math.random().toString(36).substr(2, 9),
                 type: f.type.startsWith('image') ? 'image' : 'video',
-                previewUrl,
+                previewUrl: f.type.startsWith('image') ? `data:image/jpeg;base64,${base64}` : previewUrl,
                 caption: '',
                 base64
             };
@@ -426,16 +453,19 @@ const App: React.FC = () => {
                 if (m.type === 'video' || !m.base64) return m;
                 const response = await ai.models.generateContent({
                     model: 'gemini-3-flash-preview',
-                    contents: [
-                        { text: "Analyze this photo and write a cinematic, one-sentence nostalgic caption." },
+                    contents: {
+                      parts: [
+                        { text: "Analyze this photo and write a cinematic, one-sentence nostalgic caption. Keep it evocative and short." },
                         { inlineData: { mimeType: 'image/jpeg', data: m.base64 } }
-                    ]
+                      ]
+                    }
                 });
                 return { ...m, caption: response.text || '' };
             }));
             setMediaFiles(updatedMedia);
         } catch (e) {
-            setError("Smart Captions failed. Check API key.");
+            console.error("Smart Captions Error:", e);
+            setError("Smart Captions failed. Check your API key.");
         } finally {
             setIsProcessingCaptions(false);
         }
@@ -443,20 +473,21 @@ const App: React.FC = () => {
 
     const saveSlideshow = async () => {
         if (!user || !Array.isArray(mediaFiles) || mediaFiles.length === 0) {
-            setError("Add photos before saving!");
+            setError("Add content before saving.");
             return;
         }
         
+        // Final sanity check on size
         const totalSize = mediaFiles.reduce((acc, curr) => acc + (curr.base64?.length || 0), 0);
-        if (totalSize > 800000) {
-            setError("Project data is too large for Firestore! Try fewer or smaller photos.");
+        if (totalSize > 950000) {
+            setError("Project still too large for cloud storage (Firestore limit). Please use fewer images.");
             return;
         }
 
         const projectData = {
             userId: user.uid,
             name: slideshowName || `Slideshow ${new Date().toLocaleDateString()}`,
-            media: mediaFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), 
+            media: mediaFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), // Don't save transient blob URLs
             audio: audioFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), 
             settings: settings,
             timestamp: serverTimestamp()
@@ -472,18 +503,18 @@ const App: React.FC = () => {
                 alert("New Collection Saved!");
             }
         } catch (e: any) {
-            setError("Save Error: " + e.message);
+            setError("Cloud Save Failed: " + e.message);
         }
     };
 
     const shareSlideshow = (id: string) => {
         const url = `${window.location.origin}?id=${id}`;
         navigator.clipboard.writeText(url);
-        alert("Link copied to clipboard!");
+        alert("Share link copied!");
     };
 
     const deleteSlideshow = async (id: string) => {
-        if (confirm("Delete permanently?")) {
+        if (confirm("Permanently delete this project?")) {
             await deleteDoc(doc(db, "slideshows", id));
             if (currentProjectId === id) {
                 setCurrentProjectId(null);
@@ -502,7 +533,7 @@ const App: React.FC = () => {
         try {
             const music = (window as any).MusicKit?.getInstance();
             if (!music) {
-                setError("Apple Music not initialized yet.");
+                setError("Apple Music not loaded. Try simulated mode.");
                 return;
             }
             await music.authorize();
@@ -556,10 +587,10 @@ const App: React.FC = () => {
                     {/* HERO SECTION */}
                     <section className="text-center pt-32 pb-24 px-4 bg-gradient-to-b from-brand-light to-white">
                         <h2 className="text-7xl font-black mb-8 tracking-tighter text-brand-dark leading-none">Your Memories,<br/>In <span className="text-brand-purple underline decoration-apple-red decoration-8 underline-offset-8">Perfect Sync</span></h2>
-                        <p className="text-gray-500 mb-12 max-w-xl mx-auto text-xl leading-relaxed">Create cinematic slideshows with Apple Music. Simulate library access or connect your real account.</p>
+                        <p className="text-gray-500 mb-12 max-w-xl mx-auto text-xl leading-relaxed">The only cinematic slideshow builder with full multi-track audio and AI storytelling.</p>
                         <div className="flex flex-col sm:flex-row gap-6 justify-center">
-                            <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="bg-brand-purple text-white px-12 py-5 rounded-full font-bold shadow-2xl hover:scale-105 transition-transform text-lg">Start Building</button>
-                            <a href="#about" className="px-12 py-5 rounded-full font-bold text-brand-dark border-2 border-brand-dark/10 hover:bg-brand-dark/5 transition-colors text-lg">Learn More</a>
+                            <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="bg-brand-purple text-white px-12 py-5 rounded-full font-bold shadow-2xl hover:scale-105 transition-transform text-lg">Launch Editor</button>
+                            <a href="#about" className="px-12 py-5 rounded-full font-bold text-brand-dark border-2 border-brand-dark/10 hover:bg-brand-dark/5 transition-colors text-lg">Our Philosophy</a>
                         </div>
                     </section>
 
@@ -573,10 +604,10 @@ const App: React.FC = () => {
                                 Whether you are reliving a family vacation or presenting a portfolio, our studio-grade timeline and AI-powered captioning turn simple photos into an immersive digital gallery.
                             </p>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <div className="p-6 bg-gray-50 rounded-3xl"><p className="text-3xl font-black text-brand-purple">20+</p><p className="text-[10px] uppercase font-bold text-gray-400 tracking-widest mt-2">Media Limit</p></div>
-                                <div className="p-6 bg-gray-50 rounded-3xl"><p className="text-3xl font-black text-brand-purple">100M+</p><p className="text-[10px] uppercase font-bold text-gray-400 tracking-widest mt-2">Music Catalog</p></div>
-                                <div className="p-6 bg-gray-50 rounded-3xl"><p className="text-3xl font-black text-brand-purple">AI</p><p className="text-[10px] uppercase font-bold text-gray-400 tracking-widest mt-2">Smart Captions</p></div>
-                                <div className="p-6 bg-gray-50 rounded-3xl"><p className="text-3xl font-black text-brand-purple">4K</p><p className="text-[10px] uppercase font-bold text-gray-400 tracking-widest mt-2">Visual Fidelity</p></div>
+                                <div className="p-6 bg-gray-50 rounded-3xl group hover:bg-brand-purple transition-colors"><p className="text-3xl font-black text-brand-purple group-hover:text-white">20+</p><p className="text-[10px] uppercase font-bold text-gray-400 group-hover:text-white/60 tracking-widest mt-2">Media Limit</p></div>
+                                <div className="p-6 bg-gray-50 rounded-3xl group hover:bg-brand-purple transition-colors"><p className="text-3xl font-black text-brand-purple group-hover:text-white">100M+</p><p className="text-[10px] uppercase font-bold text-gray-400 group-hover:text-white/60 tracking-widest mt-2">Music Catalog</p></div>
+                                <div className="p-6 bg-gray-50 rounded-3xl group hover:bg-brand-purple transition-colors"><p className="text-3xl font-black text-brand-purple group-hover:text-white">AI</p><p className="text-[10px] uppercase font-bold text-gray-400 group-hover:text-white/60 tracking-widest mt-2">Smart Captions</p></div>
+                                <div className="p-6 bg-gray-50 rounded-3xl group hover:bg-brand-purple transition-colors"><p className="text-3xl font-black text-brand-purple group-hover:text-white">HD</p><p className="text-[10px] uppercase font-bold text-gray-400 group-hover:text-white/60 tracking-widest mt-2">Visual Quality</p></div>
                             </div>
                         </div>
                     </section>
@@ -591,7 +622,7 @@ const App: React.FC = () => {
                                 { title: "AI Smart Captions", desc: "Our Gemini-powered AI analyzes your photos to generate poetic, nostalgic descriptions automatically.", icon: "✨" },
                                 { title: "Cinematic Styles", desc: "Choose from professional Ken Burns effects, smooth fades, and dynamic zooms for a premium look.", icon: "🎬" },
                                 { title: "Cloud Collections", desc: "Save and update your projects securely in the cloud. Access your memories from any device.", icon: "☁️" },
-                                { title: "One-Tap Sharing", desc: "Share your curated collections with friends and family using a single, high-speed preview link.", icon: "🔗" }
+                                { title: "Global Sharing", desc: "Share your curated collections with friends and family using a single, high-speed preview link.", icon: "🔗" }
                             ].map((f, i) => (
                                 <div key={i} className="p-10 rounded-[3rem] bg-gray-50 border border-gray-100 hover:shadow-2xl transition-all hover:-translate-y-2 group">
                                     <div className="text-5xl mb-6 group-hover:scale-110 transition-transform inline-block">{f.icon}</div>
@@ -724,6 +755,24 @@ const App: React.FC = () => {
                                                 </div>
                                                 <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-gray-600 hover:text-red-500 transition-colors">🗑️</button>
                                             </div>
+                                        ))}
+                                    </div>
+                                </section>
+
+                                <section className="bg-gray-800/30 p-6 rounded-3xl border border-gray-700/50">
+                                    <h3 className="text-sm font-black uppercase mb-4 text-brand-purple tracking-widest flex items-center gap-2">
+                                        <span className="bg-brand-purple text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px]">3</span>
+                                        Transitions
+                                    </h3>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {['ken-burns', 'fade-in', 'slide-from-right', 'zoom-in'].map(styleId => (
+                                            <button 
+                                                key={styleId} 
+                                                onClick={() => setSettings(s => ({ ...s, slideStyle: styleId }))}
+                                                className={`py-3 px-4 rounded-xl text-[10px] font-bold border transition-all uppercase tracking-widest ${settings.slideStyle === styleId ? 'bg-brand-purple border-brand-purple text-white' : 'bg-gray-800 border-gray-700 text-gray-400'}`}
+                                            >
+                                                {styleId.replace(/-/g, ' ')}
+                                            </button>
                                         ))}
                                     </div>
                                 </section>
