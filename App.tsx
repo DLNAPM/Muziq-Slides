@@ -70,7 +70,7 @@ interface MediaFile {
   duration?: number;
   timelineStart?: number;
   timelineEnd?: number;
-  base64?: string; // For Gemini processing
+  base64?: string; 
 }
 
 interface AppStateAudio {
@@ -206,21 +206,34 @@ const App: React.FC = () => {
 
     const loadSharedSlideshow = async (id: string) => {
         const docRef = doc(db, "slideshows", id);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-            const data = docSnap.data() as SavedSlideshow;
-            loadProject(data);
-            setIsPlaying(true);
+        try {
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                const data = docSnap.data() as SavedSlideshow;
+                loadProject(data);
+                setIsPlaying(true);
+            }
+        } catch (e) {
+            setError("Failed to load shared slideshow.");
         }
     };
 
     const loadProject = (project: SavedSlideshow) => {
-        setMediaFiles(project.media);
-        setAudioFiles(project.audio);
-        setSettings(project.settings);
-        setSlideshowName(project.name);
+        if (!project) return;
+        
+        // RECONSTRUCT MEDIA: Blob URLs expire, so we must use base64 if available to restore previews
+        const restoredMedia = (Array.isArray(project.media) ? project.media : []).map(m => {
+            if (m.base64 && (!m.previewUrl || m.previewUrl.startsWith('blob:'))) {
+                return { ...m, previewUrl: `data:image/jpeg;base64,${m.base64}` };
+            }
+            return m;
+        });
+
+        setMediaFiles(restoredMedia);
+        setAudioFiles(Array.isArray(project.audio) ? project.audio : []);
+        setSettings(project.settings || { interval: 5, slideStyle: 'ken-burns', repeatSlideshow: false, showCaptions: true });
+        setSlideshowName(project.name || '');
         setElapsedTime(0);
-        // Scroll to workspace top
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
@@ -250,6 +263,7 @@ const App: React.FC = () => {
     }, [user]);
 
     const mediaWithTimestamps = useMemo(() => {
+        if (!Array.isArray(mediaFiles)) return [];
         let currentPos = 0;
         return mediaFiles.map(m => {
             const start = currentPos;
@@ -330,7 +344,7 @@ const App: React.FC = () => {
     };
 
     const generateSmartCaptions = async () => {
-        if (mediaFiles.length === 0) return;
+        if (!Array.isArray(mediaFiles) || mediaFiles.length === 0) return;
         setIsProcessingCaptions(true);
         try {
             const updatedMedia = await Promise.all(mediaFiles.map(async (m) => {
@@ -353,17 +367,21 @@ const App: React.FC = () => {
     };
 
     const saveSlideshow = async () => {
-        if (!user || mediaFiles.length === 0) return;
+        if (!user || !Array.isArray(mediaFiles) || mediaFiles.length === 0) return;
         const id = Math.random().toString(36).substr(2, 9);
-        await setDoc(doc(db, "slideshows", id), {
-            userId: user.uid,
-            name: slideshowName || `Slideshow ${new Date().toLocaleDateString()}`,
-            media: mediaFiles,
-            audio: audioFiles,
-            settings: settings,
-            timestamp: serverTimestamp()
-        });
-        alert("Slideshow saved successfully!");
+        try {
+            await setDoc(doc(db, "slideshows", id), {
+                userId: user.uid,
+                name: slideshowName || `Slideshow ${new Date().toLocaleDateString()}`,
+                media: mediaFiles,
+                audio: audioFiles,
+                settings: settings,
+                timestamp: serverTimestamp()
+            });
+            alert("Slideshow saved successfully!");
+        } catch (e) {
+            setError("Failed to save project.");
+        }
     };
 
     const shareSlideshow = (id: string) => {
@@ -446,7 +464,7 @@ const App: React.FC = () => {
                                     <p className="text-xs text-gray-400">Click to upload images or videos (Max 20)</p>
                                 </div>
                                 <div className="grid grid-cols-4 gap-2">
-                                    {mediaFiles.map((m, i) => (
+                                    {Array.isArray(mediaFiles) && mediaFiles.map((m, i) => (
                                         <div key={m.id} className="aspect-square bg-gray-900 rounded-lg overflow-hidden relative group">
                                             <img src={m.previewUrl} className="w-full h-full object-cover" alt="" />
                                             <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
@@ -455,11 +473,11 @@ const App: React.FC = () => {
                                         </div>
                                     ))}
                                 </div>
-                                {mediaFiles.length > 0 && (
+                                {Array.isArray(mediaFiles) && mediaFiles.length > 0 && (
                                     <button 
                                         onClick={generateSmartCaptions} 
                                         disabled={isProcessingCaptions}
-                                        className="w-full bg-brand-purple/20 text-brand-purple py-3 rounded-xl text-xs font-bold border border-brand-purple/30 flex items-center justify-center gap-2"
+                                        className="w-full bg-brand-purple/20 text-brand-purple py-3 rounded-xl text-xs font-bold border border-brand-purple/30 flex items-center justify-center gap-2 hover:bg-brand-purple/30 transition-colors"
                                     >
                                         {isProcessingCaptions ? <div className="w-3 h-3 border-2 border-brand-purple border-t-transparent rounded-full animate-spin"></div> : '✨'}
                                         {isProcessingCaptions ? 'Generating Captions...' : 'Generate Smart Captions'}
@@ -484,7 +502,7 @@ const App: React.FC = () => {
                                 </button>
                             </div>
                             <div className="mt-4 space-y-2">
-                                {audioFiles.map(a => (
+                                {Array.isArray(audioFiles) && audioFiles.map(a => (
                                     <div key={a.id} className="bg-gray-900/50 border border-gray-700 p-3 rounded-xl text-[10px] flex justify-between items-center">
                                         <div className="truncate pr-4">
                                             <span className="text-gray-400 block uppercase tracking-tighter text-[8px]">{a.source}</span>
@@ -535,13 +553,13 @@ const App: React.FC = () => {
                                     className="bg-transparent text-2xl font-black text-white outline-none placeholder:text-gray-700 w-full"
                                 />
                                 <div className="flex gap-2">
-                                    <button onClick={saveSlideshow} className="bg-gray-800 text-white px-6 py-2 rounded-full text-xs font-bold border border-gray-700">Save Project</button>
-                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-8 py-2 rounded-full text-xs font-bold shadow-xl shadow-brand-purple/20">Preview Live</button>
+                                    <button onClick={saveSlideshow} className="bg-gray-800 text-white px-6 py-2 rounded-full text-xs font-bold border border-gray-700 hover:bg-gray-700 transition-colors">Save Project</button>
+                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-8 py-2 rounded-full text-xs font-bold shadow-xl shadow-brand-purple/20 hover:bg-brand-purple/80 transition-all">Preview Live</button>
                                 </div>
                             </div>
                             
                             <div className="aspect-video bg-black rounded-3xl relative overflow-hidden flex items-center justify-center border border-gray-700/50 shadow-2xl">
-                                {mediaFiles.length > 0 ? (
+                                {Array.isArray(mediaFiles) && mediaFiles.length > 0 ? (
                                     <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover opacity-30 grayscale" alt="" />
                                 ) : (
                                     <div className="text-center">
@@ -550,7 +568,7 @@ const App: React.FC = () => {
                                     </div>
                                 )}
                                 <div className="absolute inset-0 flex items-center justify-center">
-                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-20 h-20 bg-brand-purple/90 rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-transform">
+                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-20 h-20 bg-brand-purple/90 rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-transform active:scale-95">
                                         <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                                     </button>
                                 </div>
@@ -560,10 +578,10 @@ const App: React.FC = () => {
                         <section>
                             <h3 className="text-sm font-bold uppercase mb-6 text-gray-500 tracking-widest">Saved Collections</h3>
                             <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4">
-                                {ownedSlideshows.map(ss => (
+                                {Array.isArray(ownedSlideshows) && ownedSlideshows.map(ss => (
                                     <div key={ss.id} className="bg-gray-800/40 border border-gray-700/50 p-5 rounded-[2rem] group hover:border-brand-purple/50 transition-colors">
                                         <div className="aspect-video bg-gray-900 rounded-2xl mb-4 overflow-hidden relative">
-                                            {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-60" alt="" />}
+                                            {Array.isArray(ss.media) && ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-60" alt="" />}
                                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
                                                 <button onClick={() => {
                                                     loadProject(ss);
@@ -572,7 +590,7 @@ const App: React.FC = () => {
                                             </div>
                                         </div>
                                         <h4 className="font-bold truncate text-sm mb-1">{ss.name}</h4>
-                                        <p className="text-[10px] text-gray-500 mb-4">{ss.media.length} items • {ss.settings.slideStyle}</p>
+                                        <p className="text-[10px] text-gray-500 mb-4">{Array.isArray(ss.media) ? ss.media.length : 0} items • {ss.settings?.slideStyle || 'default'}</p>
                                         <div className="flex flex-wrap gap-2">
                                             <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple text-white py-2 rounded-xl text-[10px] font-bold hover:bg-brand-purple/80 transition-colors">Load</button>
                                             <button onClick={() => shareSlideshow(ss.id)} className="flex-1 bg-gray-700 text-gray-200 py-2 rounded-xl text-[10px] font-bold hover:bg-gray-600 transition-colors">Share</button>
@@ -580,7 +598,7 @@ const App: React.FC = () => {
                                         </div>
                                     </div>
                                 ))}
-                                {ownedSlideshows.length === 0 && (
+                                {(!Array.isArray(ownedSlideshows) || ownedSlideshows.length === 0) && (
                                     <div className="col-span-full py-12 text-center bg-gray-800/20 border border-gray-700/30 rounded-[2rem]">
                                         <p className="text-xs text-gray-600 uppercase tracking-widest font-bold">No saved collections yet</p>
                                     </div>
@@ -627,12 +645,20 @@ const App: React.FC = () => {
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="bg-gray-800/50 p-6 rounded-[2rem] border border-gray-700 text-center cursor-pointer hover:border-apple-red transition-colors" onClick={async () => {
                                         const music = (window as any).MusicKit.getInstance();
-                                        const playlists = await music.api.library.playlists();
-                                        if (playlists && playlists.length > 0) {
-                                            const tracks = await music.api.library.playlist(playlists[0].id);
-                                            const t = tracks.relationships.tracks.data[0];
-                                            setAudioFiles(p => [...p, { id: t.id, name: t.attributes.name, duration: t.attributes.durationInMillis/1000, startTime: 0, previewUrl: '', source: 'apple-music', appleMusicTrackId: t.id }]);
-                                            setIsMusicBrowserOpen(false);
+                                        try {
+                                            const playlists = await music.api.library.playlists();
+                                            if (playlists && playlists.length > 0) {
+                                                const tracks = await music.api.library.playlist(playlists[0].id);
+                                                if (tracks?.relationships?.tracks?.data?.length > 0) {
+                                                    const t = tracks.relationships.tracks.data[0];
+                                                    setAudioFiles(p => [...p, { id: t.id, name: t.attributes.name, duration: t.attributes.durationInMillis/1000, startTime: 0, previewUrl: '', source: 'apple-music', appleMusicTrackId: t.id }]);
+                                                    setIsMusicBrowserOpen(false);
+                                                }
+                                            } else {
+                                                alert("No playlists found in your library.");
+                                            }
+                                        } catch (e) {
+                                            setError("Failed to fetch music library data.");
                                         }
                                     }}>
                                         <div className="text-2xl mb-2">🎶</div>
@@ -657,7 +683,7 @@ const App: React.FC = () => {
                     </button>
                     
                     <div className="w-full h-full relative flex items-center justify-center overflow-hidden">
-                        {mediaWithTimestamps.map((m, idx) => (
+                        {Array.isArray(mediaWithTimestamps) && mediaWithTimestamps.map((m, idx) => (
                             <TheaterMedia 
                                 key={m.id} 
                                 media={m} 
@@ -669,7 +695,7 @@ const App: React.FC = () => {
                     </div>
 
                     {/* AUDIO ENGINE */}
-                    {audioFiles.map(a => {
+                    {Array.isArray(audioFiles) && audioFiles.map(a => {
                         const active = elapsedTime >= a.startTime && elapsedTime < (a.startTime + a.duration);
                         return a.source === 'apple-music' ? 
                             <AppleMusicPlayer key={a.id} trackId={a.appleMusicTrackId!} active={active} startTimeInFile={elapsedTime - a.startTime} /> :
@@ -678,6 +704,13 @@ const App: React.FC = () => {
 
                     {/* PLAYBACK PROGRESS */}
                     <div className="absolute bottom-0 left-0 h-1 bg-brand-purple z-[120] transition-all duration-300" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }}></div>
+                </div>
+            )}
+            
+            {error && (
+                <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-96 bg-red-600 text-white p-4 rounded-2xl shadow-2xl z-[500] flex justify-between items-center animate-fade-in">
+                    <p className="text-xs font-bold">{error}</p>
+                    <button onClick={() => setError(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors">✕</button>
                 </div>
             )}
         </div>
