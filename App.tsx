@@ -55,7 +55,7 @@ const compressImage = (base64Str: string): Promise<string> => {
         img.src = `data:image/jpeg;base64,${base64Str}`;
         img.onload = () => {
             const canvas = document.createElement('canvas');
-            const MAX_WIDTH = 1200; 
+            const MAX_WIDTH = 1000; // Standard for web slideshows
             let width = img.width;
             let height = img.height;
             if (width > MAX_WIDTH) {
@@ -66,7 +66,8 @@ const compressImage = (base64Str: string): Promise<string> => {
             canvas.height = height;
             const ctx = canvas.getContext('2d');
             ctx?.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL('image/jpeg', 0.6).split(',')[1]);
+            // 0.5 quality is safe for 1MB Firestore limit with 20 photos
+            resolve(canvas.toDataURL('image/jpeg', 0.5).split(',')[1]);
         };
         img.onerror = () => resolve(base64Str);
     });
@@ -142,11 +143,12 @@ const TheaterMedia: React.FC<{
     slideStyle: string;
     showCaptions: boolean;
 }> = ({ media, isVisible, slideStyle, showCaptions }) => {
+    // We use a separate state or key to force animation re-trigger when visibility toggles
     const animationClass = isVisible ? `animate-${slideStyle}` : 'opacity-0 pointer-events-none';
     
     return (
         <div className={`w-full h-full absolute inset-0 flex flex-col items-center justify-center transition-opacity duration-700 ${isVisible ? 'opacity-100 z-20' : 'opacity-0 z-10'}`}>
-            <div key={media.id} className={`w-full h-full flex items-center justify-center ${animationClass}`}>
+            <div key={`${media.id}-${isVisible}`} className={`w-full h-full flex items-center justify-center ${animationClass}`}>
                 {media.type === 'image' ? (
                     <img src={media.previewUrl} className="w-full h-full object-contain" alt="slide" />
                 ) : (
@@ -204,47 +206,48 @@ const HelpModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen,
             <div className="bg-gray-900 border border-gray-800 max-w-2xl w-full rounded-[2.5rem] p-10 overflow-y-auto max-h-[85vh] shadow-2xl">
                 <div className="flex justify-between items-start mb-8">
                     <div>
-                        <h2 className="text-3xl font-black text-white uppercase tracking-tighter">How to use Muziq Slides</h2>
-                        <p className="text-xs text-brand-purple font-black uppercase tracking-widest mt-1">Quick Guide & Features</p>
+                        <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Guide & Disclaimer</h2>
+                        <p className="text-xs text-brand-purple font-black uppercase tracking-widest mt-1">Mastering Muziq Slides</p>
                     </div>
                     <button onClick={onClose} className="w-10 h-10 bg-gray-800 hover:bg-gray-700 text-white rounded-full flex items-center justify-center transition-all">✕</button>
                 </div>
                 
                 <div className="space-y-8 text-gray-400 text-sm leading-relaxed">
                     <section>
-                        <h4 className="text-white font-bold uppercase text-xs mb-3 tracking-widest">Step 1: Upload Collection</h4>
-                        <p>Drop up to 20 images or short videos into the collection area. We recommend high-quality JPEGs for the best cinematic experience. <i>(Videos will play for their full duration)</i>.</p>
+                        <h4 className="text-white font-bold uppercase text-xs mb-3 tracking-widest">How to Use the App</h4>
+                        <ol className="list-decimal list-inside space-y-2">
+                            <li><b>Add Media:</b> Upload up to 20 photos or videos. Images are automatically optimized for cloud storage.</li>
+                            <li><b>Add Soundtrack:</b> Choose a local MP3 or connect Apple Music. You can use Simulated Mode if you just want to test.</li>
+                            <li><b>Refine Timing:</b> In "Studio" mode, drag tracks or set exact offsets to match your visual pace.</li>
+                            <li><b>AI Smart Captions:</b> Let our AI analyze each image to generate poetic subtitles.</li>
+                            <li><b>Share:</b> Save your collection to generate a persistent shareable link.</li>
+                        </ol>
                     </section>
-                    
+
                     <section>
-                        <h4 className="text-white font-bold uppercase text-xs mb-3 tracking-widest">Step 2: AI Smart Captions</h4>
-                        <p>Press the "AI Smart Captions" button to let Gemini Pro analyze your photos and write evocative, nostalgic subtitles for each slide.</p>
-                    </section>
-                    
-                    <section>
-                        <h4 className="text-white font-bold uppercase text-xs mb-3 tracking-widest">Step 3: Music Synchronization</h4>
-                        <p>Connect your Apple Music account to browse your library, or use <b>Simulated Mode</b> to test with our curated vibe tracks. In the <b>Studio</b> tab, you can offset audio to start at a specific second.</p>
-                    </section>
-                    
-                    <section>
-                        <h4 className="text-white font-bold uppercase text-xs mb-3 tracking-widest">Step 4: Transitions & Preview</h4>
-                        <p>Choose from 4 professional transitions: Ken Burns, Fade, Slide, or Zoom. Hit "Preview" to see your masterpiece in fullscreen.</p>
+                        <h4 className="text-white font-bold uppercase text-xs mb-3 tracking-widest">Key Features</h4>
+                        <ul className="list-disc list-inside space-y-1">
+                            <li>Multi-track audio support with precise offsets.</li>
+                            <li>4 professional-grade cinematic transitions.</li>
+                            <li>Gemini-powered visual analysis for storytelling.</li>
+                            <li>Cloud sync and persistence across devices.</li>
+                        </ul>
                     </section>
 
                     <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-3xl">
                         <h4 className="text-red-400 font-bold uppercase text-[10px] mb-2 tracking-widest flex items-center gap-2">
-                            <span>⚠️</span> Disclaimer
+                            <span>⚠️</span> Disclaimer: What this app is NOT for
                         </h4>
                         <ul className="list-disc list-inside space-y-1 text-red-400/80 text-[11px] font-medium">
-                            <li>NOT a professional cloud backup service; data is compressed to fit cloud limits.</li>
-                            <li>NOT for high-stakes broadcast or emergency communications.</li>
-                            <li>Respect Copyright: Only use audio/visual content you have the rights to.</li>
-                            <li>Sharing links does not transfer music subscriptions.</li>
+                            <li><b>NOT a backup service:</b> We compress media heavily to stay within Firestore limits. Keep your original files safe.</li>
+                            <li><b>NOT for high-stakes broadcast:</b> This is a creative personal storyteller.</li>
+                            <li><b>Respect Licensing:</b> Ensure you have rights to any media or audio you share.</li>
+                            <li><b>Public Sharing:</b> Recipients will see your visual show, but music requires their own Apple Music access for real tracks.</li>
                         </ul>
                     </div>
                 </div>
                 
-                <button onClick={onClose} className="w-full mt-10 bg-brand-purple py-4 rounded-2xl font-black uppercase text-xs text-white shadow-xl shadow-brand-purple/20 hover:scale-[1.02] active:scale-95 transition-all">Got it, Let's Build</button>
+                <button onClick={onClose} className="w-full mt-10 bg-brand-purple py-4 rounded-2xl font-black uppercase text-xs text-white shadow-xl shadow-brand-purple/20 hover:scale-[1.02] active:scale-95 transition-all">Return to Editor</button>
             </div>
         </div>
     );
@@ -284,6 +287,7 @@ const App: React.FC = () => {
 
     const reconstructMedia = useCallback((media: MediaFile[]) => {
         return (media || []).map(m => {
+            // Restore previewUrl from base64 if it's missing or points to a stale blob
             if (m.base64 && (!m.previewUrl || m.previewUrl.startsWith('blob:'))) {
                 return { ...m, previewUrl: `data:image/jpeg;base64,${m.base64}` };
             }
@@ -341,7 +345,7 @@ const App: React.FC = () => {
                 .then(token => {
                     const mkInit = () => {
                         if (!(window as any).MusicKit) return false;
-                        (window as any).MusicKit.configure({ developerToken: token, app: { name: 'Muziq Slides', build: '1.0.7' } });
+                        (window as any).MusicKit.configure({ developerToken: token, app: { name: 'Muziq Slides', build: '1.0.8' } });
                         return true;
                     };
                     if (!mkInit()) {
@@ -464,7 +468,7 @@ const App: React.FC = () => {
                     model: 'gemini-3-flash-preview',
                     contents: {
                       parts: [
-                        { text: "Analyze this photo and write a cinematic, one-sentence nostalgic caption. Keep it evocative and short." },
+                        { text: "Analyze this photo and write a cinematic, one-sentence nostalgic caption. Keep it evocative and short. Poem-like." },
                         { inlineData: { mimeType: 'image/jpeg', data: m.base64 } }
                       ]
                     }
@@ -473,7 +477,8 @@ const App: React.FC = () => {
             }));
             setMediaFiles(updatedMedia);
         } catch (e) {
-            setError("Smart Captions failed. Check your API key.");
+            console.error("Smart Captions Error:", e);
+            setError("Smart Captions failed. Check API key and ensure images are valid.");
         } finally {
             setIsProcessingCaptions(false);
         }
@@ -481,26 +486,40 @@ const App: React.FC = () => {
 
     const saveSlideshow = async () => {
         if (!user || !Array.isArray(mediaFiles) || mediaFiles.length === 0) { setError("Add content first."); return; }
+        
+        // Strict size checking before sending to Firestore
         const totalSize = mediaFiles.reduce((acc, curr) => acc + (curr.base64?.length || 0), 0);
-        if (totalSize > 950000) { setError("Project too large for cloud sync (1MB limit). Use fewer images."); return; }
+        if (totalSize > 950000) { 
+            setError("Project data too large for Cloud Storage (1MB limit). Using fewer photos usually fixes this."); 
+            return; 
+        }
+
         const projectData = {
             userId: user.uid,
             name: slideshowName || `Slideshow ${new Date().toLocaleDateString()}`,
-            media: mediaFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), 
+            media: mediaFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), // Only save base64, wipe blobs
             audio: audioFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), 
             settings: settings,
             timestamp: serverTimestamp()
         };
         try {
-            if (currentProjectId) { await updateDoc(doc(db, "slideshows", currentProjectId), projectData); alert("Updated!"); }
-            else { const docRef = await addDoc(collection(db, "slideshows"), projectData); setCurrentProjectId(docRef.id); alert("Saved!"); }
-        } catch (e: any) { setError("Save Failed: " + e.message); }
+            if (currentProjectId) { 
+                await updateDoc(doc(db, "slideshows", currentProjectId), projectData); 
+                alert("Collection Updated Successfully!"); 
+            } else { 
+                const docRef = await addDoc(collection(db, "slideshows"), projectData); 
+                setCurrentProjectId(docRef.id); 
+                alert("Collection Saved Successfully!"); 
+            }
+        } catch (e: any) { 
+            setError("Cloud Save Failed: " + (e.message || "Unknown Error")); 
+        }
     };
 
-    const shareSlideshow = (id: string) => { const url = `${window.location.origin}?id=${id}`; navigator.clipboard.writeText(url); alert("Link Copied!"); };
+    const shareSlideshow = (id: string) => { const url = `${window.location.origin}?id=${id}`; navigator.clipboard.writeText(url); alert("Share link copied to clipboard!"); };
 
     const deleteSlideshow = async (id: string) => {
-        if (confirm("Delete project?")) {
+        if (confirm("Permanently delete this project? This cannot be undone.")) {
             await deleteDoc(doc(db, "slideshows", id));
             if (currentProjectId === id) { setCurrentProjectId(null); setMediaFiles([]); setAudioFiles([]); setSlideshowName(''); }
         }
@@ -513,10 +532,10 @@ const App: React.FC = () => {
     const handleAuthorizeApple = async () => {
         try {
             const music = (window as any).MusicKit?.getInstance();
-            if (!music) { setError("Apple Music loading..."); return; }
+            if (!music) { setError("MusicKit not found. Please refresh."); return; }
             await music.authorize();
             setAppleMusicAuthorized(music.isAuthorized);
-        } catch (err) { setError("Authorization failed."); setIsSimulationMode(true); }
+        } catch (err) { setError("Apple Music auth failed."); setIsSimulationMode(true); }
     };
 
     const addMockTrack = (track: typeof MOCK_TRACKS[0]) => {
@@ -556,50 +575,50 @@ const App: React.FC = () => {
             {!user ? (
                 <main>
                     <section className="text-center pt-32 pb-24 px-4 bg-gradient-to-b from-brand-light to-white">
-                        <h2 className="text-7xl font-black mb-8 tracking-tighter text-brand-dark leading-none">Your Memories,<br/>In <span className="text-brand-purple underline decoration-apple-red decoration-8 underline-offset-8">Perfect Sync</span></h2>
-                        <p className="text-gray-500 mb-12 max-w-xl mx-auto text-xl leading-relaxed">The only cinematic slideshow builder with full multi-track audio and AI storytelling.</p>
+                        <h2 className="text-7xl font-black mb-8 tracking-tighter text-brand-dark leading-none">Your Life,<br/>In <span className="text-brand-purple underline decoration-apple-red decoration-8 underline-offset-8">Rhythm</span></h2>
+                        <p className="text-gray-500 mb-12 max-w-xl mx-auto text-xl leading-relaxed">The only cinematic slideshow builder perfectly synced with Apple Music.</p>
                         <div className="flex flex-col sm:flex-row gap-6 justify-center">
-                            <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="bg-brand-purple text-white px-12 py-5 rounded-full font-bold shadow-2xl hover:scale-105 transition-transform text-lg">Launch Editor</button>
-                            <a href="#guide" className="px-12 py-5 rounded-full font-bold text-brand-dark border-2 border-brand-dark/10 hover:bg-brand-dark/5 transition-colors text-lg">How it Works</a>
+                            <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="bg-brand-purple text-white px-12 py-5 rounded-full font-bold shadow-2xl hover:scale-105 transition-transform text-lg">Create My First Show</button>
+                            <a href="#guide" className="px-12 py-5 rounded-full font-bold text-brand-dark border-2 border-brand-dark/10 hover:bg-brand-dark/5 transition-colors text-lg">How to Use</a>
                         </div>
                     </section>
 
                     <section id="guide" className="py-24 px-4 bg-white border-y border-gray-100">
                         <div className="max-w-4xl mx-auto">
-                            <h3 className="text-4xl font-black mb-12 text-brand-dark uppercase tracking-tighter text-center">User Guide & Features</h3>
+                            <h3 className="text-4xl font-black mb-12 text-brand-dark uppercase tracking-tighter text-center">App Guide & Features</h3>
                             <div className="grid md:grid-cols-2 gap-12 mb-16">
                                 <div className="space-y-6">
                                     <div className="flex gap-4">
                                         <div className="w-10 h-10 bg-brand-purple rounded-2xl flex items-center justify-center text-white font-black flex-shrink-0 shadow-lg shadow-brand-purple/20">1</div>
                                         <div>
-                                            <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-2">Build Your Deck</h4>
-                                            <p className="text-gray-500 text-sm leading-relaxed">Upload up to 20 media files. AI-powered image compression ensures your collection saves instantly to our secure cloud.</p>
+                                            <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-2">Upload Collection</h4>
+                                            <p className="text-gray-500 text-sm leading-relaxed">Add up to 20 media files. Our system handles optimization so your shows load fast globally.</p>
                                         </div>
                                     </div>
                                     <div className="flex gap-4">
                                         <div className="w-10 h-10 bg-brand-purple rounded-2xl flex items-center justify-center text-white font-black flex-shrink-0 shadow-lg shadow-brand-purple/20">2</div>
                                         <div>
-                                            <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-2">Sync the Vibe</h4>
-                                            <p className="text-gray-500 text-sm leading-relaxed">Connect Apple Music or use our built-in high-quality simulation tracks. Precisely time audio in the Studio Timeline.</p>
+                                            <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-2">Master the Studio</h4>
+                                            <p className="text-gray-500 text-sm leading-relaxed">Use the multi-track studio to offset audio start times. Connect Apple Music or use curated simulated tracks.</p>
                                         </div>
                                     </div>
                                     <div className="flex gap-4">
                                         <div className="w-10 h-10 bg-brand-purple rounded-2xl flex items-center justify-center text-white font-black flex-shrink-0 shadow-lg shadow-brand-purple/20">3</div>
                                         <div>
-                                            <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-2">Cinematic Style</h4>
-                                            <p className="text-gray-500 text-sm leading-relaxed">Choose smooth transitions and enable Gemini AI Captions to tell the story behind your photos automatically.</p>
+                                            <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-2">AI Smart Captions</h4>
+                                            <p className="text-gray-500 text-sm leading-relaxed">Gemini AI interprets your visuals and crafts nostalgic subtitles that match the cinematic vibe.</p>
                                         </div>
                                     </div>
                                 </div>
-                                <div className="bg-gray-50 p-8 rounded-[3rem] border border-gray-100">
-                                    <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-4 text-center">Important Disclaimer</h4>
+                                <div className="bg-gray-50 p-8 rounded-[3rem] border border-gray-100 shadow-inner">
+                                    <h4 className="font-black text-brand-dark uppercase text-sm tracking-wider mb-4 text-center">Product Disclaimer</h4>
                                     <div className="space-y-4 text-xs text-gray-500 font-medium leading-relaxed">
-                                        <p><b>Muziq Slides</b> is a creative storytelling platform for personal use. It is <u>not</u> intended for:</p>
+                                        <p><b>Muziq Slides</b> is a creative tool for personal storytelling. It is <u>not</u> for:</p>
                                         <ul className="list-disc list-inside space-y-2">
-                                            <li><b>Cloud Backup:</b> We compress files to optimize for web performance. Do not delete your original copies.</li>
-                                            <li><b>Commercial Broadcast:</b> Apple Music integration is for personal preview and creation; respect licensing terms.</li>
-                                            <li><b>Professional Production:</b> For high-fidelity 4K video editing, use dedicated desktop software.</li>
-                                            <li><b>Medical/Emergency:</b> Not for critical safety or real-time informational signaling.</li>
+                                            <li><b>High-Res Backup:</b> Images are compressed for cloud synchronization. Keep your masters locally.</li>
+                                            <li><b>Professional Post-Production:</b> Use desktop software for broadcast-grade 4K video editing.</li>
+                                            <li><b>Medical/Critical Signals:</b> Not for real-time safety or medical information.</li>
+                                            <li><b>Public Music Distribution:</b> Apple Music integration respects personal subscription limits.</li>
                                         </ul>
                                     </div>
                                 </div>
@@ -608,15 +627,15 @@ const App: React.FC = () => {
                     </section>
 
                     <section id="features" className="py-24 px-4 max-w-6xl mx-auto bg-white">
-                        <h3 className="text-3xl font-black mb-16 text-center text-brand-dark uppercase tracking-tighter">Engineered for Moments</h3>
+                        <h3 className="text-3xl font-black mb-16 text-center text-brand-dark uppercase tracking-tighter">Key Features</h3>
                         <div className="grid md:grid-cols-3 gap-8">
                             {[
-                                { title: "Studio Timeline", desc: "Precisely sync audio offsets to specific moments in your show with our multi-track editor.", icon: "🎹" },
-                                { title: "Music Integration", desc: "Access the full Apple Music library or use our 'Simulated Mode' to test your vibes instantly.", icon: "🎵" },
-                                { title: "AI Smart Captions", desc: "Gemini-powered AI analyzes your photos to generate poetic descriptions automatically.", icon: "✨" },
-                                { title: "Cinematic Styles", desc: "Choose from Ken Burns effects, smooth fades, and dynamic zooms for a premium look.", icon: "🎬" },
-                                { title: "Cloud Collections", desc: "Save projects securely in the cloud. Access your memories from any device.", icon: "☁️" },
-                                { title: "Global Sharing", desc: "Share your curated collections with friends using a single preview link.", icon: "🔗" }
+                                { title: "Studio Timeline", desc: "Multi-track audio support with precise start-time offsets.", icon: "🎹" },
+                                { title: "Music Library", desc: "Direct Apple Music connection or curated simulation tracks.", icon: "🎵" },
+                                { title: "AI Storyteller", desc: "Automated image analysis and nostalgic captioning via Gemini.", icon: "✨" },
+                                { title: "Cinematic Styles", desc: "Pro-grade Ken Burns and Zoom transitions built-in.", icon: "🎬" },
+                                { title: "Cloud Persistence", desc: "Auto-sync to Firestore for reliable cross-device access.", icon: "☁️" },
+                                { title: "One-Tap Share", desc: "Instant high-performance links for friends and family.", icon: "🔗" }
                             ].map((f, i) => (
                                 <div key={i} className="p-10 rounded-[3rem] bg-gray-50 border border-gray-100 hover:shadow-2xl transition-all hover:-translate-y-2 group">
                                     <div className="text-5xl mb-6 group-hover:scale-110 transition-transform inline-block">{f.icon}</div>
@@ -720,7 +739,7 @@ const App: React.FC = () => {
                                                 className="w-full bg-brand-purple/10 text-brand-purple py-4 rounded-2xl text-xs font-black uppercase border border-brand-purple/30 flex items-center justify-center gap-2 hover:bg-brand-purple hover:text-white transition-all shadow-lg shadow-brand-purple/5"
                                             >
                                                 {isProcessingCaptions ? <div className="w-3 h-3 border-2 border-brand-purple border-t-transparent rounded-full animate-spin"></div> : '✨'}
-                                                {isProcessingCaptions ? 'Polishing...' : 'AI Smart Captions'}
+                                                {isProcessingCaptions ? 'Polishing Stories...' : 'AI Smart Captions'}
                                             </button>
                                         )}
                                     </div>
@@ -818,7 +837,7 @@ const App: React.FC = () => {
                                                 <p className="text-[10px] text-gray-500 mb-5 font-bold uppercase tracking-widest">{ss.media.length} Moments</p>
                                                 <div className="flex flex-wrap gap-2">
                                                     <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple text-white py-2.5 rounded-2xl text-[10px] font-black uppercase hover:bg-brand-purple/80 transition-all">Load</button>
-                                                    <button onClick={() => shareSlideshow(ss.id)} className="flex-1 bg-gray-800 text-gray-400 py-2.5 rounded-2xl text-[10px] font-black uppercase hover:bg-gray-700 transition-all">Share</button>
+                                                    <button onClick={() => shareSlideshow(ss.id)} className="flex-1 bg-gray-800 text-gray-400 py-2.5 rounded-2xl text-[10px] font-black uppercase hover:bg-brand-purple/70 transition-all">Share</button>
                                                     <button onClick={() => deleteSlideshow(ss.id)} className="px-4 bg-red-500/10 text-red-500 py-2.5 rounded-2xl text-[10px] font-black hover:bg-red-500 hover:text-white transition-all">🗑️</button>
                                                 </div>
                                             </div>
