@@ -209,12 +209,19 @@ const App: React.FC = () => {
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
             const data = docSnap.data() as SavedSlideshow;
-            setMediaFiles(data.media);
-            setAudioFiles(data.audio);
-            setSettings(data.settings);
-            setSlideshowName(data.name);
+            loadProject(data);
             setIsPlaying(true);
         }
+    };
+
+    const loadProject = (project: SavedSlideshow) => {
+        setMediaFiles(project.media);
+        setAudioFiles(project.audio);
+        setSettings(project.settings);
+        setSlideshowName(project.name);
+        setElapsedTime(0);
+        // Scroll to workspace top
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     // Apple Music setup
@@ -314,7 +321,7 @@ const App: React.FC = () => {
         const newAudio: AppStateAudio = {
             id: Math.random().toString(36).substr(2, 9),
             name: file.name,
-            duration: 180, // Approximate, or we can use an audio element to detect
+            duration: 180, 
             startTime: 0,
             previewUrl,
             source: 'local'
@@ -559,23 +566,25 @@ const App: React.FC = () => {
                                             {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-60" alt="" />}
                                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
                                                 <button onClick={() => {
-                                                    setMediaFiles(ss.media);
-                                                    setAudioFiles(ss.audio);
-                                                    setSettings(ss.settings);
-                                                    setSlideshowName(ss.name);
-                                                    setElapsedTime(0);
+                                                    loadProject(ss);
                                                     setIsPlaying(true);
-                                                }} className="bg-white text-brand-dark p-3 rounded-full font-bold text-xs">Play Now</button>
+                                                }} className="bg-white text-brand-dark px-4 py-2 rounded-full font-bold text-xs shadow-xl active:scale-95 transition-all">Quick Play</button>
                                             </div>
                                         </div>
                                         <h4 className="font-bold truncate text-sm mb-1">{ss.name}</h4>
                                         <p className="text-[10px] text-gray-500 mb-4">{ss.media.length} items • {ss.settings.slideStyle}</p>
-                                        <div className="flex gap-2">
-                                            <button onClick={() => shareSlideshow(ss.id)} className="flex-1 bg-gray-700 py-2 rounded-xl text-[10px] font-bold hover:bg-gray-600">Share</button>
-                                            <button onClick={() => deleteSlideshow(ss.id)} className="px-3 bg-red-500/10 text-red-500 py-2 rounded-xl text-[10px] font-bold hover:bg-red-500 hover:text-white">🗑️</button>
+                                        <div className="flex flex-wrap gap-2">
+                                            <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple text-white py-2 rounded-xl text-[10px] font-bold hover:bg-brand-purple/80 transition-colors">Load</button>
+                                            <button onClick={() => shareSlideshow(ss.id)} className="flex-1 bg-gray-700 text-gray-200 py-2 rounded-xl text-[10px] font-bold hover:bg-gray-600 transition-colors">Share</button>
+                                            <button onClick={() => deleteSlideshow(ss.id)} className="px-3 bg-red-500/10 text-red-500 py-2 rounded-xl text-[10px] font-bold hover:bg-red-500 hover:text-white transition-colors">🗑️</button>
                                         </div>
                                     </div>
                                 ))}
+                                {ownedSlideshows.length === 0 && (
+                                    <div className="col-span-full py-12 text-center bg-gray-800/20 border border-gray-700/30 rounded-[2rem]">
+                                        <p className="text-xs text-gray-600 uppercase tracking-widest font-bold">No saved collections yet</p>
+                                    </div>
+                                )}
                             </div>
                         </section>
                     </div>
@@ -616,15 +625,15 @@ const App: React.FC = () => {
                             <div className="flex-1 overflow-y-auto p-6 space-y-4">
                                 <p className="text-[10px] text-gray-500 font-bold uppercase mb-4 tracking-widest">Your Playlists</p>
                                 <div className="grid grid-cols-2 gap-4">
-                                    {/* Mocking actual MusicKit API calls for brevity, assuming standard relationships.tracks structure */}
                                     <div className="bg-gray-800/50 p-6 rounded-[2rem] border border-gray-700 text-center cursor-pointer hover:border-apple-red transition-colors" onClick={async () => {
                                         const music = (window as any).MusicKit.getInstance();
                                         const playlists = await music.api.library.playlists();
-                                        // Simple track picker would happen here
-                                        const tracks = await music.api.library.playlist(playlists[0].id);
-                                        const t = tracks.relationships.tracks.data[0];
-                                        setAudioFiles(p => [...p, { id: t.id, name: t.attributes.name, duration: t.attributes.durationInMillis/1000, startTime: 0, previewUrl: '', source: 'apple-music', appleMusicTrackId: t.id }]);
-                                        setIsMusicBrowserOpen(false);
+                                        if (playlists && playlists.length > 0) {
+                                            const tracks = await music.api.library.playlist(playlists[0].id);
+                                            const t = tracks.relationships.tracks.data[0];
+                                            setAudioFiles(p => [...p, { id: t.id, name: t.attributes.name, duration: t.attributes.durationInMillis/1000, startTime: 0, previewUrl: '', source: 'apple-music', appleMusicTrackId: t.id }]);
+                                            setIsMusicBrowserOpen(false);
+                                        }
                                     }}>
                                         <div className="text-2xl mb-2">🎶</div>
                                         <span className="text-[10px] font-black uppercase">Recent Playlists</span>
