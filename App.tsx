@@ -82,6 +82,7 @@ interface AppStateAudio {
     id: string;
     name: string;
     duration: number; 
+    originalDuration?: number;
     startTime: number; 
     previewUrl: string; 
     source: 'local' | 'apple-music' | 'sfx';
@@ -123,11 +124,11 @@ const SFX_OPTIONS = [
 ];
 
 const MOCK_TRACKS: AppStateAudio[] = [
-    { id: 'm1', name: 'Midnight City', duration: 243, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', source: 'apple-music', volume: 1 },
-    { id: 'm2', name: 'Starboy', duration: 230, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', source: 'apple-music', volume: 1 },
-    { id: 'm3', name: 'Blinding Lights', duration: 200, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', source: 'apple-music', volume: 1 },
-    { id: 'm4', name: 'Levitating', duration: 203, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3', source: 'apple-music', volume: 1 },
-    { id: 'm5', name: 'Save Your Tears', duration: 215, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3', source: 'apple-music', volume: 1 },
+    { id: 'm1', name: 'Midnight City', duration: 243, originalDuration: 243, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', source: 'apple-music', volume: 0.8 },
+    { id: 'm2', name: 'Starboy', duration: 230, originalDuration: 230, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', source: 'apple-music', volume: 0.8 },
+    { id: 'm3', name: 'Blinding Lights', duration: 200, originalDuration: 200, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', source: 'apple-music', volume: 0.8 },
+    { id: 'm4', name: 'Levitating', duration: 203, originalDuration: 203, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3', source: 'apple-music', volume: 0.8 },
+    { id: 'm5', name: 'Save Your Tears', duration: 215, originalDuration: 215, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3', source: 'apple-music', volume: 0.8 },
 ];
 
 const TheaterMedia: React.FC<{
@@ -147,7 +148,7 @@ const TheaterMedia: React.FC<{
         if (videoRef.current) {
             videoRef.current.volume = media.isMuted ? 0 : (media.videoVolume ?? 1);
         }
-    }, [media.isMuted, media.videoVolume]);
+    }, [media.isMuted, media.videoVolume, isVisible]);
 
     return (
         <div className={`w-full h-full absolute inset-0 flex flex-col items-center justify-center transition-opacity duration-700 ${isVisible ? 'opacity-100 z-20' : 'opacity-0 z-10'}`}>
@@ -253,6 +254,7 @@ const App: React.FC = () => {
                 let audio = audioPoolRef.current.get(track.id);
                 if (!audio && track.previewUrl) {
                     audio = new Audio(track.previewUrl);
+                    audio.crossOrigin = "anonymous";
                     audioPoolRef.current.set(track.id, audio);
                 }
                 
@@ -261,13 +263,19 @@ const App: React.FC = () => {
                     if (relativeTime >= 0 && relativeTime < track.duration) {
                         if (audio.paused) {
                             audio.currentTime = relativeTime;
-                            audio.play().catch(() => {});
+                            audio.play().catch(e => console.error("Audio play failed:", e));
                         }
-                        // Handle Fades
-                        let targetVolume = track.volume ?? 1;
+                        
+                        // Volume Logic
+                        let targetVolume = (track.volume !== undefined) ? track.volume : 0.8;
                         if (track.fadeIn && relativeTime < 2) targetVolume *= (relativeTime / 2);
                         if (track.fadeOut && relativeTime > track.duration - 2) targetVolume *= ((track.duration - relativeTime) / 2);
-                        audio.volume = Math.max(0, Math.min(1, targetVolume));
+                        
+                        // Apply volume directly to audio element
+                        const finalVolume = Math.max(0, Math.min(1, targetVolume));
+                        if (audio.volume !== finalVolume) {
+                            audio.volume = finalVolume;
+                        }
                     } else {
                         if (!audio.paused) {
                             audio.pause();
@@ -376,10 +384,11 @@ const App: React.FC = () => {
                 id: Math.random().toString(36).substr(2, 9), 
                 name: file.name, 
                 duration: audio.duration, 
+                originalDuration: audio.duration,
                 startTime: 0, 
                 previewUrl, 
                 source: 'local',
-                volume: 1
+                volume: 0.8
             }]);
         };
     };
@@ -391,10 +400,11 @@ const App: React.FC = () => {
                 id: Math.random().toString(36).substr(2, 9), 
                 name: sfx.name, 
                 duration: audio.duration || 2, 
+                originalDuration: audio.duration || 2,
                 startTime: elapsedTime, 
                 previewUrl: sfx.url, 
                 source: 'sfx',
-                volume: 1
+                volume: 0.8
             }]);
         };
     };
@@ -408,6 +418,13 @@ const App: React.FC = () => {
             }
             return next;
         });
+    };
+
+    // --- Media Controls ---
+    const toggleMuteMedia = (id: string) => {
+        setMediaFiles(prev => prev.map(m => 
+            m.id === id ? { ...m, isMuted: !m.isMuted } : m
+        ));
     };
 
     const generateSmartCaptions = async () => {
@@ -494,54 +511,119 @@ const App: React.FC = () => {
     const StudioTimeline = () => {
         const pixelsPerSecond = 20;
         return (
-            <div className="bg-gray-900 rounded-[2rem] border border-white/5 p-8 space-y-4 overflow-x-auto">
+            <div className="bg-gray-900 rounded-[2rem] border border-white/5 p-8 space-y-4 overflow-x-auto relative">
                 <div className="relative h-12 border-b border-white/5 mb-4 min-w-[1000px]">
-                    {Array.from({length: Math.ceil(totalSlideshowDuration / 5) + 5}).map((_, i) => (
+                    {Array.from({length: Math.ceil(Math.max(totalSlideshowDuration, 60) / 5) + 5}).map((_, i) => (
                         <div key={i} className="absolute text-[8px] font-black text-gray-700" style={{left: i * 5 * pixelsPerSecond}}>
                             {i * 5}s
                         </div>
                     ))}
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-brand-purple z-10" style={{left: elapsedTime * pixelsPerSecond}}></div>
+                    <div className="absolute top-0 bottom-0 w-0.5 bg-brand-purple z-10 transition-all duration-100" style={{left: elapsedTime * pixelsPerSecond}}></div>
                 </div>
+
+                {/* VISUALS TRACK */}
                 <div className="flex items-center gap-4 min-w-[1000px]">
-                    <div className="w-24 text-[10px] font-black uppercase tracking-widest text-gray-500">Visuals</div>
+                    <div className="w-32 text-[10px] font-black uppercase tracking-widest text-gray-500">Visuals</div>
                     <div className="flex h-16 bg-white/5 rounded-xl flex-1 relative">
                         {mediaWithTimestamps.map((m) => (
                             <div key={m.id} className="h-full border-r border-black/20 overflow-hidden relative" style={{width: (m.timelineEnd! - m.timelineStart!) * pixelsPerSecond}}>
-                                <img src={m.previewUrl} className="w-full h-full object-cover opacity-60" />
+                                <img src={m.previewUrl} className="w-full h-full object-cover opacity-60" alt="" />
                                 <div className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-white shadow-sm">{m.type === 'video' ? '🎬' : '📷'}</div>
                             </div>
                         ))}
                     </div>
                 </div>
+
+                {/* MUSIC TRACK */}
                 <div className="flex items-center gap-4 min-w-[1000px]">
-                    <div className="w-24 text-[10px] font-black uppercase tracking-widest text-gray-500 flex flex-col gap-1">
+                    <div className="w-32 text-[10px] font-black uppercase tracking-widest text-gray-500 flex flex-col gap-1">
                         <span>Music</span>
-                        <button onClick={() => setIsMusicBrowserOpen(true)} className="text-[8px] bg-brand-purple/20 hover:bg-brand-purple/40 p-1 rounded transition-colors">Add</button>
+                        <button onClick={() => setIsMusicBrowserOpen(true)} className="text-[8px] bg-brand-purple/20 hover:bg-brand-purple/40 p-1 rounded transition-colors uppercase font-bold">Add Track</button>
                     </div>
-                    <div className="h-16 bg-white/5 rounded-xl flex-1 relative">
+                    <div className="h-28 bg-white/5 rounded-xl flex-1 relative">
                         {audioFiles.filter(a => a.source !== 'sfx').map((a) => (
-                            <div key={a.id} className="absolute h-full bg-brand-purple/40 border border-brand-purple/40 rounded-xl p-2 group cursor-move" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
-                                <div className="flex justify-between items-center h-full">
-                                    <span className="text-[9px] font-bold truncate px-2">{a.name}</span>
-                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100">
-                                        <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeIn: !x.fadeIn} : x))} className={`p-1 rounded text-[8px] ${a.fadeIn ? 'bg-brand-purple' : 'bg-black/40'}`}>IN</button>
-                                        <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeOut: !x.fadeOut} : x))} className={`p-1 rounded text-[8px] ${a.fadeOut ? 'bg-brand-purple' : 'bg-black/40'}`}>OUT</button>
-                                        <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="p-1 rounded text-[8px] bg-red-500">✕</button>
+                            <div key={a.id} className="absolute h-24 bg-brand-purple/30 border border-brand-purple/40 rounded-xl p-3 group" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
+                                <div className="flex flex-col gap-2 h-full">
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-[9px] font-bold truncate max-w-[100px]">{a.name}</span>
+                                        <div className="flex gap-1">
+                                            <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeIn: !x.fadeIn} : x))} className={`p-1 rounded text-[8px] font-bold ${a.fadeIn ? 'bg-brand-purple text-white' : 'bg-black/40 text-gray-400'}`}>FADE IN</button>
+                                            <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeOut: !x.fadeOut} : x))} className={`p-1 rounded text-[8px] font-bold ${a.fadeOut ? 'bg-brand-purple text-white' : 'bg-black/40'}`}>FADE OUT</button>
+                                            <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="p-1 rounded text-[8px] bg-red-500 text-white">✕</button>
+                                        </div>
+                                    </div>
+
+                                    {/* VOLUME CONTROL */}
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[8px] font-black text-gray-400">VOL</span>
+                                        <input 
+                                            type="range" 
+                                            min="0" max="1" step="0.01" 
+                                            value={a.volume ?? 0.8} 
+                                            onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, volume: parseFloat(e.target.value)} : x))}
+                                            className="flex-1 h-1 accent-white appearance-none bg-white/20 rounded-full cursor-pointer" 
+                                        />
+                                    </div>
+
+                                    {/* POSITION CONTROL */}
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[8px] font-black text-gray-400">POS</span>
+                                        <input 
+                                            type="range" 
+                                            min="0" max={Math.max(totalSlideshowDuration, 60)} step="0.1" 
+                                            value={a.startTime} 
+                                            onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: parseFloat(e.target.value)} : x))}
+                                            className="flex-1 h-1 accent-brand-purple appearance-none bg-brand-purple/20 rounded-full cursor-pointer" 
+                                        />
+                                    </div>
+
+                                    {/* TRIM CONTROL */}
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[8px] font-black text-gray-400">TRIM</span>
+                                        <input 
+                                            type="range" 
+                                            min="0.5" max={a.originalDuration || a.duration || 10} step="0.1" 
+                                            value={a.duration} 
+                                            onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, duration: parseFloat(e.target.value)} : x))}
+                                            className="flex-1 h-1 accent-apple-red appearance-none bg-apple-red/20 rounded-full cursor-pointer" 
+                                        />
                                     </div>
                                 </div>
-                                <input type="range" className="absolute -bottom-1 left-0 right-0 h-1 accent-brand-purple opacity-0 group-hover:opacity-100" min="0" max={totalSlideshowDuration} step="0.1" value={a.startTime} onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: parseFloat(e.target.value)} : x))} />
                             </div>
                         ))}
                     </div>
                 </div>
+
+                {/* SFX TRACK */}
                 <div className="flex items-center gap-4 min-w-[1000px]">
-                    <div className="w-24 text-[10px] font-black uppercase tracking-widest text-gray-500">SFX</div>
-                    <div className="h-12 bg-white/5 rounded-xl flex-1 relative">
+                    <div className="w-32 text-[10px] font-black uppercase tracking-widest text-gray-500">SFX</div>
+                    <div className="h-24 bg-white/5 rounded-xl flex-1 relative">
                         {audioFiles.filter(a => a.source === 'sfx').map((a) => (
-                            <div key={a.id} className="absolute h-full bg-apple-red/40 border border-apple-red/40 rounded-xl p-2 group cursor-move" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
-                                <span className="text-[8px] font-bold truncate">{a.name}</span>
-                                <input type="range" className="absolute -bottom-1 left-0 right-0 h-1 accent-apple-red opacity-0 group-hover:opacity-100" min="0" max={totalSlideshowDuration} step="0.1" value={a.startTime} onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: parseFloat(e.target.value)} : x))} />
+                            <div key={a.id} className="absolute h-20 bg-apple-red/30 border border-apple-red/40 rounded-xl p-3 group" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
+                                <div className="flex flex-col gap-2 h-full">
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-[8px] font-bold truncate max-w-[80px]">{a.name}</span>
+                                        <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-[8px] bg-black/40 p-1 rounded">✕</button>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <input 
+                                            type="range" 
+                                            min="0" max={Math.max(totalSlideshowDuration, 60)} step="0.1" 
+                                            value={a.startTime} 
+                                            onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: parseFloat(e.target.value)} : x))}
+                                            className="flex-1 h-0.5 accent-apple-red appearance-none bg-apple-red/20 rounded-full" 
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <input 
+                                            type="range" 
+                                            min="0" max="1" step="0.1" 
+                                            value={a.volume ?? 0.8} 
+                                            onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, volume: parseFloat(e.target.value)} : x))}
+                                            className="flex-1 h-0.5 accent-white appearance-none bg-white/20 rounded-full" 
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -562,7 +644,7 @@ const App: React.FC = () => {
                 </div>
                 <nav className="hidden md:flex items-center gap-8">
                     <button onClick={() => scrollTo('features')} className="text-xs font-black uppercase tracking-widest text-gray-400 hover:text-white transition-colors">Features</button>
-                    <button onClick={() => { if(!user) handleGoogleLogin(); else setViewMode('studio'); }} className={`text-xs font-black uppercase tracking-widest transition-colors ${viewMode === 'studio' ? 'text-brand-purple' : 'text-gray-400 hover:text-white'}`}>Studio</button>
+                    <button onClick={() => { if(!user) handleGoogleLogin(); else setViewMode('studio'); }} className={`text-xs font-black uppercase tracking-widest transition-colors ${viewMode === 'studio' ? 'text-brand-purple underline decoration-2 underline-offset-8' : 'text-gray-400 hover:text-white'}`}>Studio</button>
                     <button onClick={() => scrollTo('support')} className="text-xs font-black uppercase tracking-widest text-gray-400 hover:text-white transition-colors">Support</button>
                 </nav>
                 <div className="flex items-center gap-4">
@@ -652,6 +734,11 @@ const App: React.FC = () => {
                             className="bg-transparent text-5xl md:text-7xl font-black text-white/90 outline-none w-full placeholder:text-white/10 tracking-tighter" 
                         />
                         <div className="flex flex-wrap gap-4 shrink-0">
+                            {viewMode === 'studio' && (
+                                <button onClick={() => setViewMode('easy')} className="bg-white/10 hover:bg-white/20 text-white px-8 py-3 rounded-full text-xs font-bold border border-white/10 flex items-center gap-2">
+                                    <span>← Exit Studio</span>
+                                </button>
+                            )}
                             <button onClick={() => setViewMode(v => v === 'easy' ? 'studio' : 'easy')} className={`px-8 py-3 rounded-full text-xs font-bold border transition-all ${viewMode === 'studio' ? 'bg-brand-purple border-brand-purple' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>Studio</button>
                             <button onClick={saveSlideshow} className="bg-white/5 hover:bg-white/10 text-white px-8 py-3 rounded-full text-xs font-bold border border-white/10">Save</button>
                             <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl hover:scale-105">Preview</button>
@@ -661,7 +748,13 @@ const App: React.FC = () => {
                     {viewMode === 'studio' ? (
                         <div className="space-y-8">
                             <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5">
-                                <h3 className="text-xs font-black uppercase mb-6 text-brand-purple tracking-widest">Multi-Track Editor</h3>
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="text-xs font-black uppercase text-brand-purple tracking-widest">Multi-Track Editor</h3>
+                                    <div className="flex items-center gap-4">
+                                        <span className="text-xs font-black text-gray-500 uppercase">Timeline Cursor: {elapsedTime.toFixed(1)}s</span>
+                                        <button onClick={() => setElapsedTime(0)} className="text-[10px] font-black uppercase text-gray-400 hover:text-white">Reset</button>
+                                    </div>
+                                </div>
                                 <StudioTimeline />
                             </section>
                             <div className="grid md:grid-cols-2 gap-8">
@@ -669,8 +762,8 @@ const App: React.FC = () => {
                                     <h3 className="text-xs font-black uppercase mb-6 text-brand-purple tracking-widest">Sound Effects Track</h3>
                                     <div className="grid grid-cols-2 gap-3">
                                         {SFX_OPTIONS.map(sfx => (
-                                            <button key={sfx.name} onClick={() => addSFX(sfx)} className="bg-gray-900/60 p-4 rounded-2xl text-[10px] font-black uppercase border border-white/5 hover:border-brand-purple transition-all flex justify-between">
-                                                {sfx.name} <span>+</span>
+                                            <button key={sfx.name} onClick={() => addSFX(sfx)} className="bg-gray-900/60 p-4 rounded-2xl text-[10px] font-black uppercase border border-white/5 hover:border-brand-purple transition-all flex justify-between group">
+                                                {sfx.name} <span className="opacity-0 group-hover:opacity-100">+</span>
                                             </button>
                                         ))}
                                     </div>
@@ -680,12 +773,21 @@ const App: React.FC = () => {
                                     <div className="space-y-4">
                                         {mediaFiles.filter(m => m.type === 'video').map(m => (
                                             <div key={m.id} className="flex items-center gap-4 bg-gray-900/60 p-4 rounded-2xl border border-white/5">
-                                                <img src={m.previewUrl} className="w-12 h-12 rounded-lg object-cover" />
-                                                <div className="flex-1">
+                                                <img src={m.previewUrl} className="w-12 h-12 rounded-lg object-cover" alt="" />
+                                                <div className="flex-1 space-y-2">
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="text-[10px] font-black text-gray-400 uppercase">Video Volume</span>
+                                                        <button onClick={() => toggleMuteMedia(m.id)} className={`text-[8px] font-bold p-1 rounded ${m.isMuted ? 'bg-red-500 text-white' : 'bg-brand-purple text-white'}`}>
+                                                            {m.isMuted ? 'MUTED' : 'ACTIVE'}
+                                                        </button>
+                                                    </div>
                                                     <input type="range" min="0" max="1" step="0.01" value={m.isMuted ? 0 : (m.videoVolume ?? 1)} onChange={(e) => setMediaFiles(p => p.map(x => x.id === m.id ? {...x, videoVolume: parseFloat(e.target.value), isMuted: parseFloat(e.target.value) === 0} : x))} className="w-full accent-brand-purple h-1 bg-gray-700 rounded-full" />
                                                 </div>
                                             </div>
                                         ))}
+                                        {mediaFiles.filter(m => m.type === 'video').length === 0 && (
+                                            <div className="text-center py-8 opacity-20 text-xs font-black uppercase tracking-widest">No Video Clips</div>
+                                        )}
                                     </div>
                                 </section>
                             </div>
@@ -702,13 +804,13 @@ const App: React.FC = () => {
                                         </div>
                                         {mediaFiles.map((m, idx) => (
                                             <div key={m.id} className="aspect-square bg-gray-900 rounded-xl overflow-hidden relative border border-gray-800 group">
-                                                <img src={m.previewUrl} className="w-full h-full object-cover" />
+                                                <img src={m.previewUrl} className="w-full h-full object-cover" alt="" />
                                                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-1">
                                                     <div className="flex gap-1">
                                                         <button onClick={() => moveMedia(idx, 'up')} className="bg-white/20 p-1.5 rounded-lg text-xs">←</button>
                                                         <button onClick={() => moveMedia(idx, 'down')} className="bg-white/20 p-1.5 rounded-lg text-xs">→</button>
                                                     </div>
-                                                    <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="bg-red-500 p-1.5 rounded-lg text-xs">✕</button>
+                                                    <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="bg-red-500 p-1.5 rounded-lg text-xs text-white">✕</button>
                                                 </div>
                                             </div>
                                         ))}
@@ -741,7 +843,7 @@ const App: React.FC = () => {
                                     <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Transitions</h3>
                                     <div className="grid grid-cols-2 gap-2 mb-4">
                                         {['ken-burns', 'fade-in', 'slide-from-right', 'zoom-in'].map(style => (
-                                            <button key={style} onClick={() => setSettings(s => ({...s, slideStyle: style}))} className={`py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${settings.slideStyle === style ? 'bg-brand-purple text-white' : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                                            <button key={style} onClick={() => setSettings(s => ({...s, slideStyle: style}))} className={`py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${settings.slideStyle === style ? 'bg-brand-purple text-white shadow-lg' : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
                                                 {style.replace(/-/g, ' ')}
                                             </button>
                                         ))}
@@ -758,9 +860,9 @@ const App: React.FC = () => {
                                     <div className="aspect-video bg-gray-950 rounded-[3rem] relative overflow-hidden border border-white/5 flex items-center justify-center">
                                         {mediaFiles.length > 0 ? (
                                             <div className="w-full h-full relative">
-                                                <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover opacity-20 blur-sm scale-110" />
+                                                <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover opacity-20 blur-sm scale-110" alt="" />
                                                 <div className="absolute inset-0 flex items-center justify-center">
-                                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-24 h-24 bg-brand-purple rounded-full flex items-center justify-center shadow-2xl hover:scale-110">
+                                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-24 h-24 bg-brand-purple rounded-full flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all">
                                                         <svg className="w-10 h-10 text-white ml-2" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                                                     </button>
                                                 </div>
@@ -782,20 +884,25 @@ const App: React.FC = () => {
                                     <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
                                         {ownedSlideshows.map(ss => (
                                             <div key={ss.id} className="bg-gray-800/20 p-6 rounded-[2.5rem] border border-white/5 hover:border-brand-purple transition-all group">
-                                                <div className="aspect-square bg-gray-900 rounded-[2rem] mb-5 overflow-hidden relative">
-                                                    {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform" />}
+                                                <div className="aspect-square bg-gray-900 rounded-[2rem] mb-5 overflow-hidden relative border border-white/5">
+                                                    {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform" alt="" />}
                                                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
-                                                        <button onClick={() => loadProject(ss)} className="bg-white text-brand-dark px-6 py-2.5 rounded-full font-bold text-xs">Edit</button>
+                                                        <button onClick={() => loadProject(ss)} className="bg-white text-brand-dark px-6 py-2.5 rounded-full font-bold text-xs">Edit Collection</button>
                                                     </div>
                                                 </div>
                                                 <h4 className="font-bold truncate text-sm mb-1 text-gray-200">{ss.name}</h4>
                                                 <div className="flex gap-2 mt-4">
-                                                    <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple/10 text-brand-purple py-2 rounded-xl text-[10px] font-black uppercase">Load</button>
-                                                    <button onClick={() => shareProject(ss.id)} className="flex-1 bg-white/5 text-gray-400 py-2 rounded-xl text-[10px] font-black uppercase">Share</button>
-                                                    <button onClick={() => deleteSlideshow(ss.id)} className="p-2 text-red-500">🗑️</button>
+                                                    <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple/10 text-brand-purple py-2 rounded-xl text-[10px] font-black uppercase hover:bg-brand-purple hover:text-white">Load</button>
+                                                    <button onClick={() => shareProject(ss.id)} className="flex-1 bg-white/5 text-gray-400 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-white/10">Share</button>
+                                                    <button onClick={() => deleteSlideshow(ss.id)} className="p-2 text-red-500 hover:scale-110 transition-transform">🗑️</button>
                                                 </div>
                                             </div>
                                         ))}
+                                        {ownedSlideshows.length === 0 && (
+                                            <div className="col-span-full py-20 text-center opacity-20 border-2 border-dashed border-white/10 rounded-[2.5rem]">
+                                                <p className="text-xs font-black uppercase tracking-[0.2em]">No Saved Collections Yet</p>
+                                            </div>
+                                        )}
                                     </div>
                                 </section>
                             </div>
@@ -830,7 +937,7 @@ const App: React.FC = () => {
                                                     <span className="text-[10px] text-gray-600 uppercase font-black">{Math.floor(track.duration / 60)}:{(track.duration % 60).toString().padStart(2,'0')}</span>
                                                 </div>
                                             </div>
-                                            <button className="bg-brand-purple/10 text-brand-purple px-6 py-2 rounded-xl text-[10px] font-black uppercase">Add</button>
+                                            <button className="bg-brand-purple/10 text-brand-purple px-6 py-2 rounded-xl text-[10px] font-black uppercase group-hover:bg-brand-purple group-hover:text-white transition-all">Add Track</button>
                                         </div>
                                     ))}
                                 </div>
@@ -848,6 +955,7 @@ const App: React.FC = () => {
                             <TheaterMedia key={m.id} media={m} isVisible={idx === currentSlide} slideStyle={settings.slideStyle} showCaptions={settings.showCaptions} />
                         ))}
                     </div>
+                    {/* PROGRESS BAR */}
                     <div className="absolute bottom-0 left-0 h-1.5 bg-brand-purple z-[620] transition-all duration-200 shadow-[0_0_20px_rgba(109,40,217,0.8)]" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }}></div>
                 </div>
             )}
@@ -855,7 +963,7 @@ const App: React.FC = () => {
             {error && (
                 <div className="fixed bottom-10 right-10 bg-red-600 text-white p-6 rounded-[2rem] shadow-2xl z-[700] flex gap-6 items-center border border-white/20 animate-slide-from-bottom">
                     <p className="text-sm font-bold">{error}</p>
-                    <button onClick={() => setError(null)} className="ml-4 font-black">✕</button>
+                    <button onClick={() => setError(null)} className="ml-4 font-black bg-white/20 w-8 h-8 rounded-full flex items-center justify-center">✕</button>
                 </div>
             )}
         </div>
