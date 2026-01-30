@@ -119,6 +119,7 @@ interface MediaFile {
   timelineStart?: number;
   timelineEnd?: number;
   base64?: string; 
+  isMuted?: boolean;
 }
 
 interface AppStateAudio {
@@ -173,7 +174,7 @@ const TheaterMedia: React.FC<{
                 {media.type === 'image' ? (
                     <img src={mediaUrl} className="w-full h-full object-contain" alt="slide" />
                 ) : (
-                    <video src={mediaUrl} className="w-full h-full object-contain" autoPlay muted loop />
+                    <video src={mediaUrl} className="w-full h-full object-contain" autoPlay muted={media.isMuted} loop />
                 )}
             </div>
             {showCaptions && media.caption && isVisible && (
@@ -248,14 +249,12 @@ const App: React.FC = () => {
     useEffect(() => {
         if (!user) { setOwnedSlideshows([]); setSharedSlideshows([]); return; }
         
-        // Owned projects
         const qOwned = query(collection(db, "slideshows"), where("userId", "==", user.uid));
         const unsubOwned = onSnapshot(qOwned, (snap) => {
             const projects = snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow));
             setOwnedSlideshows(projects.map(p => ({...p, media: reconstructMedia(p.media)})));
         });
 
-        // Shared projects
         const qShared = query(collection(db, "slideshows"), where("sharedWith", "array-contains", user.email?.toLowerCase()));
         const unsubShared = onSnapshot(qShared, (snap) => {
             const projects = snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSlideshow));
@@ -330,7 +329,8 @@ const App: React.FC = () => {
                 type: f.type.startsWith('image') ? 'image' : 'video',
                 previewUrl: f.type.startsWith('image') ? `data:image/jpeg;base64,${base64}` : previewUrl,
                 caption: '',
-                base64: base64 || ''
+                base64: base64 || '',
+                isMuted: f.type.startsWith('video')
             };
         }));
         setMediaFiles(p => [...p, ...newMedia]);
@@ -351,6 +351,21 @@ const App: React.FC = () => {
                 source: 'local' 
             }]);
         };
+    };
+
+    const moveMedia = (index: number, direction: 'up' | 'down') => {
+        setMediaFiles(prev => {
+            const next = [...prev];
+            const target = direction === 'up' ? index - 1 : index + 1;
+            if (target >= 0 && target < next.length) {
+                [next[index], next[target]] = [next[target], next[index]];
+            }
+            return next;
+        });
+    };
+
+    const toggleMuteMedia = (id: string) => {
+        setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, isMuted: !m.isMuted } : m));
     };
 
     const generateSmartCaptions = async () => {
@@ -382,7 +397,6 @@ const App: React.FC = () => {
     const saveSlideshow = async () => {
         if (!user || mediaFiles.length === 0) { setError("Add content first."); return; }
         
-        // Preserve sharedWith if it already exists
         let existingSharedWith: string[] = [];
         if (currentProjectId) {
             const docRef = doc(db, "slideshows", currentProjectId);
@@ -491,33 +505,6 @@ const App: React.FC = () => {
                             </button>
                         </div>
                     </section>
-                    <section id="about" className="py-24 px-4 bg-white border-y border-gray-100">
-                        <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-12">
-                            <div className="space-y-6">
-                                <h3 className="text-4xl font-black text-brand-dark tracking-tighter uppercase">Unlimited Creativity</h3>
-                                <p className="text-gray-500 leading-relaxed">Muziq Slides is a simplified, high-performance editor for your life's best moments. Create beautiful photo streams with automated beat-matching and AI-powered poetic captions.</p>
-                                <ul className="space-y-4 pt-4">
-                                    <li className="flex gap-4">
-                                        <div className="w-8 h-8 bg-brand-purple text-white rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0">✓</div>
-                                        <span className="text-sm font-bold text-gray-700">20-Photo Cloud Uploads</span>
-                                    </li>
-                                    <li className="flex gap-4">
-                                        <div className="w-8 h-8 bg-brand-purple text-white rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0">✓</div>
-                                        <span className="text-sm font-bold text-gray-700">Apple Music Authorization</span>
-                                    </li>
-                                    <li className="flex gap-4">
-                                        <div className="w-8 h-8 bg-brand-purple text-white rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0">✓</div>
-                                        <span className="text-sm font-bold text-gray-700">Gemini AI Cinematic Captions</span>
-                                    </li>
-                                </ul>
-                            </div>
-                            <div className="bg-gray-50 p-10 rounded-[3rem] border border-gray-100 shadow-inner flex flex-col justify-center">
-                                <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Social Sharing</p>
-                                <p className="text-gray-500 text-sm leading-relaxed mb-6 italic">"Invite friends to your slideshow library by adding their Google email. No complex permissions, just shared memories in perfect sync."</p>
-                                <button onClick={handleGoogleLogin} className="bg-brand-purple text-white py-4 rounded-full font-black uppercase tracking-widest text-xs shadow-lg">Get Started with Google</button>
-                            </div>
-                        </div>
-                    </section>
                 </main>
             ) : (
                 <main className="p-4 max-w-7xl mx-auto grid lg:grid-cols-12 gap-8 py-8">
@@ -529,10 +516,25 @@ const App: React.FC = () => {
                                     <input type="file" multiple accept="image/*,video/*" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
                                     <span className="text-2xl text-gray-500">＋</span>
                                 </div>
-                                {mediaFiles.map((m) => (
+                                {mediaFiles.map((m, idx) => (
                                     <div key={m.id} className="aspect-square bg-gray-900 rounded-xl overflow-hidden relative border border-gray-800 group">
                                         <img src={m.previewUrl} className="w-full h-full object-cover" alt="" />
-                                        <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                                        
+                                        {/* Reorder Overlay */}
+                                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-1">
+                                            <div className="flex gap-1">
+                                                <button onClick={() => moveMedia(idx, 'up')} className="bg-white/20 hover:bg-white/40 text-white p-1.5 rounded-lg text-xs" title="Move Back">←</button>
+                                                <button onClick={() => moveMedia(idx, 'down')} className="bg-white/20 hover:bg-white/40 text-white p-1.5 rounded-lg text-xs" title="Move Forward">→</button>
+                                            </div>
+                                            <div className="flex gap-1">
+                                                {m.type === 'video' && (
+                                                    <button onClick={() => toggleMuteMedia(m.id)} className={`p-1.5 rounded-lg text-xs ${m.isMuted ? 'bg-red-500/80' : 'bg-white/20'}`} title={m.isMuted ? "Unmute" : "Mute"}>
+                                                        {m.isMuted ? '🔇' : '🔊'}
+                                                    </button>
+                                                )}
+                                                <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="bg-red-500 hover:bg-red-600 text-white p-1.5 rounded-lg text-xs" title="Remove">✕</button>
+                                            </div>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -564,12 +566,28 @@ const App: React.FC = () => {
 
                         <section className="bg-gray-800/30 p-6 rounded-3xl border border-gray-700/50">
                             <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Transitions</h3>
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-2 gap-2 mb-4">
                                 {['ken-burns', 'fade-in', 'slide-from-right', 'zoom-in'].map(style => (
                                     <button key={style} onClick={() => setSettings(s => ({...s, slideStyle: style}))} className={`py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${settings.slideStyle === style ? 'bg-brand-purple text-white shadow-lg' : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
                                         {style.replace(/-/g, ' ')}
                                     </button>
                                 ))}
+                            </div>
+                            <div className="mt-6">
+                                <label className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-3 block">Timing: <span className="text-white">{settings.interval}s</span></label>
+                                <input 
+                                    type="range" 
+                                    min="1" 
+                                    max="20" 
+                                    step="1"
+                                    value={settings.interval}
+                                    onChange={(e) => setSettings(s => ({ ...s, interval: parseInt(e.target.value) }))}
+                                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple"
+                                />
+                                <div className="flex justify-between text-[9px] font-black text-gray-600 mt-2 uppercase">
+                                    <span>Fast (1s)</span>
+                                    <span>Slow (20s)</span>
+                                </div>
                             </div>
                         </section>
                     </div>
@@ -577,7 +595,12 @@ const App: React.FC = () => {
                     <div className="lg:col-span-8 space-y-8 animate-fade-in">
                         <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-gray-700/50">
                             <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-                                <input value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Untitled Slideshow..." className="bg-transparent text-4xl font-black text-white outline-none w-full placeholder:text-gray-800 tracking-tighter" />
+                                <input 
+                                    value={slideshowName} 
+                                    onChange={(e) => setSlideshowName(e.target.value)} 
+                                    placeholder="Untitled Slideshow" 
+                                    className="bg-transparent text-4xl font-black text-white outline-none w-full placeholder:text-gray-700 tracking-tighter" 
+                                />
                                 <div className="flex gap-2">
                                     <button onClick={saveSlideshow} className="bg-gray-800 hover:bg-gray-700 text-white px-8 py-3 rounded-full text-xs font-bold border border-gray-700">Save Collection</button>
                                     <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl hover:scale-105 active:scale-95 transition-all">Preview Final</button>
