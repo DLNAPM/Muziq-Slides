@@ -210,7 +210,6 @@ const App: React.FC = () => {
     const [isMusicBrowserOpen, setIsMusicBrowserOpen] = useState(false);
     const [appleMusicAuthorized, setAppleMusicAuthorized] = useState(false);
     const [viewMode, setViewMode] = useState<'easy' | 'studio'>('easy');
-    // FIX: Add missing state variable and setter for isSimulationMode
     const [isSimulationMode, setIsSimulationMode] = useState(false);
     
     const requestRef = useRef<number>(0);
@@ -357,12 +356,10 @@ const App: React.FC = () => {
     const generateSmartCaptions = async () => {
         if (mediaFiles.length === 0) return;
         setIsProcessingCaptions(true);
-        // Correctly initialize GoogleGenAI with API key from environment variable
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         try {
             const updatedMedia = await Promise.all(mediaFiles.map(async (m) => {
                 if (m.type === 'video' || !m.base64) return m;
-                // Generate content using gemini-3-flash-preview for general text tasks
                 const response = await ai.models.generateContent({
                     model: 'gemini-3-flash-preview',
                     contents: {
@@ -372,7 +369,6 @@ const App: React.FC = () => {
                       ]
                     }
                 });
-                // Access response.text as a property to get generated text
                 return { ...m, caption: response.text || '' };
             }));
             setMediaFiles(updatedMedia);
@@ -385,15 +381,27 @@ const App: React.FC = () => {
 
     const saveSlideshow = async () => {
         if (!user || mediaFiles.length === 0) { setError("Add content first."); return; }
+        
+        // Preserve sharedWith if it already exists
+        let existingSharedWith: string[] = [];
+        if (currentProjectId) {
+            const docRef = doc(db, "slideshows", currentProjectId);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                existingSharedWith = docSnap.data().sharedWith || [];
+            }
+        }
+
         const projectData = {
             userId: user.uid,
             name: slideshowName || `Slideshow ${new Date().toLocaleDateString()}`,
             media: mediaFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), 
             audio: audioFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), 
             settings: settings,
-            sharedWith: [], 
+            sharedWith: existingSharedWith, 
             timestamp: serverTimestamp()
         };
+
         try {
             if (currentProjectId) { 
                 await updateDoc(doc(db, "slideshows", currentProjectId), projectData); 
@@ -435,6 +443,15 @@ const App: React.FC = () => {
         } else { setError("MusicKit not loaded."); }
     };
 
+    const handleGoogleLogin = async () => {
+        const provider = new GoogleAuthProvider();
+        try {
+            await signInWithPopup(auth, provider);
+        } catch (e: any) {
+            setError("Login failed: " + e.message);
+        }
+    };
+
     if (isLoading) return <div className="min-h-screen bg-brand-dark flex items-center justify-center"><div className="w-10 h-10 border-4 border-brand-purple border-t-transparent rounded-full animate-spin"></div></div>;
 
     return (
@@ -451,7 +468,14 @@ const App: React.FC = () => {
                             <button onClick={() => setViewMode('studio')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'studio' ? 'bg-brand-purple text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}>Studio</button>
                         </nav>
                     )}
-                    {user ? <button onClick={() => signOut(auth)} className="text-xs bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg font-bold border border-gray-700 transition-colors">Logout</button> : <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="text-xs bg-brand-purple hover:bg-brand-purple/80 px-4 py-2 rounded-lg font-bold text-white shadow-lg transition-all">Sign In</button>}
+                    {user ? (
+                        <div className="flex items-center gap-3">
+                            <span className="hidden sm:inline text-xs font-bold text-gray-400">{user.email}</span>
+                            <button onClick={() => signOut(auth)} className="text-xs bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg font-bold border border-gray-700 transition-colors">Logout</button>
+                        </div>
+                    ) : (
+                        <button onClick={handleGoogleLogin} className="text-xs bg-brand-purple hover:bg-brand-purple/80 px-4 py-2 rounded-lg font-bold text-white shadow-lg transition-all">Sign In</button>
+                    )}
                 </div>
             </header>
 
@@ -461,7 +485,10 @@ const App: React.FC = () => {
                         <h2 className="text-7xl font-black mb-8 tracking-tighter text-brand-dark leading-none">Memories,<br/>In <span className="text-brand-purple underline decoration-apple-red decoration-8 underline-offset-8">Perfect Sync</span></h2>
                         <p className="text-gray-500 mb-12 max-w-xl mx-auto text-xl leading-relaxed">The only cinematic slideshow builder perfectly synced with Apple Music.</p>
                         <div className="flex flex-col sm:flex-row gap-6 justify-center">
-                            <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="bg-brand-purple text-white px-12 py-5 rounded-full font-bold shadow-2xl hover:scale-105 transition-transform text-lg">Get Started Free</button>
+                            <button onClick={handleGoogleLogin} className="bg-brand-purple text-white px-12 py-5 rounded-full font-bold shadow-2xl hover:scale-105 transition-transform text-lg flex items-center justify-center gap-3">
+                                <svg className="w-6 h-6" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                                Sign In with Google
+                            </button>
                         </div>
                     </section>
                     <section id="about" className="py-24 px-4 bg-white border-y border-gray-100">
@@ -487,7 +514,7 @@ const App: React.FC = () => {
                             <div className="bg-gray-50 p-10 rounded-[3rem] border border-gray-100 shadow-inner flex flex-col justify-center">
                                 <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Social Sharing</p>
                                 <p className="text-gray-500 text-sm leading-relaxed mb-6 italic">"Invite friends to your slideshow library by adding their Google email. No complex permissions, just shared memories in perfect sync."</p>
-                                <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="bg-brand-purple text-white py-4 rounded-full font-black uppercase tracking-widest text-xs">Sign In with Google</button>
+                                <button onClick={handleGoogleLogin} className="bg-brand-purple text-white py-4 rounded-full font-black uppercase tracking-widest text-xs shadow-lg">Get Started with Google</button>
                             </div>
                         </div>
                     </section>
@@ -496,7 +523,7 @@ const App: React.FC = () => {
                 <main className="p-4 max-w-7xl mx-auto grid lg:grid-cols-12 gap-8 py-8">
                     <div className="lg:col-span-4 space-y-6">
                         <section className="bg-gray-800/30 p-6 rounded-3xl border border-gray-700/50">
-                            <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Media</h3>
+                            <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Media (Max 20)</h3>
                             <div className="grid grid-cols-4 gap-2 mb-4">
                                 <div className="aspect-square bg-gray-900/50 rounded-xl border-2 border-dashed border-gray-700 flex items-center justify-center relative hover:border-brand-purple cursor-pointer group">
                                     <input type="file" multiple accept="image/*,video/*" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
@@ -520,7 +547,7 @@ const App: React.FC = () => {
                             <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Soundtrack</h3>
                             <div className="grid grid-cols-2 gap-2 mb-4">
                                 <div className="relative">
-                                    <button className="w-full bg-gray-800 border border-gray-700 py-3 rounded-xl text-[10px] font-black uppercase text-gray-400">Files</button>
+                                    <button className="w-full bg-gray-800 border border-gray-700 py-3 rounded-xl text-[10px] font-black uppercase text-gray-400">Local Files</button>
                                     <input type="file" accept="audio/*" onChange={handleAudioUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
                                 </div>
                                 <button onClick={() => setIsMusicBrowserOpen(true)} className="w-full bg-apple-red/10 py-3 rounded-xl text-[10px] font-black uppercase text-apple-red border border-apple-red/30 hover:bg-apple-red hover:text-white">Apple Music</button>
@@ -552,8 +579,8 @@ const App: React.FC = () => {
                             <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
                                 <input value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Untitled Slideshow..." className="bg-transparent text-4xl font-black text-white outline-none w-full placeholder:text-gray-800 tracking-tighter" />
                                 <div className="flex gap-2">
-                                    <button onClick={saveSlideshow} className="bg-gray-800 hover:bg-gray-700 text-white px-8 py-3 rounded-full text-xs font-bold border border-gray-700">Save</button>
-                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl hover:scale-105 active:scale-95 transition-all">Preview</button>
+                                    <button onClick={saveSlideshow} className="bg-gray-800 hover:bg-gray-700 text-white px-8 py-3 rounded-full text-xs font-bold border border-gray-700">Save Collection</button>
+                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl hover:scale-105 active:scale-95 transition-all">Preview Final</button>
                                 </div>
                             </div>
                             
@@ -587,15 +614,15 @@ const App: React.FC = () => {
                                         <div className="aspect-square bg-gray-900 rounded-[2rem] mb-5 overflow-hidden relative border border-gray-800/50">
                                             {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform" alt="" />}
                                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
-                                                <button onClick={() => loadProject(ss)} className="bg-white text-brand-dark px-6 py-2.5 rounded-full font-bold text-xs">Edit Project</button>
+                                                <button onClick={() => loadProject(ss)} className="bg-white text-brand-dark px-6 py-2.5 rounded-full font-bold text-xs shadow-xl">Edit Project</button>
                                             </div>
                                         </div>
                                         <h4 className="font-bold truncate text-sm mb-1 text-gray-200">{ss.name}</h4>
-                                        <p className="text-[10px] text-gray-600 mb-5 font-bold uppercase tracking-widest">{ss.media.length} Slides • {ss.audio.length} Tracks</p>
+                                        <p className="text-[10px] text-gray-600 mb-5 font-bold uppercase tracking-widest">{ss.media.length} Slides • {ss.sharedWith?.length || 0} Shared</p>
                                         <div className="flex gap-2">
-                                            <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple/10 text-brand-purple py-2.5 rounded-2xl text-[10px] font-black uppercase hover:bg-brand-purple hover:text-white">Load</button>
-                                            <button onClick={() => shareProject(ss.id)} className="flex-1 bg-gray-800 text-gray-400 py-2.5 rounded-2xl text-[10px] font-black uppercase hover:bg-gray-700">Share</button>
-                                            <button onClick={() => deleteSlideshow(ss.id)} className="px-4 bg-red-500/10 text-red-500 py-2.5 rounded-2xl text-[10px] font-black hover:bg-red-500 hover:text-white">🗑️</button>
+                                            <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple/10 text-brand-purple py-2.5 rounded-2xl text-[10px] font-black uppercase hover:bg-brand-purple hover:text-white transition-colors">Load</button>
+                                            <button onClick={() => shareProject(ss.id)} className="flex-1 bg-gray-800 text-gray-400 py-2.5 rounded-2xl text-[10px] font-black uppercase hover:bg-gray-700 transition-colors">Share</button>
+                                            <button onClick={() => deleteSlideshow(ss.id)} className="px-4 bg-red-500/10 text-red-500 py-2.5 rounded-2xl text-[10px] font-black hover:bg-red-500 hover:text-white transition-colors">🗑️</button>
                                         </div>
                                     </div>
                                 ))}
@@ -613,17 +640,17 @@ const App: React.FC = () => {
                                         <div className="aspect-square bg-gray-900 rounded-[2rem] mb-5 overflow-hidden relative border border-gray-800/50">
                                             {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform" alt="" />}
                                             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
-                                                <button onClick={() => loadProject(ss)} className="bg-white text-brand-dark px-6 py-2.5 rounded-full font-bold text-xs">View Project</button>
+                                                <button onClick={() => loadProject(ss)} className="bg-white text-brand-dark px-6 py-2.5 rounded-full font-bold text-xs shadow-xl">View Project</button>
                                             </div>
                                         </div>
                                         <h4 className="font-bold truncate text-sm mb-1 text-gray-200">{ss.name}</h4>
-                                        <p className="text-[10px] text-gray-600 mb-5 font-bold uppercase tracking-widest">Shared by other account</p>
-                                        <button onClick={() => loadProject(ss)} className="w-full bg-brand-purple text-white py-2.5 rounded-2xl text-[10px] font-black uppercase shadow-lg">Load Shared Show</button>
+                                        <p className="text-[10px] text-gray-600 mb-5 font-bold uppercase tracking-widest">Received via Share</p>
+                                        <button onClick={() => loadProject(ss)} className="w-full bg-brand-purple text-white py-2.5 rounded-2xl text-[10px] font-black uppercase shadow-lg hover:scale-105 transition-transform">Play Shared Show</button>
                                     </div>
                                 ))}
                                 {sharedSlideshows.length === 0 && (
                                     <div className="col-span-full py-10 bg-gray-900/40 rounded-[3rem] border border-dashed border-gray-800 text-center opacity-20">
-                                        <p className="text-[10px] font-black uppercase tracking-widest">No shared shows found</p>
+                                        <p className="text-[10px] font-black uppercase tracking-widest">No shared shows received</p>
                                     </div>
                                 )}
                             </div>
@@ -637,7 +664,7 @@ const App: React.FC = () => {
                     <div className="bg-gray-950 w-full max-w-2xl h-[80vh] rounded-[4rem] border border-gray-800 p-12 flex flex-col shadow-2xl">
                         <div className="flex justify-between items-center mb-12">
                             <div>
-                                <h2 className="text-3xl font-black uppercase tracking-tighter text-white">Music Browser</h2>
+                                <h2 className="text-3xl font-black uppercase tracking-tighter text-white">Apple Music</h2>
                             </div>
                             <button onClick={() => setIsMusicBrowserOpen(false)} className="w-12 h-12 bg-gray-900 rounded-full flex items-center justify-center text-gray-500 hover:text-white transition-all">✕</button>
                         </div>
@@ -645,9 +672,9 @@ const App: React.FC = () => {
                             {!appleMusicAuthorized && !isSimulationMode ? (
                                 <div className="text-center py-20 bg-gray-900/50 rounded-[3rem] border border-gray-800">
                                     <div className="w-20 h-20 bg-apple-red/20 text-apple-red rounded-[2rem] flex items-center justify-center mx-auto mb-8 text-3xl shadow-xl"></div>
-                                    <h3 className="text-xl font-bold mb-4 text-white">Apple Music Library</h3>
-                                    <p className="text-xs text-gray-500 mb-10 max-w-xs mx-auto leading-relaxed">Authorize to browse your personal playlists and library directly in the editor.</p>
-                                    <button onClick={handleAuthorizeApple} className="bg-apple-red text-white px-12 py-4 rounded-full font-bold shadow-2xl text-sm uppercase tracking-widest">Authorize Access</button>
+                                    <h3 className="text-xl font-bold mb-4 text-white">Connect Library</h3>
+                                    <p className="text-xs text-gray-500 mb-10 max-w-xs mx-auto leading-relaxed">Authorize Muziq Slides to browse your Apple Music library.</p>
+                                    <button onClick={handleAuthorizeApple} className="bg-apple-red text-white px-12 py-4 rounded-full font-bold shadow-2xl text-sm uppercase tracking-widest">Authorize Now</button>
                                     <button onClick={() => setIsSimulationMode(true)} className="block w-full mt-6 text-[10px] uppercase font-black text-gray-600 hover:text-brand-purple">Or use simulation mode</button>
                                 </div>
                             ) : (
@@ -661,7 +688,7 @@ const App: React.FC = () => {
                                                     <span className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">{Math.floor(track.duration / 60)}:{(track.duration % 60).toString().padStart(2,'0')}</span>
                                                 </div>
                                             </div>
-                                            <button className="bg-brand-purple/10 text-brand-purple px-6 py-2 rounded-xl text-[10px] font-black uppercase group-hover:bg-brand-purple group-hover:text-white transition-all">Add</button>
+                                            <button className="bg-brand-purple/10 text-brand-purple px-6 py-2 rounded-xl text-[10px] font-black uppercase group-hover:bg-brand-purple group-hover:text-white transition-all">Add Track</button>
                                         </div>
                                     ))}
                                 </div>
