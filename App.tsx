@@ -136,7 +136,8 @@ const TheaterMedia: React.FC<{
     isVisible: boolean;
     slideStyle: string;
     showCaptions: boolean;
-}> = ({ media, isVisible, slideStyle, showCaptions }) => {
+    globalVisualsMuted: boolean;
+}> = ({ media, isVisible, slideStyle, showCaptions, globalVisualsMuted }) => {
     const animationClass = isVisible ? `animate-${slideStyle}` : 'opacity-0 pointer-events-none';
     const mediaUrl = (media.base64 && (!media.previewUrl || media.previewUrl === '')) 
         ? `data:image/jpeg;base64,${media.base64}` 
@@ -146,9 +147,11 @@ const TheaterMedia: React.FC<{
 
     useEffect(() => {
         if (videoRef.current) {
-            videoRef.current.volume = media.isMuted ? 0 : (media.videoVolume ?? 1);
+            const individualMute = media.isMuted;
+            videoRef.current.volume = (globalVisualsMuted || individualMute) ? 0 : (media.videoVolume ?? 1);
+            videoRef.current.muted = globalVisualsMuted || individualMute;
         }
-    }, [media.isMuted, media.videoVolume, isVisible]);
+    }, [media.isMuted, media.videoVolume, isVisible, globalVisualsMuted]);
 
     return (
         <div className={`w-full h-full absolute inset-0 flex flex-col items-center justify-center transition-opacity duration-700 ${isVisible ? 'opacity-100 z-20' : 'opacity-0 z-10'}`}>
@@ -156,7 +159,7 @@ const TheaterMedia: React.FC<{
                 {media.type === 'image' ? (
                     <img src={mediaUrl} className="w-full h-full object-contain" alt="slide" />
                 ) : (
-                    <video ref={videoRef} src={mediaUrl} className="w-full h-full object-contain" autoPlay muted={media.isMuted} loop />
+                    <video ref={videoRef} src={mediaUrl} className="w-full h-full object-contain" autoPlay muted={globalVisualsMuted || media.isMuted} loop playsInline />
                 )}
             </div>
             {showCaptions && media.caption && isVisible && (
@@ -180,6 +183,11 @@ const App: React.FC = () => {
         repeatSlideshow: false, 
         showCaptions: true,
     });
+    const [trackMutes, setTrackMutes] = useState({
+        visuals: false,
+        music: false,
+        sfx: false
+    });
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentSlide, setCurrentSlide] = useState(0);
     const [elapsedTime, setElapsedTime] = useState(0); 
@@ -202,18 +210,22 @@ const App: React.FC = () => {
 
     const reconstructMedia = useCallback((media: MediaFile[]) => {
         return (media || []).map(m => {
+            // Robust check for legacy fields
+            const isMuted = m.isMuted ?? false;
+            const videoVolume = m.videoVolume ?? 1;
+            const caption = m.caption ?? '';
+            
             if (m.base64 && (!m.previewUrl || m.previewUrl === '' || m.previewUrl.startsWith('blob:'))) {
-                return { ...m, previewUrl: `data:image/jpeg;base64,${m.base64}` };
+                return { ...m, isMuted, videoVolume, caption, previewUrl: `data:image/jpeg;base64,${m.base64}` };
             }
-            return m;
+            return { ...m, isMuted, videoVolume, caption };
         });
     }, []);
 
-    // Helper to fix audio URLs after cloud restoration
     const reconstructAudio = useCallback((audioList: AppStateAudio[]) => {
         return (audioList || []).map(a => {
             let fixedUrl = a.previewUrl;
-            // If the URL is missing or empty (common in cloud restore), try to find the original based on source
+            // Support legacy cloud restore
             if (!fixedUrl || fixedUrl === '') {
                 if (a.source === 'sfx') {
                     const foundSfx = SFX_OPTIONS.find(s => s.name === a.name);
@@ -223,7 +235,13 @@ const App: React.FC = () => {
                     if (foundMock) fixedUrl = foundMock.previewUrl;
                 }
             }
-            return { ...a, previewUrl: fixedUrl };
+            return { 
+                ...a, 
+                previewUrl: fixedUrl, 
+                volume: a.volume ?? 0.8,
+                fadeIn: a.fadeIn ?? false,
+                fadeOut: a.fadeOut ?? false
+            };
         });
     }, []);
 
@@ -270,7 +288,7 @@ const App: React.FC = () => {
     useEffect(() => {
         if (isPlaying) {
             audioFiles.forEach(track => {
-                if (!track.previewUrl) return; // Skip broken tracks
+                if (!track.previewUrl) return; 
                 
                 let audio = audioPoolRef.current.get(track.id);
                 if (!audio) {
@@ -284,19 +302,22 @@ const App: React.FC = () => {
                     if (relativeTime >= 0 && relativeTime < track.duration) {
                         if (audio.paused) {
                             audio.currentTime = relativeTime;
-                            audio.play().catch(e => {
-                                console.warn("Audio play blocked, needs user interaction:", e);
-                            });
+                            audio.play().catch(e => console.warn("Engine play delayed:", e));
                         }
                         
-                        // Volume Logic
-                        let targetVolume = (track.volume !== undefined) ? track.volume : 0.8;
+                        // Volume Logic + Track Mutes
+                        const isGlobalMuted = track.source === 'sfx' ? trackMutes.sfx : trackMutes.music;
+                        let targetVolume = isGlobalMuted ? 0 : ((track.volume !== undefined) ? track.volume : 0.8);
+                        
                         if (track.fadeIn && relativeTime < 2) targetVolume *= (relativeTime / 2);
                         if (track.fadeOut && relativeTime > track.duration - 2) targetVolume *= ((track.duration - relativeTime) / 2);
                         
                         const finalVolume = Math.max(0, Math.min(1, targetVolume));
                         if (audio.volume !== finalVolume) {
                             audio.volume = finalVolume;
+                        }
+                        if (audio.muted !== isGlobalMuted) {
+                            audio.muted = isGlobalMuted;
                         }
                     } else {
                         if (!audio.paused) {
@@ -312,7 +333,7 @@ const App: React.FC = () => {
                 audio.currentTime = 0;
             });
         }
-    }, [isPlaying, elapsedTime, audioFiles]);
+    }, [isPlaying, elapsedTime, audioFiles, trackMutes]);
 
     const mediaWithTimestamps = useMemo(() => {
         let currentPos = 0;
@@ -416,18 +437,16 @@ const App: React.FC = () => {
     };
 
     const addSFX = (sfx: {name: string, url: string}) => {
-        // Immediate preview playback to unlock browser audio
         const preview = new Audio(sfx.url);
         preview.volume = 0.8;
-        preview.play().catch(e => console.warn("Preview audio blocked", e));
+        if (!trackMutes.sfx) preview.play().catch(e => console.warn("Preview blocked", e));
 
         const trackId = Math.random().toString(36).substr(2, 9);
         
-        // Add to state immediately with default duration
         setAudioFiles(p => [...p, { 
             id: trackId, 
             name: sfx.name, 
-            duration: 2, // Fallback duration
+            duration: 2, 
             originalDuration: 2,
             startTime: elapsedTime, 
             previewUrl: sfx.url, 
@@ -435,7 +454,6 @@ const App: React.FC = () => {
             volume: 0.8
         }]);
 
-        // Update with actual duration once metadata is loaded
         const audioLoader = new Audio(sfx.url);
         audioLoader.onloadedmetadata = () => {
             setAudioFiles(p => p.map(a => a.id === trackId ? {
@@ -559,8 +577,20 @@ const App: React.FC = () => {
 
                 {/* VISUALS TRACK */}
                 <div className="flex items-center gap-4 min-w-[1000px]">
-                    <div className="w-32 text-[10px] font-black uppercase tracking-widest text-gray-500">Visuals</div>
-                    <div className="flex h-16 bg-white/5 rounded-xl flex-1 relative border border-white/5">
+                    <div className="w-32 flex flex-col gap-1 items-start">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Visuals</span>
+                        <button 
+                            onClick={() => setTrackMutes(m => ({ ...m, visuals: !m.visuals }))}
+                            className={`p-1.5 rounded-lg border transition-all ${trackMutes.visuals ? 'bg-red-500/20 border-red-500/40 text-red-500' : 'bg-white/5 border-white/10 text-gray-500 hover:text-white'}`}
+                        >
+                            {trackMutes.visuals ? (
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+                            ) : (
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                            )}
+                        </button>
+                    </div>
+                    <div className={`flex h-16 bg-white/5 rounded-xl flex-1 relative border border-white/5 transition-opacity ${trackMutes.visuals ? 'opacity-30' : 'opacity-100'}`}>
                         {mediaWithTimestamps.map((m) => (
                             <div key={m.id} className="h-full border-r border-black/20 overflow-hidden relative" style={{width: (m.timelineEnd! - m.timelineStart!) * pixelsPerSecond}}>
                                 <img src={m.previewUrl} className="w-full h-full object-cover opacity-60" alt="" />
@@ -572,57 +602,37 @@ const App: React.FC = () => {
 
                 {/* MUSIC TRACK */}
                 <div className="flex items-center gap-4 min-w-[1000px]">
-                    <div className="w-32 text-[10px] font-black uppercase tracking-widest text-gray-500 flex flex-col gap-1">
-                        <span>Music</span>
-                        <button onClick={() => setIsMusicBrowserOpen(true)} className="text-[8px] bg-brand-purple/20 hover:bg-brand-purple/40 p-1 rounded transition-colors uppercase font-bold text-brand-purple">Add Track</button>
+                    <div className="w-32 flex flex-col gap-1 items-start">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Music</span>
+                        <div className="flex gap-1">
+                            <button 
+                                onClick={() => setTrackMutes(m => ({ ...m, music: !m.music }))}
+                                className={`p-1.5 rounded-lg border transition-all ${trackMutes.music ? 'bg-red-500/20 border-red-500/40 text-red-500' : 'bg-white/5 border-white/10 text-gray-500 hover:text-white'}`}
+                            >
+                                {trackMutes.music ? (
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+                                ) : (
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                                )}
+                            </button>
+                            <button onClick={() => setIsMusicBrowserOpen(true)} className="text-[8px] bg-brand-purple/20 hover:bg-brand-purple/40 px-2 py-1.5 rounded-lg transition-colors uppercase font-bold text-brand-purple">Add</button>
+                        </div>
                     </div>
-                    <div className="h-28 bg-white/5 rounded-xl flex-1 relative border border-white/5">
+                    <div className={`h-28 bg-white/5 rounded-xl flex-1 relative border border-white/5 transition-opacity ${trackMutes.music ? 'opacity-30' : 'opacity-100'}`}>
                         {audioFiles.filter(a => a.source !== 'sfx').map((a) => (
                             <div key={a.id} className="absolute h-24 bg-brand-purple/30 border border-brand-purple/40 rounded-xl p-3 group shadow-lg" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
                                 <div className="flex flex-col gap-2 h-full">
                                     <div className="flex justify-between items-center">
                                         <span className="text-[9px] font-bold truncate max-w-[100px] text-white">{a.name}</span>
-                                        <div className="flex gap-1">
-                                            <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeIn: !x.fadeIn} : x))} className={`p-1 rounded text-[8px] font-bold ${a.fadeIn ? 'bg-brand-purple text-white shadow-sm' : 'bg-black/40 text-gray-400'}`}>FADE IN</button>
-                                            <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeOut: !x.fadeOut} : x))} className={`p-1 rounded text-[8px] font-bold ${a.fadeOut ? 'bg-brand-purple text-white shadow-sm' : 'bg-black/40 text-gray-400'}`}>FADE OUT</button>
-                                            <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="p-1 rounded text-[8px] bg-red-600 text-white">✕</button>
-                                        </div>
+                                        <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="p-1 rounded text-[8px] bg-red-600 text-white">✕</button>
                                     </div>
-
-                                    {/* VOLUME CONTROL */}
                                     <div className="flex items-center gap-2">
                                         <span className="text-[8px] font-black text-gray-400">VOL</span>
-                                        <input 
-                                            type="range" 
-                                            min="0" max="1" step="0.01" 
-                                            value={a.volume ?? 0.8} 
-                                            onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, volume: parseFloat(e.target.value)} : x))}
-                                            className="flex-1 h-1 accent-white appearance-none bg-white/20 rounded-full cursor-pointer" 
-                                        />
+                                        <input type="range" min="0" max="1" step="0.01" value={a.volume ?? 0.8} onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, volume: parseFloat(e.target.value)} : x))} className="flex-1 h-1 accent-white appearance-none bg-white/20 rounded-full cursor-pointer" />
                                     </div>
-
-                                    {/* POSITION CONTROL */}
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[8px] font-black text-gray-400">POS</span>
-                                        <input 
-                                            type="range" 
-                                            min="0" max={Math.max(totalSlideshowDuration, 60)} step="0.1" 
-                                            value={a.startTime} 
-                                            onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: parseFloat(e.target.value)} : x))}
-                                            className="flex-1 h-1 accent-brand-purple appearance-none bg-brand-purple/20 rounded-full cursor-pointer" 
-                                        />
-                                    </div>
-
-                                    {/* TRIM CONTROL */}
                                     <div className="flex items-center gap-2">
                                         <span className="text-[8px] font-black text-gray-400">TRIM</span>
-                                        <input 
-                                            type="range" 
-                                            min="0.5" max={a.originalDuration || a.duration || 10} step="0.1" 
-                                            value={a.duration} 
-                                            onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, duration: parseFloat(e.target.value)} : x))}
-                                            className="flex-1 h-1 accent-apple-red appearance-none bg-apple-red/20 rounded-full cursor-pointer" 
-                                        />
+                                        <input type="range" min="0.5" max={a.originalDuration || a.duration || 10} step="0.1" value={a.duration} onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, duration: parseFloat(e.target.value)} : x))} className="flex-1 h-1 accent-apple-red appearance-none bg-apple-red/20 rounded-full cursor-pointer" />
                                     </div>
                                 </div>
                             </div>
@@ -632,8 +642,20 @@ const App: React.FC = () => {
 
                 {/* SFX TRACK */}
                 <div className="flex items-center gap-4 min-w-[1000px]">
-                    <div className="w-32 text-[10px] font-black uppercase tracking-widest text-gray-500">SFX</div>
-                    <div className="h-24 bg-white/5 rounded-xl flex-1 relative border border-white/5">
+                    <div className="w-32 flex flex-col gap-1 items-start">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">SFX</span>
+                        <button 
+                            onClick={() => setTrackMutes(m => ({ ...m, sfx: !m.sfx }))}
+                            className={`p-1.5 rounded-lg border transition-all ${trackMutes.sfx ? 'bg-red-500/20 border-red-500/40 text-red-500' : 'bg-white/5 border-white/10 text-gray-500 hover:text-white'}`}
+                        >
+                            {trackMutes.sfx ? (
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+                            ) : (
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                            )}
+                        </button>
+                    </div>
+                    <div className={`h-24 bg-white/5 rounded-xl flex-1 relative border border-white/5 transition-opacity ${trackMutes.sfx ? 'opacity-30' : 'opacity-100'}`}>
                         {audioFiles.filter(a => a.source === 'sfx').map((a) => (
                             <div key={a.id} className="absolute h-20 bg-apple-red/30 border border-apple-red/40 rounded-xl p-3 group shadow-lg" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
                                 <div className="flex flex-col gap-2 h-full">
@@ -642,22 +664,7 @@ const App: React.FC = () => {
                                         <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-[8px] bg-black/40 p-1 rounded text-white">✕</button>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        <input 
-                                            type="range" 
-                                            min="0" max={Math.max(totalSlideshowDuration, 60)} step="0.1" 
-                                            value={a.startTime} 
-                                            onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: parseFloat(e.target.value)} : x))}
-                                            className="flex-1 h-0.5 accent-apple-red appearance-none bg-apple-red/20 rounded-full" 
-                                        />
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <input 
-                                            type="range" 
-                                            min="0" max="1" step="0.1" 
-                                            value={a.volume ?? 0.8} 
-                                            onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, volume: parseFloat(e.target.value)} : x))}
-                                            className="flex-1 h-0.5 accent-white appearance-none bg-white/20 rounded-full" 
-                                        />
+                                        <input type="range" min="0" max="1" step="0.1" value={a.volume ?? 0.8} onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, volume: parseFloat(e.target.value)} : x))} className="flex-1 h-0.5 accent-white appearance-none bg-white/20 rounded-full" />
                                     </div>
                                 </div>
                             </div>
@@ -672,7 +679,6 @@ const App: React.FC = () => {
 
     return (
         <div className={`min-h-screen font-sans bg-brand-dark text-gray-200 overflow-x-hidden`}>
-            {/* STICKY HEADER */}
             <header className="fixed top-0 left-0 right-0 p-4 flex justify-between items-center z-[100] bg-gray-900/40 backdrop-blur-2xl border-b border-white/5">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})}>
                     <div className="w-8 h-8 bg-brand-purple rounded-lg flex items-center justify-center font-black text-white shadow-lg shadow-brand-purple/20">M</div>
@@ -697,7 +703,6 @@ const App: React.FC = () => {
 
             {!user ? (
                 <main className="animate-fade-in">
-                    {/* HERO */}
                     <section className="min-h-screen flex flex-col items-center justify-center text-center px-4 pt-20 bg-gradient-to-b from-brand-dark to-gray-900">
                         <div className="space-y-4 mb-12">
                             <h2 className="text-7xl md:text-[9rem] font-black tracking-tighter text-white leading-none">Muziq Slides</h2>
@@ -710,65 +715,11 @@ const App: React.FC = () => {
                             </button>
                         </div>
                     </section>
-                    {/* FEATURES */}
-                    <div id="features">
-                        <section className="min-h-screen flex flex-col md:flex-row items-center justify-center p-8 md:p-24 gap-16 border-t border-white/5">
-                            <div className="md:w-1/2 space-y-8">
-                                <span className="text-brand-purple font-black uppercase tracking-[0.3em] text-xs block">Cinematic Canvas</span>
-                                <h3 className="text-5xl md:text-7xl font-black tracking-tighter text-white">20 High-Res Collections.</h3>
-                                <p className="text-xl text-gray-400 leading-relaxed">Upload up to 20 images or videos. Every frame is optimized for high-performance rendering.</p>
-                            </div>
-                            <div className="md:w-1/2 bg-gray-800/20 aspect-video rounded-[3rem] border border-white/5 flex items-center justify-center">
-                                <div className="grid grid-cols-4 gap-4 w-full h-full p-8 opacity-40">
-                                    {[1,2,3,4,5,6,7,8].map(i => <div key={i} className="aspect-square bg-gray-700/50 rounded-2xl"></div>)}
-                                </div>
-                            </div>
-                        </section>
-                        <section className="min-h-screen flex flex-col md:flex-row-reverse items-center justify-center p-8 md:p-24 gap-16 bg-white/[0.02]">
-                            <div className="md:w-1/2 space-y-8">
-                                <span className="text-apple-red font-black uppercase tracking-[0.3em] text-xs block">Perfect Harmony</span>
-                                <h3 className="text-5xl md:text-7xl font-black tracking-tighter text-white">Apple Music Sync.</h3>
-                                <p className="text-xl text-gray-400 leading-relaxed">Connect your library and pair your favorite tracks with your visual story. Choose from your playlists or our simulation tracks.</p>
-                            </div>
-                            <div className="md:w-1/2 bg-apple-red/5 aspect-video rounded-[3rem] border border-apple-red/10 flex items-center justify-center p-12 text-[10rem] text-apple-red opacity-20"></div>
-                        </section>
-                    </div>
-                    {/* FOOTER */}
-                    <footer id="support" className="bg-gray-950 border-t border-white/5 py-32 px-8">
-                        <div className="max-w-7xl mx-auto grid md:grid-cols-4 gap-16">
-                            <div className="col-span-2 space-y-8">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-8 h-8 bg-brand-purple rounded-lg flex items-center justify-center font-black text-white">M</div>
-                                    <h1 className="text-xl font-bold tracking-tight text-white uppercase"><span className="text-brand-purple">Muziq</span> Slides</h1>
-                                </div>
-                                <p className="text-gray-500 text-lg leading-relaxed max-w-sm">Premier destination for cinematic memory storytelling. Powered by Google Gemini AI.</p>
-                            </div>
-                            <div className="space-y-6">
-                                <h4 className="text-[10px] font-black uppercase tracking-widest text-brand-purple">Legal</h4>
-                                <ul className="space-y-4 text-sm text-gray-500">
-                                    <li>Privacy Policy</li>
-                                    <li>Terms of Service</li>
-                                </ul>
-                            </div>
-                            <div className="space-y-6">
-                                <h4 className="text-[10px] font-black uppercase tracking-widest text-brand-purple">Support</h4>
-                                <ul className="space-y-4 text-sm text-gray-500">
-                                    <li>support@muziqslides.com</li>
-                                    <li>Help Center</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </footer>
                 </main>
             ) : (
                 <main className="p-4 max-w-7xl mx-auto py-24 animate-fade-in">
                     <div className="flex flex-col md:flex-row justify-between items-center mb-12 gap-6">
-                        <input 
-                            value={slideshowName} 
-                            onChange={(e) => setSlideshowName(e.target.value)} 
-                            placeholder="Untitled Slideshow" 
-                            className="bg-transparent text-5xl md:text-7xl font-black text-white/90 outline-none w-full placeholder:text-white/10 tracking-tighter" 
-                        />
+                        <input value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Untitled Slideshow" className="bg-transparent text-5xl md:text-7xl font-black text-white/90 outline-none w-full placeholder:text-white/10 tracking-tighter" />
                         <div className="flex flex-wrap gap-4 shrink-0">
                             {viewMode === 'studio' && (
                                 <button onClick={() => setViewMode('easy')} className="bg-white/10 hover:bg-white/20 text-white px-8 py-3 rounded-full text-xs font-bold border border-white/10 flex items-center gap-2 transition-colors">
@@ -788,22 +739,13 @@ const App: React.FC = () => {
                                     <div className="flex items-center gap-6">
                                         <h3 className="text-xs font-black uppercase text-brand-purple tracking-widest">Multi-Track Editor</h3>
                                         <div className="flex items-center gap-2 bg-black/40 p-1.5 rounded-full border border-white/5">
-                                            <button 
-                                                onClick={() => setIsPlaying(!isPlaying)} 
-                                                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isPlaying ? 'bg-brand-purple text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}
-                                            >
-                                                {isPlaying ? (
-                                                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                                                ) : (
-                                                    <svg className="w-4 h-4 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                                                )}
+                                            <button onClick={() => setIsPlaying(!isPlaying)} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isPlaying ? 'bg-brand-purple text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+                                                {isPlaying ? <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg> : <svg className="w-4 h-4 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>}
                                             </button>
                                             <span className="text-[10px] font-black text-gray-400 uppercase px-4">{elapsedTime.toFixed(1)}s / {totalSlideshowDuration.toFixed(1)}s</span>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-4">
-                                        <button onClick={() => setElapsedTime(0)} className="text-[10px] font-black uppercase text-gray-500 hover:text-white transition-colors">Reset Cursor</button>
-                                    </div>
+                                    <button onClick={() => setElapsedTime(0)} className="text-[10px] font-black uppercase text-gray-500 hover:text-white transition-colors">Reset Cursor</button>
                                 </div>
                                 <StudioTimeline />
                             </section>
@@ -828,7 +770,7 @@ const App: React.FC = () => {
                                                 </div>
                                                 <div className="flex-1 space-y-2">
                                                     <div className="flex justify-between items-center">
-                                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">Volume Profile</span>
+                                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">Individual Video Volume</span>
                                                         <button onClick={() => toggleMuteMedia(m.id)} className={`text-[8px] font-black p-1 px-3 rounded-full transition-all ${m.isMuted ? 'bg-red-500/20 text-red-500 border border-red-500/40' : 'bg-brand-purple/20 text-brand-purple border border-brand-purple/40'}`}>
                                                             {m.isMuted ? 'MUTED' : 'ON AIR'}
                                                         </button>
@@ -837,12 +779,6 @@ const App: React.FC = () => {
                                                 </div>
                                             </div>
                                         ))}
-                                        {mediaFiles.filter(m => m.type === 'video').length === 0 && (
-                                            <div className="text-center py-12 opacity-10 flex flex-col items-center gap-4">
-                                                <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-                                                <p className="text-[10px] font-black uppercase tracking-widest">No Video Layers Found</p>
-                                            </div>
-                                        )}
                                     </div>
                                 </section>
                             </div>
@@ -870,11 +806,7 @@ const App: React.FC = () => {
                                             </div>
                                         ))}
                                     </div>
-                                    <button onClick={generateSmartCaptions} disabled={isProcessingCaptions} className="w-full bg-brand-purple/10 text-brand-purple py-3 rounded-2xl text-[10px] font-black uppercase border border-brand-purple/20 hover:bg-brand-purple hover:text-white transition-all">
-                                        {isProcessingCaptions ? 'AI is writing...' : '✨ Auto-Captions'}
-                                    </button>
                                 </section>
-
                                 <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5 shadow-xl">
                                     <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Master Soundtrack</h3>
                                     <div className="grid grid-cols-2 gap-2 mb-4">
@@ -884,37 +816,8 @@ const App: React.FC = () => {
                                         </div>
                                         <button onClick={() => setIsMusicBrowserOpen(true)} className="w-full bg-apple-red/10 py-3 rounded-xl text-[10px] font-black uppercase text-apple-red border border-apple-red/20 hover:bg-apple-red hover:text-white transition-colors">Apple Music</button>
                                     </div>
-                                    <div className="space-y-2">
-                                        {audioFiles.length > 0 ? audioFiles.map(a => (
-                                            <div key={a.id} className="bg-black/20 p-3 rounded-xl text-[10px] flex justify-between items-center border border-white/5">
-                                                <div className="flex items-center gap-2 overflow-hidden">
-                                                    <span className="w-2 h-2 rounded-full bg-brand-purple animate-pulse"></span>
-                                                    <span className="truncate font-bold text-gray-300">{a.name}</span>
-                                                </div>
-                                                <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-gray-600 hover:text-red-500 transition-colors">🗑️</button>
-                                            </div>
-                                        )) : (
-                                            <p className="text-[10px] text-gray-700 text-center py-4 font-black uppercase tracking-widest italic">No Audio Layers</p>
-                                        )}
-                                    </div>
-                                </section>
-
-                                <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5 shadow-xl">
-                                    <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Motion Styles</h3>
-                                    <div className="grid grid-cols-2 gap-2 mb-4">
-                                        {['ken-burns', 'fade-in', 'slide-from-right', 'zoom-in'].map(style => (
-                                            <button key={style} onClick={() => setSettings(s => ({...s, slideStyle: style}))} className={`py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${settings.slideStyle === style ? 'bg-brand-purple text-white shadow-lg border-brand-purple' : 'bg-gray-800 border-white/5 text-gray-500 hover:border-white/10'}`}>
-                                                {style.replace(/-/g, ' ')}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <div className="mt-6">
-                                        <label className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-3 block">Frame Duration: <span className="text-white">{settings.interval}s</span></label>
-                                        <input type="range" min="1" max="20" step="1" value={settings.interval} onChange={(e) => setSettings(s => ({ ...s, interval: parseInt(e.target.value) }))} className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
-                                    </div>
                                 </section>
                             </div>
-
                             <div className="md:col-span-8 space-y-8">
                                 <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5 shadow-2xl">
                                     <div className="aspect-video bg-gray-950 rounded-[3rem] relative overflow-hidden border border-white/10 flex items-center justify-center group">
@@ -922,20 +825,19 @@ const App: React.FC = () => {
                                             <div className="w-full h-full relative">
                                                 <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover opacity-20 blur-md scale-110" alt="" />
                                                 <div className="absolute inset-0 flex items-center justify-center">
-                                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-24 h-24 bg-brand-purple rounded-full flex items-center justify-center shadow-[0_0_50px_rgba(109,40,217,0.5)] hover:scale-110 active:scale-95 transition-all">
+                                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-24 h-24 bg-brand-purple rounded-full flex items-center justify-center shadow-2xl hover:scale-110 transition-all">
                                                         <svg className="w-10 h-10 text-white ml-2" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                                                     </button>
                                                 </div>
                                             </div>
                                         ) : (
                                             <div className="text-center p-12 opacity-10 flex flex-col items-center">
-                                                <div className="w-24 h-24 bg-gray-900 border border-white/10 rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 text-4xl shadow-2xl">🎬</div>
+                                                <div className="w-24 h-24 bg-gray-900 border border-white/10 rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 text-4xl">🎬</div>
                                                 <p className="text-xs font-black uppercase tracking-[0.3em]">Timeline Empty</p>
                                             </div>
                                         )}
                                     </div>
                                 </section>
-
                                 <section className="space-y-6">
                                     <div className="flex justify-between items-center px-4">
                                         <h3 className="text-xs font-black uppercase text-gray-500 tracking-widest">Saved Collections</h3>
@@ -952,17 +854,12 @@ const App: React.FC = () => {
                                                 </div>
                                                 <h4 className="font-bold truncate text-sm mb-1 text-gray-200">{ss.name}</h4>
                                                 <div className="flex gap-2 mt-4">
-                                                    <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple/10 text-brand-purple py-2 rounded-xl text-[10px] font-black uppercase hover:bg-brand-purple hover:text-white transition-colors">Load</button>
-                                                    <button onClick={() => shareProject(ss.id)} className="flex-1 bg-white/5 text-gray-400 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-white/10 transition-colors">Share</button>
-                                                    <button onClick={() => deleteSlideshow(ss.id)} className="p-2 text-red-500/50 hover:text-red-500 transition-colors">🗑️</button>
+                                                    <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple/10 text-brand-purple py-2 rounded-xl text-[10px] font-black uppercase hover:bg-brand-purple">Load</button>
+                                                    <button onClick={() => shareProject(ss.id)} className="flex-1 bg-white/5 text-gray-400 py-2 rounded-xl text-[10px] font-black uppercase">Share</button>
+                                                    <button onClick={() => deleteSlideshow(ss.id)} className="p-2 text-red-500/50 hover:text-red-500">🗑️</button>
                                                 </div>
                                             </div>
                                         ))}
-                                        {ownedSlideshows.length === 0 && (
-                                            <div className="col-span-full py-24 text-center opacity-10 border-2 border-dashed border-white/5 rounded-[3rem]">
-                                                <p className="text-[10px] font-black uppercase tracking-[0.3em]">No Projects Found</p>
-                                            </div>
-                                        )}
                                     </div>
                                 </section>
                             </div>
@@ -971,33 +868,30 @@ const App: React.FC = () => {
                 </main>
             )}
 
-            {/* MODALS */}
             {isMusicBrowserOpen && (
                 <div className="fixed inset-0 bg-black/98 z-[500] flex items-center justify-center p-6 backdrop-blur-3xl animate-fade-in">
-                    <div className="bg-gray-950 w-full max-w-2xl h-[80vh] rounded-[4rem] border border-white/10 p-12 flex flex-col shadow-[0_0_100px_rgba(0,0,0,1)]">
+                    <div className="bg-gray-950 w-full max-w-2xl h-[80vh] rounded-[4rem] border border-white/10 p-12 flex flex-col shadow-2xl">
                         <div className="flex justify-between items-center mb-12">
                             <h2 className="text-3xl font-black uppercase tracking-tighter text-white">Music Vault</h2>
                             <button onClick={() => setIsMusicBrowserOpen(false)} className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center text-gray-500 hover:text-white transition-all border border-white/5">✕</button>
                         </div>
-                        <div className="flex-1 overflow-y-auto pr-2 space-y-4 custom-scrollbar">
-                            {!appleMusicAuthorized && !isSimulationMode ? (
-                                <div className="text-center py-24 bg-white/5 rounded-[4rem] border border-white/5">
-                                    <div className="w-24 h-24 bg-apple-red/10 text-apple-red rounded-[2.5rem] flex items-center justify-center mx-auto mb-10 text-4xl shadow-2xl"></div>
-                                    <h3 className="text-2xl font-black mb-4 text-white uppercase tracking-tight">Connect Library</h3>
-                                    <button onClick={() => setIsSimulationMode(true)} className="bg-apple-red text-white px-16 py-5 rounded-full font-black shadow-[0_15px_30px_rgba(250,36,60,0.3)] text-xs uppercase tracking-[0.2em] hover:scale-105 active:scale-95 transition-all">Browse Simulation</button>
+                        <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+                            {!isSimulationMode ? (
+                                <div className="text-center py-24">
+                                    <button onClick={() => setIsSimulationMode(true)} className="bg-apple-red text-white px-16 py-5 rounded-full font-black text-xs uppercase tracking-[0.2em] hover:scale-105 transition-all">Browse Simulation</button>
                                 </div>
                             ) : (
                                 <div className="grid gap-4">
                                     {MOCK_TRACKS.map(track => (
                                         <div key={track.id} className="bg-white/5 p-6 rounded-[2.5rem] border border-white/5 flex justify-between items-center hover:bg-white/10 hover:border-brand-purple cursor-pointer transition-all group" onClick={() => { setAudioFiles(p => [...p, { ...track, startTime: elapsedTime }]); setIsMusicBrowserOpen(false); }}>
                                             <div className="flex items-center gap-5">
-                                                <div className="w-14 h-14 bg-gray-900 rounded-2xl flex items-center justify-center text-xl shadow-inner group-hover:bg-brand-purple/20 transition-colors">🎵</div>
+                                                <div className="w-14 h-14 bg-gray-900 rounded-2xl flex items-center justify-center text-xl">🎵</div>
                                                 <div className="flex flex-col">
                                                     <span className="font-black text-white text-base tracking-tight">{track.name}</span>
-                                                    <span className="text-[10px] text-gray-600 uppercase font-black tracking-widest">{Math.floor(track.duration / 60)}:{(track.duration % 60).toString().padStart(2,'0')}</span>
+                                                    <span className="text-[10px] text-gray-600 uppercase font-black">{Math.floor(track.duration / 60)}:{(track.duration % 60).toString().padStart(2,'0')}</span>
                                                 </div>
                                             </div>
-                                            <button className="bg-brand-purple/20 text-brand-purple px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest group-hover:bg-brand-purple group-hover:text-white transition-all">Add to Mix</button>
+                                            <button className="bg-brand-purple/20 text-brand-purple px-8 py-3 rounded-2xl text-[10px] font-black uppercase group-hover:bg-brand-purple group-hover:text-white transition-all">Add to Mix</button>
                                         </div>
                                     ))}
                                 </div>
@@ -1012,7 +906,7 @@ const App: React.FC = () => {
                     <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white/20 hover:text-white p-5 z-[610] text-4xl transition-all cursor-pointer">✕</button>
                     <div className="w-full h-full relative overflow-hidden flex items-center justify-center">
                         {mediaWithTimestamps.map((m, idx) => (
-                            <TheaterMedia key={m.id} media={m} isVisible={idx === currentSlide} slideStyle={settings.slideStyle} showCaptions={settings.showCaptions} />
+                            <TheaterMedia key={m.id} media={m} isVisible={idx === currentSlide} slideStyle={settings.slideStyle} showCaptions={settings.showCaptions} globalVisualsMuted={trackMutes.visuals} />
                         ))}
                     </div>
                     <div className="absolute bottom-0 left-0 h-1.5 bg-brand-purple z-[620] transition-all duration-200 shadow-[0_0_30px_rgba(109,40,217,1)]" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }}></div>
@@ -1021,10 +915,7 @@ const App: React.FC = () => {
             
             {error && (
                 <div className="fixed bottom-10 right-10 bg-red-600 text-white p-8 rounded-[2.5rem] shadow-2xl z-[700] flex gap-8 items-center border border-white/20 animate-slide-from-bottom">
-                    <div className="flex flex-col gap-1">
-                        <span className="text-[10px] font-black uppercase opacity-60 tracking-widest">System Alert</span>
-                        <p className="text-sm font-bold tracking-tight">{error}</p>
-                    </div>
+                    <p className="text-sm font-bold tracking-tight">{error}</p>
                     <button onClick={() => setError(null)} className="p-3 bg-white/20 hover:bg-white/40 rounded-full transition-all text-xs">✕</button>
                 </div>
             )}
