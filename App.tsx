@@ -263,7 +263,7 @@ const App: React.FC = () => {
                     if (relativeTime >= 0 && relativeTime < track.duration) {
                         if (audio.paused) {
                             audio.currentTime = relativeTime;
-                            audio.play().catch(e => console.error("Audio play failed:", e));
+                            audio.play().catch(e => console.warn("Audio play blocked by browser:", e));
                         }
                         
                         // Volume Logic
@@ -394,6 +394,11 @@ const App: React.FC = () => {
     };
 
     const addSFX = (sfx: {name: string, url: string}) => {
+        // Immediate preview playback
+        const preview = new Audio(sfx.url);
+        preview.volume = 0.8;
+        preview.play().catch(() => {});
+
         const audio = new Audio(sfx.url);
         audio.onloadedmetadata = () => {
             setAudioFiles(p => [...p, { 
@@ -420,7 +425,6 @@ const App: React.FC = () => {
         });
     };
 
-    // --- Media Controls ---
     const toggleMuteMedia = (id: string) => {
         setMediaFiles(prev => prev.map(m => 
             m.id === id ? { ...m, isMuted: !m.isMuted } : m
@@ -511,24 +515,24 @@ const App: React.FC = () => {
     const StudioTimeline = () => {
         const pixelsPerSecond = 20;
         return (
-            <div className="bg-gray-900 rounded-[2rem] border border-white/5 p-8 space-y-4 overflow-x-auto relative">
+            <div className="bg-gray-900 rounded-[2rem] border border-white/5 p-8 space-y-4 overflow-x-auto relative shadow-inner">
                 <div className="relative h-12 border-b border-white/5 mb-4 min-w-[1000px]">
                     {Array.from({length: Math.ceil(Math.max(totalSlideshowDuration, 60) / 5) + 5}).map((_, i) => (
                         <div key={i} className="absolute text-[8px] font-black text-gray-700" style={{left: i * 5 * pixelsPerSecond}}>
                             {i * 5}s
                         </div>
                     ))}
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-brand-purple z-10 transition-all duration-100" style={{left: elapsedTime * pixelsPerSecond}}></div>
+                    <div className="absolute top-0 bottom-0 w-0.5 bg-brand-purple z-10 transition-all duration-100 shadow-[0_0_10px_rgba(109,40,217,0.5)]" style={{left: elapsedTime * pixelsPerSecond}}></div>
                 </div>
 
                 {/* VISUALS TRACK */}
                 <div className="flex items-center gap-4 min-w-[1000px]">
                     <div className="w-32 text-[10px] font-black uppercase tracking-widest text-gray-500">Visuals</div>
-                    <div className="flex h-16 bg-white/5 rounded-xl flex-1 relative">
+                    <div className="flex h-16 bg-white/5 rounded-xl flex-1 relative border border-white/5">
                         {mediaWithTimestamps.map((m) => (
                             <div key={m.id} className="h-full border-r border-black/20 overflow-hidden relative" style={{width: (m.timelineEnd! - m.timelineStart!) * pixelsPerSecond}}>
                                 <img src={m.previewUrl} className="w-full h-full object-cover opacity-60" alt="" />
-                                <div className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-white shadow-sm">{m.type === 'video' ? '🎬' : '📷'}</div>
+                                <div className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-white shadow-sm bg-black/20">{m.type === 'video' ? '🎬' : '📷'}</div>
                             </div>
                         ))}
                     </div>
@@ -538,18 +542,18 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-4 min-w-[1000px]">
                     <div className="w-32 text-[10px] font-black uppercase tracking-widest text-gray-500 flex flex-col gap-1">
                         <span>Music</span>
-                        <button onClick={() => setIsMusicBrowserOpen(true)} className="text-[8px] bg-brand-purple/20 hover:bg-brand-purple/40 p-1 rounded transition-colors uppercase font-bold">Add Track</button>
+                        <button onClick={() => setIsMusicBrowserOpen(true)} className="text-[8px] bg-brand-purple/20 hover:bg-brand-purple/40 p-1 rounded transition-colors uppercase font-bold text-brand-purple">Add Track</button>
                     </div>
-                    <div className="h-28 bg-white/5 rounded-xl flex-1 relative">
+                    <div className="h-28 bg-white/5 rounded-xl flex-1 relative border border-white/5">
                         {audioFiles.filter(a => a.source !== 'sfx').map((a) => (
-                            <div key={a.id} className="absolute h-24 bg-brand-purple/30 border border-brand-purple/40 rounded-xl p-3 group" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
+                            <div key={a.id} className="absolute h-24 bg-brand-purple/30 border border-brand-purple/40 rounded-xl p-3 group shadow-lg" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
                                 <div className="flex flex-col gap-2 h-full">
                                     <div className="flex justify-between items-center">
-                                        <span className="text-[9px] font-bold truncate max-w-[100px]">{a.name}</span>
+                                        <span className="text-[9px] font-bold truncate max-w-[100px] text-white">{a.name}</span>
                                         <div className="flex gap-1">
-                                            <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeIn: !x.fadeIn} : x))} className={`p-1 rounded text-[8px] font-bold ${a.fadeIn ? 'bg-brand-purple text-white' : 'bg-black/40 text-gray-400'}`}>FADE IN</button>
-                                            <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeOut: !x.fadeOut} : x))} className={`p-1 rounded text-[8px] font-bold ${a.fadeOut ? 'bg-brand-purple text-white' : 'bg-black/40'}`}>FADE OUT</button>
-                                            <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="p-1 rounded text-[8px] bg-red-500 text-white">✕</button>
+                                            <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeIn: !x.fadeIn} : x))} className={`p-1 rounded text-[8px] font-bold ${a.fadeIn ? 'bg-brand-purple text-white shadow-sm' : 'bg-black/40 text-gray-400'}`}>FADE IN</button>
+                                            <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeOut: !x.fadeOut} : x))} className={`p-1 rounded text-[8px] font-bold ${a.fadeOut ? 'bg-brand-purple text-white shadow-sm' : 'bg-black/40 text-gray-400'}`}>FADE OUT</button>
+                                            <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="p-1 rounded text-[8px] bg-red-600 text-white">✕</button>
                                         </div>
                                     </div>
 
@@ -597,13 +601,13 @@ const App: React.FC = () => {
                 {/* SFX TRACK */}
                 <div className="flex items-center gap-4 min-w-[1000px]">
                     <div className="w-32 text-[10px] font-black uppercase tracking-widest text-gray-500">SFX</div>
-                    <div className="h-24 bg-white/5 rounded-xl flex-1 relative">
+                    <div className="h-24 bg-white/5 rounded-xl flex-1 relative border border-white/5">
                         {audioFiles.filter(a => a.source === 'sfx').map((a) => (
-                            <div key={a.id} className="absolute h-20 bg-apple-red/30 border border-apple-red/40 rounded-xl p-3 group" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
+                            <div key={a.id} className="absolute h-20 bg-apple-red/30 border border-apple-red/40 rounded-xl p-3 group shadow-lg" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
                                 <div className="flex flex-col gap-2 h-full">
                                     <div className="flex justify-between items-center">
-                                        <span className="text-[8px] font-bold truncate max-w-[80px]">{a.name}</span>
-                                        <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-[8px] bg-black/40 p-1 rounded">✕</button>
+                                        <span className="text-[8px] font-bold truncate max-w-[80px] text-white">{a.name}</span>
+                                        <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-[8px] bg-black/40 p-1 rounded text-white">✕</button>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <input 
@@ -735,172 +739,196 @@ const App: React.FC = () => {
                         />
                         <div className="flex flex-wrap gap-4 shrink-0">
                             {viewMode === 'studio' && (
-                                <button onClick={() => setViewMode('easy')} className="bg-white/10 hover:bg-white/20 text-white px-8 py-3 rounded-full text-xs font-bold border border-white/10 flex items-center gap-2">
+                                <button onClick={() => setViewMode('easy')} className="bg-white/10 hover:bg-white/20 text-white px-8 py-3 rounded-full text-xs font-bold border border-white/10 flex items-center gap-2 transition-colors">
                                     <span>← Exit Studio</span>
                                 </button>
                             )}
-                            <button onClick={() => setViewMode(v => v === 'easy' ? 'studio' : 'easy')} className={`px-8 py-3 rounded-full text-xs font-bold border transition-all ${viewMode === 'studio' ? 'bg-brand-purple border-brand-purple' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>Studio</button>
-                            <button onClick={saveSlideshow} className="bg-white/5 hover:bg-white/10 text-white px-8 py-3 rounded-full text-xs font-bold border border-white/10">Save</button>
-                            <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl hover:scale-105">Preview</button>
+                            <button onClick={() => setViewMode(v => v === 'easy' ? 'studio' : 'easy')} className={`px-8 py-3 rounded-full text-xs font-bold border transition-all ${viewMode === 'studio' ? 'bg-brand-purple border-brand-purple shadow-[0_0_15px_rgba(109,40,217,0.4)]' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>Studio</button>
+                            <button onClick={saveSlideshow} className="bg-white/5 hover:bg-white/10 text-white px-8 py-3 rounded-full text-xs font-bold border border-white/10 transition-colors">Save</button>
+                            <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl hover:scale-105 transition-transform">Preview</button>
                         </div>
                     </div>
 
                     {viewMode === 'studio' ? (
-                        <div className="space-y-8">
-                            <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5">
+                        <div className="space-y-8 animate-fade-in">
+                            <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5 shadow-2xl">
                                 <div className="flex justify-between items-center mb-6">
-                                    <h3 className="text-xs font-black uppercase text-brand-purple tracking-widest">Multi-Track Editor</h3>
+                                    <div className="flex items-center gap-6">
+                                        <h3 className="text-xs font-black uppercase text-brand-purple tracking-widest">Multi-Track Editor</h3>
+                                        <div className="flex items-center gap-2 bg-black/40 p-1.5 rounded-full border border-white/5">
+                                            <button 
+                                                onClick={() => setIsPlaying(!isPlaying)} 
+                                                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isPlaying ? 'bg-brand-purple text-white' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                                            >
+                                                {isPlaying ? (
+                                                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                                                ) : (
+                                                    <svg className="w-4 h-4 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                                )}
+                                            </button>
+                                            <span className="text-[10px] font-black text-gray-400 uppercase px-4">{elapsedTime.toFixed(1)}s / {totalSlideshowDuration.toFixed(1)}s</span>
+                                        </div>
+                                    </div>
                                     <div className="flex items-center gap-4">
-                                        <span className="text-xs font-black text-gray-500 uppercase">Timeline Cursor: {elapsedTime.toFixed(1)}s</span>
-                                        <button onClick={() => setElapsedTime(0)} className="text-[10px] font-black uppercase text-gray-400 hover:text-white">Reset</button>
+                                        <button onClick={() => setElapsedTime(0)} className="text-[10px] font-black uppercase text-gray-500 hover:text-white transition-colors">Reset Cursor</button>
                                     </div>
                                 </div>
                                 <StudioTimeline />
                             </section>
                             <div className="grid md:grid-cols-2 gap-8">
                                 <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5">
-                                    <h3 className="text-xs font-black uppercase mb-6 text-brand-purple tracking-widest">Sound Effects Track</h3>
+                                    <h3 className="text-xs font-black uppercase mb-6 text-brand-purple tracking-widest">Sound Effects Library</h3>
                                     <div className="grid grid-cols-2 gap-3">
                                         {SFX_OPTIONS.map(sfx => (
-                                            <button key={sfx.name} onClick={() => addSFX(sfx)} className="bg-gray-900/60 p-4 rounded-2xl text-[10px] font-black uppercase border border-white/5 hover:border-brand-purple transition-all flex justify-between group">
-                                                {sfx.name} <span className="opacity-0 group-hover:opacity-100">+</span>
+                                            <button key={sfx.name} onClick={() => addSFX(sfx)} className="bg-gray-900/60 p-4 rounded-2xl text-[10px] font-black uppercase border border-white/5 hover:border-brand-purple transition-all flex justify-between group active:scale-95">
+                                                {sfx.name} <span className="opacity-0 group-hover:opacity-100 text-brand-purple">＋ Add</span>
                                             </button>
                                         ))}
                                     </div>
                                 </section>
                                 <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5">
-                                    <h3 className="text-xs font-black uppercase mb-6 text-brand-purple tracking-widest">Video Audio Control</h3>
+                                    <h3 className="text-xs font-black uppercase mb-6 text-brand-purple tracking-widest">Video Master Mix</h3>
                                     <div className="space-y-4">
                                         {mediaFiles.filter(m => m.type === 'video').map(m => (
                                             <div key={m.id} className="flex items-center gap-4 bg-gray-900/60 p-4 rounded-2xl border border-white/5">
-                                                <img src={m.previewUrl} className="w-12 h-12 rounded-lg object-cover" alt="" />
+                                                <div className="w-16 h-12 bg-gray-800 rounded-lg overflow-hidden border border-white/5">
+                                                    <img src={m.previewUrl} className="w-full h-full object-cover" alt="" />
+                                                </div>
                                                 <div className="flex-1 space-y-2">
                                                     <div className="flex justify-between items-center">
-                                                        <span className="text-[10px] font-black text-gray-400 uppercase">Video Volume</span>
-                                                        <button onClick={() => toggleMuteMedia(m.id)} className={`text-[8px] font-bold p-1 rounded ${m.isMuted ? 'bg-red-500 text-white' : 'bg-brand-purple text-white'}`}>
-                                                            {m.isMuted ? 'MUTED' : 'ACTIVE'}
+                                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">Volume Profile</span>
+                                                        <button onClick={() => toggleMuteMedia(m.id)} className={`text-[8px] font-black p-1 px-3 rounded-full transition-all ${m.isMuted ? 'bg-red-500/20 text-red-500 border border-red-500/40' : 'bg-brand-purple/20 text-brand-purple border border-brand-purple/40'}`}>
+                                                            {m.isMuted ? 'MUTED' : 'ON AIR'}
                                                         </button>
                                                     </div>
-                                                    <input type="range" min="0" max="1" step="0.01" value={m.isMuted ? 0 : (m.videoVolume ?? 1)} onChange={(e) => setMediaFiles(p => p.map(x => x.id === m.id ? {...x, videoVolume: parseFloat(e.target.value), isMuted: parseFloat(e.target.value) === 0} : x))} className="w-full accent-brand-purple h-1 bg-gray-700 rounded-full" />
+                                                    <input type="range" min="0" max="1" step="0.01" value={m.isMuted ? 0 : (m.videoVolume ?? 1)} onChange={(e) => setMediaFiles(p => p.map(x => x.id === m.id ? {...x, videoVolume: parseFloat(e.target.value), isMuted: parseFloat(e.target.value) === 0} : x))} className="w-full accent-brand-purple h-1 bg-gray-700 rounded-full cursor-pointer" />
                                                 </div>
                                             </div>
                                         ))}
                                         {mediaFiles.filter(m => m.type === 'video').length === 0 && (
-                                            <div className="text-center py-8 opacity-20 text-xs font-black uppercase tracking-widest">No Video Clips</div>
+                                            <div className="text-center py-12 opacity-10 flex flex-col items-center gap-4">
+                                                <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                                                <p className="text-[10px] font-black uppercase tracking-widest">No Video Layers Found</p>
+                                            </div>
                                         )}
                                     </div>
                                 </section>
                             </div>
                         </div>
                     ) : (
-                        <div className="grid md:grid-cols-12 gap-8">
+                        <div className="grid md:grid-cols-12 gap-8 animate-fade-in">
                             <div className="md:col-span-4 space-y-6">
-                                <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5">
-                                    <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Media (Max 20)</h3>
+                                <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5 shadow-xl">
+                                    <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Visual Assets (Max 20)</h3>
                                     <div className="grid grid-cols-4 gap-2 mb-4">
-                                        <div className="aspect-square bg-gray-900/50 rounded-xl border-2 border-dashed border-gray-700 flex items-center justify-center relative hover:border-brand-purple cursor-pointer group">
+                                        <div className="aspect-square bg-gray-900/50 rounded-xl border-2 border-dashed border-white/10 flex items-center justify-center relative hover:border-brand-purple hover:bg-brand-purple/5 cursor-pointer group transition-all">
                                             <input type="file" multiple accept="image/*,video/*" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
-                                            <span className="text-2xl text-gray-500">＋</span>
+                                            <span className="text-2xl text-gray-600 group-hover:text-brand-purple transition-colors">＋</span>
                                         </div>
                                         {mediaFiles.map((m, idx) => (
-                                            <div key={m.id} className="aspect-square bg-gray-900 rounded-xl overflow-hidden relative border border-gray-800 group">
-                                                <img src={m.previewUrl} className="w-full h-full object-cover" alt="" />
-                                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-1">
+                                            <div key={m.id} className="aspect-square bg-gray-900 rounded-xl overflow-hidden relative border border-white/5 group shadow-lg">
+                                                <img src={m.previewUrl} className="w-full h-full object-cover transition-transform group-hover:scale-110" alt="" />
+                                                <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-1">
                                                     <div className="flex gap-1">
-                                                        <button onClick={() => moveMedia(idx, 'up')} className="bg-white/20 p-1.5 rounded-lg text-xs">←</button>
-                                                        <button onClick={() => moveMedia(idx, 'down')} className="bg-white/20 p-1.5 rounded-lg text-xs">→</button>
+                                                        <button onClick={() => moveMedia(idx, 'up')} className="bg-white/10 hover:bg-white/30 p-1.5 rounded-lg text-xs">←</button>
+                                                        <button onClick={() => moveMedia(idx, 'down')} className="bg-white/10 hover:bg-white/30 p-1.5 rounded-lg text-xs">→</button>
                                                     </div>
-                                                    <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="bg-red-500 p-1.5 rounded-lg text-xs text-white">✕</button>
+                                                    <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="bg-red-600/80 hover:bg-red-600 text-white p-1.5 rounded-lg text-xs">✕</button>
                                                 </div>
                                             </div>
                                         ))}
                                     </div>
                                     <button onClick={generateSmartCaptions} disabled={isProcessingCaptions} className="w-full bg-brand-purple/10 text-brand-purple py-3 rounded-2xl text-[10px] font-black uppercase border border-brand-purple/20 hover:bg-brand-purple hover:text-white transition-all">
-                                        {isProcessingCaptions ? 'Polishing...' : '✨ AI Smart Captions'}
+                                        {isProcessingCaptions ? 'AI is writing...' : '✨ Auto-Captions'}
                                     </button>
                                 </section>
 
-                                <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5">
-                                    <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Soundtrack</h3>
+                                <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5 shadow-xl">
+                                    <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Master Soundtrack</h3>
                                     <div className="grid grid-cols-2 gap-2 mb-4">
                                         <div className="relative">
-                                            <button className="w-full bg-gray-800 border border-gray-700 py-3 rounded-xl text-[10px] font-black uppercase text-gray-400">Local Files</button>
+                                            <button className="w-full bg-gray-800 border border-white/5 py-3 rounded-xl text-[10px] font-black uppercase text-gray-500 hover:text-white transition-colors">Local File</button>
                                             <input type="file" accept="audio/*" onChange={handleAudioUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
                                         </div>
-                                        <button onClick={() => setIsMusicBrowserOpen(true)} className="w-full bg-apple-red/10 py-3 rounded-xl text-[10px] font-black uppercase text-apple-red border border-apple-red/30 hover:bg-apple-red hover:text-white">Apple Music</button>
+                                        <button onClick={() => setIsMusicBrowserOpen(true)} className="w-full bg-apple-red/10 py-3 rounded-xl text-[10px] font-black uppercase text-apple-red border border-apple-red/20 hover:bg-apple-red hover:text-white transition-colors">Apple Music</button>
                                     </div>
                                     <div className="space-y-2">
-                                        {audioFiles.map(a => (
-                                            <div key={a.id} className="bg-gray-900/40 p-3 rounded-xl text-[10px] flex justify-between items-center border border-gray-800">
-                                                <span className="truncate font-bold text-gray-300">{a.name}</span>
-                                                <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-gray-600 hover:text-red-500">🗑️</button>
+                                        {audioFiles.length > 0 ? audioFiles.map(a => (
+                                            <div key={a.id} className="bg-black/20 p-3 rounded-xl text-[10px] flex justify-between items-center border border-white/5">
+                                                <div className="flex items-center gap-2 overflow-hidden">
+                                                    <span className="w-2 h-2 rounded-full bg-brand-purple animate-pulse"></span>
+                                                    <span className="truncate font-bold text-gray-300">{a.name}</span>
+                                                </div>
+                                                <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-gray-600 hover:text-red-500 transition-colors">🗑️</button>
                                             </div>
-                                        ))}
+                                        )) : (
+                                            <p className="text-[10px] text-gray-700 text-center py-4 font-black uppercase tracking-widest italic">No Audio Layers</p>
+                                        )}
                                     </div>
                                 </section>
 
-                                <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5">
-                                    <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Transitions</h3>
+                                <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5 shadow-xl">
+                                    <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Motion Styles</h3>
                                     <div className="grid grid-cols-2 gap-2 mb-4">
                                         {['ken-burns', 'fade-in', 'slide-from-right', 'zoom-in'].map(style => (
-                                            <button key={style} onClick={() => setSettings(s => ({...s, slideStyle: style}))} className={`py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${settings.slideStyle === style ? 'bg-brand-purple text-white shadow-lg' : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
+                                            <button key={style} onClick={() => setSettings(s => ({...s, slideStyle: style}))} className={`py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${settings.slideStyle === style ? 'bg-brand-purple text-white shadow-lg border-brand-purple' : 'bg-gray-800 border-white/5 text-gray-500 hover:border-white/10'}`}>
                                                 {style.replace(/-/g, ' ')}
                                             </button>
                                         ))}
                                     </div>
                                     <div className="mt-6">
-                                        <label className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-3 block">Timing: <span className="text-white">{settings.interval}s</span></label>
+                                        <label className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-3 block">Frame Duration: <span className="text-white">{settings.interval}s</span></label>
                                         <input type="range" min="1" max="20" step="1" value={settings.interval} onChange={(e) => setSettings(s => ({ ...s, interval: parseInt(e.target.value) }))} className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple" />
                                     </div>
                                 </section>
                             </div>
 
                             <div className="md:col-span-8 space-y-8">
-                                <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5">
-                                    <div className="aspect-video bg-gray-950 rounded-[3rem] relative overflow-hidden border border-white/5 flex items-center justify-center">
+                                <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5 shadow-2xl">
+                                    <div className="aspect-video bg-gray-950 rounded-[3rem] relative overflow-hidden border border-white/10 flex items-center justify-center group">
                                         {mediaFiles.length > 0 ? (
                                             <div className="w-full h-full relative">
-                                                <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover opacity-20 blur-sm scale-110" alt="" />
+                                                <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover opacity-20 blur-md scale-110" alt="" />
                                                 <div className="absolute inset-0 flex items-center justify-center">
-                                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-24 h-24 bg-brand-purple rounded-full flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-all">
+                                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-24 h-24 bg-brand-purple rounded-full flex items-center justify-center shadow-[0_0_50px_rgba(109,40,217,0.5)] hover:scale-110 active:scale-95 transition-all">
                                                         <svg className="w-10 h-10 text-white ml-2" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                                                     </button>
                                                 </div>
                                             </div>
                                         ) : (
-                                            <div className="text-center p-12 opacity-20">
-                                                <div className="w-20 h-20 bg-gray-900 border border-gray-800 rounded-[2rem] flex items-center justify-center mx-auto mb-6 text-3xl">🎬</div>
-                                                <p className="text-xs font-black uppercase tracking-widest">Workspace Empty</p>
+                                            <div className="text-center p-12 opacity-10 flex flex-col items-center">
+                                                <div className="w-24 h-24 bg-gray-900 border border-white/10 rounded-[2.5rem] flex items-center justify-center mx-auto mb-6 text-4xl shadow-2xl">🎬</div>
+                                                <p className="text-xs font-black uppercase tracking-[0.3em]">Timeline Empty</p>
                                             </div>
                                         )}
                                     </div>
                                 </section>
 
                                 <section className="space-y-6">
-                                    <div className="flex justify-between items-center">
-                                        <h3 className="text-xs font-black uppercase text-gray-500 tracking-widest">Collections</h3>
+                                    <div className="flex justify-between items-center px-4">
+                                        <h3 className="text-xs font-black uppercase text-gray-500 tracking-widest">Saved Collections</h3>
                                         <div className="h-px bg-white/5 flex-1 mx-6"></div>
                                     </div>
                                     <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
                                         {ownedSlideshows.map(ss => (
-                                            <div key={ss.id} className="bg-gray-800/20 p-6 rounded-[2.5rem] border border-white/5 hover:border-brand-purple transition-all group">
+                                            <div key={ss.id} className="bg-gray-800/20 p-6 rounded-[2.5rem] border border-white/5 hover:border-brand-purple transition-all group shadow-xl">
                                                 <div className="aspect-square bg-gray-900 rounded-[2rem] mb-5 overflow-hidden relative border border-white/5">
                                                     {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform" alt="" />}
-                                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
-                                                        <button onClick={() => loadProject(ss)} className="bg-white text-brand-dark px-6 py-2.5 rounded-full font-bold text-xs">Edit Collection</button>
+                                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/60">
+                                                        <button onClick={() => loadProject(ss)} className="bg-white text-brand-dark px-6 py-2.5 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl">Open</button>
                                                     </div>
                                                 </div>
                                                 <h4 className="font-bold truncate text-sm mb-1 text-gray-200">{ss.name}</h4>
                                                 <div className="flex gap-2 mt-4">
-                                                    <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple/10 text-brand-purple py-2 rounded-xl text-[10px] font-black uppercase hover:bg-brand-purple hover:text-white">Load</button>
-                                                    <button onClick={() => shareProject(ss.id)} className="flex-1 bg-white/5 text-gray-400 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-white/10">Share</button>
-                                                    <button onClick={() => deleteSlideshow(ss.id)} className="p-2 text-red-500 hover:scale-110 transition-transform">🗑️</button>
+                                                    <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple/10 text-brand-purple py-2 rounded-xl text-[10px] font-black uppercase hover:bg-brand-purple hover:text-white transition-colors">Load</button>
+                                                    <button onClick={() => shareProject(ss.id)} className="flex-1 bg-white/5 text-gray-400 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-white/10 transition-colors">Share</button>
+                                                    <button onClick={() => deleteSlideshow(ss.id)} className="p-2 text-red-500/50 hover:text-red-500 transition-colors">🗑️</button>
                                                 </div>
                                             </div>
                                         ))}
                                         {ownedSlideshows.length === 0 && (
-                                            <div className="col-span-full py-20 text-center opacity-20 border-2 border-dashed border-white/10 rounded-[2.5rem]">
-                                                <p className="text-xs font-black uppercase tracking-[0.2em]">No Saved Collections Yet</p>
+                                            <div className="col-span-full py-24 text-center opacity-10 border-2 border-dashed border-white/5 rounded-[3rem]">
+                                                <p className="text-[10px] font-black uppercase tracking-[0.3em]">No Projects Found</p>
                                             </div>
                                         )}
                                     </div>
@@ -913,31 +941,31 @@ const App: React.FC = () => {
 
             {/* MODALS */}
             {isMusicBrowserOpen && (
-                <div className="fixed inset-0 bg-black/95 z-[500] flex items-center justify-center p-6 backdrop-blur-2xl animate-fade-in">
-                    <div className="bg-gray-950 w-full max-w-2xl h-[80vh] rounded-[4rem] border border-white/10 p-12 flex flex-col shadow-2xl">
+                <div className="fixed inset-0 bg-black/98 z-[500] flex items-center justify-center p-6 backdrop-blur-3xl animate-fade-in">
+                    <div className="bg-gray-950 w-full max-w-2xl h-[80vh] rounded-[4rem] border border-white/10 p-12 flex flex-col shadow-[0_0_100px_rgba(0,0,0,1)]">
                         <div className="flex justify-between items-center mb-12">
-                            <h2 className="text-3xl font-black uppercase tracking-tighter text-white">Apple Music</h2>
-                            <button onClick={() => setIsMusicBrowserOpen(false)} className="w-12 h-12 bg-gray-900 rounded-full flex items-center justify-center text-gray-500 hover:text-white transition-all">✕</button>
+                            <h2 className="text-3xl font-black uppercase tracking-tighter text-white">Music Vault</h2>
+                            <button onClick={() => setIsMusicBrowserOpen(false)} className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center text-gray-500 hover:text-white transition-all border border-white/5">✕</button>
                         </div>
-                        <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+                        <div className="flex-1 overflow-y-auto pr-2 space-y-4 custom-scrollbar">
                             {!appleMusicAuthorized && !isSimulationMode ? (
-                                <div className="text-center py-20 bg-gray-900/50 rounded-[3rem] border border-white/5">
-                                    <div className="w-20 h-20 bg-apple-red/20 text-apple-red rounded-[2rem] flex items-center justify-center mx-auto mb-8 text-3xl shadow-xl"></div>
-                                    <h3 className="text-xl font-bold mb-4 text-white">Connect Library</h3>
-                                    <button onClick={() => setIsSimulationMode(true)} className="bg-apple-red text-white px-12 py-4 rounded-full font-bold shadow-2xl text-sm uppercase">Simulate Library</button>
+                                <div className="text-center py-24 bg-white/5 rounded-[4rem] border border-white/5">
+                                    <div className="w-24 h-24 bg-apple-red/10 text-apple-red rounded-[2.5rem] flex items-center justify-center mx-auto mb-10 text-4xl shadow-2xl"></div>
+                                    <h3 className="text-2xl font-black mb-4 text-white uppercase tracking-tight">Connect Library</h3>
+                                    <button onClick={() => setIsSimulationMode(true)} className="bg-apple-red text-white px-16 py-5 rounded-full font-black shadow-[0_15px_30px_rgba(250,36,60,0.3)] text-xs uppercase tracking-[0.2em] hover:scale-105 active:scale-95 transition-all">Browse Simulation</button>
                                 </div>
                             ) : (
                                 <div className="grid gap-4">
                                     {MOCK_TRACKS.map(track => (
-                                        <div key={track.id} className="bg-gray-900/60 p-5 rounded-[2rem] border border-white/5 flex justify-between items-center hover:border-brand-purple cursor-pointer transition-all" onClick={() => { setAudioFiles(p => [...p, { ...track, startTime: elapsedTime }]); setIsMusicBrowserOpen(false); }}>
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-12 h-12 bg-gray-800 rounded-2xl flex items-center justify-center">🎵</div>
+                                        <div key={track.id} className="bg-white/5 p-6 rounded-[2.5rem] border border-white/5 flex justify-between items-center hover:bg-white/10 hover:border-brand-purple cursor-pointer transition-all group" onClick={() => { setAudioFiles(p => [...p, { ...track, startTime: elapsedTime }]); setIsMusicBrowserOpen(false); }}>
+                                            <div className="flex items-center gap-5">
+                                                <div className="w-14 h-14 bg-gray-900 rounded-2xl flex items-center justify-center text-xl shadow-inner group-hover:bg-brand-purple/20 transition-colors">🎵</div>
                                                 <div className="flex flex-col">
-                                                    <span className="font-bold text-gray-100 text-sm">{track.name}</span>
-                                                    <span className="text-[10px] text-gray-600 uppercase font-black">{Math.floor(track.duration / 60)}:{(track.duration % 60).toString().padStart(2,'0')}</span>
+                                                    <span className="font-black text-white text-base tracking-tight">{track.name}</span>
+                                                    <span className="text-[10px] text-gray-600 uppercase font-black tracking-widest">{Math.floor(track.duration / 60)}:{(track.duration % 60).toString().padStart(2,'0')}</span>
                                                 </div>
                                             </div>
-                                            <button className="bg-brand-purple/10 text-brand-purple px-6 py-2 rounded-xl text-[10px] font-black uppercase group-hover:bg-brand-purple group-hover:text-white transition-all">Add Track</button>
+                                            <button className="bg-brand-purple/20 text-brand-purple px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest group-hover:bg-brand-purple group-hover:text-white transition-all">Add to Mix</button>
                                         </div>
                                     ))}
                                 </div>
@@ -947,23 +975,25 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {isPlaying && (
+            {isPlaying && viewMode !== 'studio' && (
                 <div className="fixed inset-0 bg-black z-[600] flex flex-col items-center justify-center animate-fade-in">
-                    <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white/30 hover:text-white p-5 z-[610] text-3xl transition-all cursor-pointer">✕</button>
+                    <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white/20 hover:text-white p-5 z-[610] text-4xl transition-all cursor-pointer">✕</button>
                     <div className="w-full h-full relative overflow-hidden flex items-center justify-center">
                         {mediaWithTimestamps.map((m, idx) => (
                             <TheaterMedia key={m.id} media={m} isVisible={idx === currentSlide} slideStyle={settings.slideStyle} showCaptions={settings.showCaptions} />
                         ))}
                     </div>
-                    {/* PROGRESS BAR */}
-                    <div className="absolute bottom-0 left-0 h-1.5 bg-brand-purple z-[620] transition-all duration-200 shadow-[0_0_20px_rgba(109,40,217,0.8)]" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }}></div>
+                    <div className="absolute bottom-0 left-0 h-1.5 bg-brand-purple z-[620] transition-all duration-200 shadow-[0_0_30px_rgba(109,40,217,1)]" style={{ width: `${(elapsedTime / totalSlideshowDuration) * 100}%` }}></div>
                 </div>
             )}
             
             {error && (
-                <div className="fixed bottom-10 right-10 bg-red-600 text-white p-6 rounded-[2rem] shadow-2xl z-[700] flex gap-6 items-center border border-white/20 animate-slide-from-bottom">
-                    <p className="text-sm font-bold">{error}</p>
-                    <button onClick={() => setError(null)} className="ml-4 font-black bg-white/20 w-8 h-8 rounded-full flex items-center justify-center">✕</button>
+                <div className="fixed bottom-10 right-10 bg-red-600 text-white p-8 rounded-[2.5rem] shadow-2xl z-[700] flex gap-8 items-center border border-white/20 animate-slide-from-bottom">
+                    <div className="flex flex-col gap-1">
+                        <span className="text-[10px] font-black uppercase opacity-60 tracking-widest">System Alert</span>
+                        <p className="text-sm font-bold tracking-tight">{error}</p>
+                    </div>
+                    <button onClick={() => setError(null)} className="p-3 bg-white/20 hover:bg-white/40 rounded-full transition-all text-xs">✕</button>
                 </div>
             )}
         </div>
