@@ -209,17 +209,36 @@ const App: React.FC = () => {
         });
     }, []);
 
+    // Helper to fix audio URLs after cloud restoration
+    const reconstructAudio = useCallback((audioList: AppStateAudio[]) => {
+        return (audioList || []).map(a => {
+            let fixedUrl = a.previewUrl;
+            // If the URL is missing or empty (common in cloud restore), try to find the original based on source
+            if (!fixedUrl || fixedUrl === '') {
+                if (a.source === 'sfx') {
+                    const foundSfx = SFX_OPTIONS.find(s => s.name === a.name);
+                    if (foundSfx) fixedUrl = foundSfx.url;
+                } else if (a.source === 'apple-music') {
+                    const foundMock = MOCK_TRACKS.find(m => m.name === a.name);
+                    if (foundMock) fixedUrl = foundMock.previewUrl;
+                }
+            }
+            return { ...a, previewUrl: fixedUrl };
+        });
+    }, []);
+
     const loadProject = useCallback((project: SavedSlideshow) => {
         if (!project) return;
         const restoredMedia = reconstructMedia(project.media);
+        const restoredAudio = reconstructAudio(project.audio);
         setCurrentProjectId(project.id || null);
         setMediaFiles(restoredMedia);
-        setAudioFiles(project.audio || []);
+        setAudioFiles(restoredAudio);
         setSettings(project.settings || { interval: 5, slideStyle: 'ken-burns', repeatSlideshow: false, showCaptions: true });
         setSlideshowName(project.name || '');
         setElapsedTime(0);
         window.scrollTo({ top: 0, behavior: 'smooth' });
-    }, [reconstructMedia]);
+    }, [reconstructMedia, reconstructAudio]);
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (u) => { 
@@ -251,8 +270,10 @@ const App: React.FC = () => {
     useEffect(() => {
         if (isPlaying) {
             audioFiles.forEach(track => {
+                if (!track.previewUrl) return; // Skip broken tracks
+                
                 let audio = audioPoolRef.current.get(track.id);
-                if (!audio && track.previewUrl) {
+                if (!audio) {
                     audio = new Audio(track.previewUrl);
                     audio.crossOrigin = "anonymous";
                     audioPoolRef.current.set(track.id, audio);
@@ -263,7 +284,9 @@ const App: React.FC = () => {
                     if (relativeTime >= 0 && relativeTime < track.duration) {
                         if (audio.paused) {
                             audio.currentTime = relativeTime;
-                            audio.play().catch(e => console.warn("Audio play blocked by browser:", e));
+                            audio.play().catch(e => {
+                                console.warn("Audio play blocked, needs user interaction:", e);
+                            });
                         }
                         
                         // Volume Logic
@@ -271,7 +294,6 @@ const App: React.FC = () => {
                         if (track.fadeIn && relativeTime < 2) targetVolume *= (relativeTime / 2);
                         if (track.fadeOut && relativeTime > track.duration - 2) targetVolume *= ((track.duration - relativeTime) / 2);
                         
-                        // Apply volume directly to audio element
                         const finalVolume = Math.max(0, Math.min(1, targetVolume));
                         if (audio.volume !== finalVolume) {
                             audio.volume = finalVolume;
@@ -394,23 +416,33 @@ const App: React.FC = () => {
     };
 
     const addSFX = (sfx: {name: string, url: string}) => {
-        // Immediate preview playback
+        // Immediate preview playback to unlock browser audio
         const preview = new Audio(sfx.url);
         preview.volume = 0.8;
-        preview.play().catch(() => {});
+        preview.play().catch(e => console.warn("Preview audio blocked", e));
 
-        const audio = new Audio(sfx.url);
-        audio.onloadedmetadata = () => {
-            setAudioFiles(p => [...p, { 
-                id: Math.random().toString(36).substr(2, 9), 
-                name: sfx.name, 
-                duration: audio.duration || 2, 
-                originalDuration: audio.duration || 2,
-                startTime: elapsedTime, 
-                previewUrl: sfx.url, 
-                source: 'sfx',
-                volume: 0.8
-            }]);
+        const trackId = Math.random().toString(36).substr(2, 9);
+        
+        // Add to state immediately with default duration
+        setAudioFiles(p => [...p, { 
+            id: trackId, 
+            name: sfx.name, 
+            duration: 2, // Fallback duration
+            originalDuration: 2,
+            startTime: elapsedTime, 
+            previewUrl: sfx.url, 
+            source: 'sfx',
+            volume: 0.8
+        }]);
+
+        // Update with actual duration once metadata is loaded
+        const audioLoader = new Audio(sfx.url);
+        audioLoader.onloadedmetadata = () => {
+            setAudioFiles(p => p.map(a => a.id === trackId ? {
+                ...a, 
+                duration: audioLoader.duration || 2, 
+                originalDuration: audioLoader.duration || 2
+            } : a));
         };
     };
 
