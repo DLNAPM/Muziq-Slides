@@ -75,15 +75,20 @@ interface MediaFile {
   timelineEnd?: number;
   base64?: string; 
   isMuted?: boolean;
+  videoVolume?: number; // 0 to 1
 }
 
 interface AppStateAudio {
     id: string;
     name: string;
     duration: number; 
-    startTime: number; 
+    startTime: number; // Position on global timeline
     previewUrl: string; 
-    source: 'local' | 'apple-music';
+    source: 'local' | 'apple-music' | 'sfx';
+    fadeIn?: boolean;
+    fadeOut?: boolean;
+    crossFade?: boolean;
+    volume?: number;
 }
 
 interface SlideshowSettings {
@@ -104,11 +109,26 @@ interface SavedSlideshow {
     sharedWith?: string[];
 }
 
+const SFX_OPTIONS = [
+    { name: 'Boom', url: 'https://actions.google.com/sounds/v1/science_fiction/low_boom.ogg' },
+    { name: 'Stream Water', url: 'https://actions.google.com/sounds/v1/water/creek_flowing.ogg' },
+    { name: 'Ocean Beach', url: 'https://actions.google.com/sounds/v1/water/waves_crashing_on_rock.ogg' },
+    { name: 'Airplane', url: 'https://actions.google.com/sounds/v1/transportation/airplane_interior_hum.ogg' },
+    { name: 'Traffic', url: 'https://actions.google.com/sounds/v1/transportation/city_traffic_ambience.ogg' },
+    { name: 'Thunderstorm', url: 'https://actions.google.com/sounds/v1/weather/thunder_and_rain.ogg' },
+    { name: 'Birds', url: 'https://actions.google.com/sounds/v1/animals/bird_whistling.ogg' },
+    { name: 'Camera Click', url: 'https://actions.google.com/sounds/v1/tools/camera_shutter_click.ogg' },
+    { name: 'Magical', url: 'https://actions.google.com/sounds/v1/science_fiction/magic_chime.ogg' },
+    { name: 'Film Projector', url: 'https://actions.google.com/sounds/v1/tools/old_film_projector.ogg' },
+];
+
+// --- Added missing MOCK_TRACKS constant for Apple Music simulation mode ---
 const MOCK_TRACKS: AppStateAudio[] = [
-    { id: 'm1', name: 'Golden Hour Memories', duration: 184, startTime: 0, previewUrl: '', source: 'apple-music' },
-    { id: 'm2', name: 'Midnight City Lights', duration: 215, startTime: 0, previewUrl: '', source: 'apple-music' },
-    { id: 'm3', name: 'Ocean Breeze Whispers', duration: 142, startTime: 0, previewUrl: '', source: 'apple-music' },
-    { id: 'm4', name: 'Mountain Peak Sunrise', duration: 198, startTime: 0, previewUrl: '', source: 'apple-music' },
+    { id: 'm1', name: 'Midnight City', duration: 243, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', source: 'apple-music', volume: 1 },
+    { id: 'm2', name: 'Starboy', duration: 230, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', source: 'apple-music', volume: 1 },
+    { id: 'm3', name: 'Blinding Lights', duration: 200, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', source: 'apple-music', volume: 1 },
+    { id: 'm4', name: 'Levitating', duration: 203, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3', source: 'apple-music', volume: 1 },
+    { id: 'm5', name: 'Save Your Tears', duration: 215, startTime: 0, previewUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3', source: 'apple-music', volume: 1 },
 ];
 
 const TheaterMedia: React.FC<{
@@ -122,13 +142,21 @@ const TheaterMedia: React.FC<{
         ? `data:image/jpeg;base64,${media.base64}` 
         : media.previewUrl;
 
+    const videoRef = useRef<HTMLVideoElement>(null);
+
+    useEffect(() => {
+        if (videoRef.current) {
+            videoRef.current.volume = media.isMuted ? 0 : (media.videoVolume ?? 1);
+        }
+    }, [media.isMuted, media.videoVolume]);
+
     return (
         <div className={`w-full h-full absolute inset-0 flex flex-col items-center justify-center transition-opacity duration-700 ${isVisible ? 'opacity-100 z-20' : 'opacity-0 z-10'}`}>
             <div key={`${media.id}-${isVisible}`} className={`w-full h-full flex items-center justify-center ${animationClass}`}>
                 {media.type === 'image' ? (
                     <img src={mediaUrl} className="w-full h-full object-contain" alt="slide" />
                 ) : (
-                    <video src={mediaUrl} className="w-full h-full object-contain" autoPlay muted={media.isMuted} loop />
+                    <video ref={videoRef} src={mediaUrl} className="w-full h-full object-contain" autoPlay muted={media.isMuted} loop />
                 )}
             </div>
             {showCaptions && media.caption && isVisible && (
@@ -170,6 +198,7 @@ const App: React.FC = () => {
     const requestRef = useRef<number>(0);
     const startTimeRef = useRef<number>(0);
     const lastTickTimeRef = useRef<number>(0);
+    const audioPoolRef = useRef<Map<string, HTMLAudioElement>>(new Map());
 
     const reconstructMedia = useCallback((media: MediaFile[]) => {
         return (media || []).map(m => {
@@ -218,11 +247,49 @@ const App: React.FC = () => {
         return () => { unsubOwned(); unsubShared(); };
     }, [user, reconstructMedia]);
 
+    // --- AUDIO ENGINE ---
+    useEffect(() => {
+        if (isPlaying) {
+            audioFiles.forEach(track => {
+                let audio = audioPoolRef.current.get(track.id);
+                if (!audio && track.previewUrl) {
+                    audio = new Audio(track.previewUrl);
+                    audioPoolRef.current.set(track.id, audio);
+                }
+                
+                if (audio) {
+                    const relativeTime = elapsedTime - track.startTime;
+                    if (relativeTime >= 0 && relativeTime < track.duration) {
+                        if (audio.paused) {
+                            audio.currentTime = relativeTime;
+                            audio.play().catch(() => {});
+                        }
+                        // Handle Fades
+                        let targetVolume = track.volume ?? 1;
+                        if (track.fadeIn && relativeTime < 2) targetVolume *= (relativeTime / 2);
+                        if (track.fadeOut && relativeTime > track.duration - 2) targetVolume *= ((track.duration - relativeTime) / 2);
+                        audio.volume = Math.max(0, Math.min(1, targetVolume));
+                    } else {
+                        if (!audio.paused) {
+                            audio.pause();
+                            audio.currentTime = 0;
+                        }
+                    }
+                }
+            });
+        } else {
+            audioPoolRef.current.forEach(audio => {
+                audio.pause();
+                audio.currentTime = 0;
+            });
+        }
+    }, [isPlaying, elapsedTime, audioFiles]);
+
     const mediaWithTimestamps = useMemo(() => {
         let currentPos = 0;
         return mediaFiles.map(m => {
             const start = currentPos;
-            const dur = m.type === 'image' ? settings.interval : (m.duration || 5);
+            const dur = m.type === 'image' ? settings.interval : (m.duration || settings.interval);
             currentPos += dur;
             return { ...m, timelineStart: start, timelineEnd: currentPos };
         });
@@ -236,7 +303,8 @@ const App: React.FC = () => {
         if (!startTimeRef.current) startTimeRef.current = time;
         const delta = (time - lastTickTimeRef.current) / 1000;
         lastTickTimeRef.current = time;
-        if (delta > 1.0) { requestRef.current = requestAnimationFrame(animate); return; }
+        if (delta > 0.5) { requestRef.current = requestAnimationFrame(animate); return; }
+        
         setElapsedTime(prev => {
             let next = prev + delta;
             if (next >= totalSlideshowDuration) {
@@ -270,6 +338,7 @@ const App: React.FC = () => {
         const newMedia: MediaFile[] = await Promise.all(files.map(async (f: File) => {
             const previewUrl = URL.createObjectURL(f);
             let base64 = '';
+            let duration = 5;
             if (f.type.startsWith('image')) {
                 const reader = new FileReader();
                 const rawBase64: string = await new Promise((resolve) => {
@@ -277,6 +346,12 @@ const App: React.FC = () => {
                     reader.readAsDataURL(f);
                 });
                 base64 = await compressImage(rawBase64);
+            } else if (f.type.startsWith('video')) {
+                const vid = document.createElement('video');
+                vid.src = previewUrl;
+                duration = await new Promise((resolve) => {
+                    vid.onloadedmetadata = () => resolve(vid.duration);
+                });
             }
             return {
                 id: Math.random().toString(36).substr(2, 9),
@@ -284,7 +359,9 @@ const App: React.FC = () => {
                 previewUrl: f.type.startsWith('image') ? `data:image/jpeg;base64,${base64}` : previewUrl,
                 caption: '',
                 base64: base64 || '',
-                isMuted: f.type.startsWith('video')
+                isMuted: f.type.startsWith('video'),
+                duration: duration,
+                videoVolume: 1
             };
         }));
         setMediaFiles(p => [...p, ...newMedia]);
@@ -302,7 +379,23 @@ const App: React.FC = () => {
                 duration: audio.duration, 
                 startTime: 0, 
                 previewUrl, 
-                source: 'local' 
+                source: 'local',
+                volume: 1
+            }]);
+        };
+    };
+
+    const addSFX = (sfx: {name: string, url: string}) => {
+        const audio = new Audio(sfx.url);
+        audio.onloadedmetadata = () => {
+            setAudioFiles(p => [...p, { 
+                id: Math.random().toString(36).substr(2, 9), 
+                name: sfx.name, 
+                duration: audio.duration || 2, 
+                startTime: elapsedTime, 
+                previewUrl: sfx.url, 
+                source: 'sfx',
+                volume: 1
             }]);
         };
     };
@@ -322,6 +415,7 @@ const App: React.FC = () => {
         setMediaFiles(prev => prev.map(m => m.id === id ? { ...m, isMuted: !m.isMuted } : m));
     };
 
+    // --- Using Gemini 3 Flash to generate evocative image captions ---
     const generateSmartCaptions = async () => {
         if (mediaFiles.length === 0) return;
         setIsProcessingCaptions(true);
@@ -427,6 +521,71 @@ const App: React.FC = () => {
 
     if (isLoading) return <div className="min-h-screen bg-brand-dark flex items-center justify-center"><div className="w-10 h-10 border-4 border-brand-purple border-t-transparent rounded-full animate-spin"></div></div>;
 
+    const StudioTimeline = () => {
+        const pixelsPerSecond = 20;
+        return (
+            <div className="bg-gray-900 rounded-[2rem] border border-white/5 p-8 space-y-4 overflow-x-auto">
+                <div className="relative h-12 border-b border-white/5 mb-4 min-w-[1000px]">
+                    {Array.from({length: Math.ceil(totalSlideshowDuration / 5) + 5}).map((_, i) => (
+                        <div key={i} className="absolute text-[8px] font-black text-gray-700" style={{left: i * 5 * pixelsPerSecond}}>
+                            {i * 5}s
+                        </div>
+                    ))}
+                    <div className="absolute top-0 bottom-0 w-0.5 bg-brand-purple z-10" style={{left: elapsedTime * pixelsPerSecond}}></div>
+                </div>
+
+                {/* VISUALS TRACK */}
+                <div className="flex items-center gap-4 min-w-[1000px]">
+                    <div className="w-24 text-[10px] font-black uppercase tracking-widest text-gray-500">Visuals</div>
+                    <div className="flex h-16 bg-white/5 rounded-xl flex-1 relative">
+                        {mediaWithTimestamps.map((m) => (
+                            <div key={m.id} className="h-full border-r border-black/20 overflow-hidden relative" style={{width: (m.timelineEnd! - m.timelineStart!) * pixelsPerSecond}}>
+                                <img src={m.previewUrl} className="w-full h-full object-cover opacity-60" />
+                                <div className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-white shadow-sm">{m.type === 'video' ? '🎬' : '📷'}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* MUSIC TRACK */}
+                <div className="flex items-center gap-4 min-w-[1000px]">
+                    <div className="w-24 text-[10px] font-black uppercase tracking-widest text-gray-500 flex flex-col gap-1">
+                        <span>Music</span>
+                        <button onClick={() => setIsMusicBrowserOpen(true)} className="text-[8px] bg-brand-purple/20 hover:bg-brand-purple/40 p-1 rounded transition-colors">Add</button>
+                    </div>
+                    <div className="h-16 bg-white/5 rounded-xl flex-1 relative">
+                        {audioFiles.filter(a => a.source !== 'sfx').map((a) => (
+                            <div key={a.id} className="absolute h-full bg-brand-purple/40 border border-brand-purple/40 rounded-xl p-2 group cursor-move" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
+                                <div className="flex justify-between items-center h-full">
+                                    <span className="text-[9px] font-bold truncate px-2">{a.name}</span>
+                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100">
+                                        <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeIn: !x.fadeIn} : x))} className={`p-1 rounded text-[8px] ${a.fadeIn ? 'bg-brand-purple' : 'bg-black/40'}`}>IN</button>
+                                        <button onClick={() => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, fadeOut: !x.fadeOut} : x))} className={`p-1 rounded text-[8px] ${a.fadeOut ? 'bg-brand-purple' : 'bg-black/40'}`}>OUT</button>
+                                        <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="p-1 rounded text-[8px] bg-red-500">✕</button>
+                                    </div>
+                                </div>
+                                <input type="range" className="absolute -bottom-1 left-0 right-0 h-1 accent-brand-purple opacity-0 group-hover:opacity-100" min="0" max={totalSlideshowDuration} step="0.1" value={a.startTime} onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: parseFloat(e.target.value)} : x))} />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* SFX TRACK */}
+                <div className="flex items-center gap-4 min-w-[1000px]">
+                    <div className="w-24 text-[10px] font-black uppercase tracking-widest text-gray-500">SFX</div>
+                    <div className="h-12 bg-white/5 rounded-xl flex-1 relative">
+                        {audioFiles.filter(a => a.source === 'sfx').map((a) => (
+                            <div key={a.id} className="absolute h-full bg-apple-red/40 border border-apple-red/40 rounded-xl p-2 group cursor-move" style={{left: a.startTime * pixelsPerSecond, width: a.duration * pixelsPerSecond}}>
+                                <span className="text-[8px] font-bold truncate">{a.name}</span>
+                                <input type="range" className="absolute -bottom-1 left-0 right-0 h-1 accent-apple-red opacity-0 group-hover:opacity-100" min="0" max={totalSlideshowDuration} step="0.1" value={a.startTime} onChange={(e) => setAudioFiles(p => p.map(x => x.id === a.id ? {...x, startTime: parseFloat(e.target.value)} : x))} />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className={`min-h-screen font-sans bg-brand-dark text-gray-200 overflow-x-hidden`}>
             {/* STICKY HEADER */}
@@ -438,7 +597,7 @@ const App: React.FC = () => {
                 
                 <nav className="hidden md:flex items-center gap-8">
                     <button onClick={() => scrollTo('features')} className="text-xs font-black uppercase tracking-widest text-gray-400 hover:text-white transition-colors">Features</button>
-                    <button onClick={() => { if(!user) handleGoogleLogin(); else setViewMode('easy'); }} className="text-xs font-black uppercase tracking-widest text-gray-400 hover:text-white transition-colors">Studio</button>
+                    <button onClick={() => { if(!user) handleGoogleLogin(); else setViewMode('studio'); }} className={`text-xs font-black uppercase tracking-widest transition-colors ${viewMode === 'studio' ? 'text-brand-purple' : 'text-gray-400 hover:text-white'}`}>Studio</button>
                     <button onClick={() => scrollTo('support')} className="text-xs font-black uppercase tracking-widest text-gray-400 hover:text-white transition-colors">Support</button>
                 </nav>
 
@@ -471,259 +630,138 @@ const App: React.FC = () => {
                             </button>
                             <p className="text-[10px] uppercase font-black tracking-widest text-gray-600">Secure Authentication via Firebase</p>
                         </div>
-                        
-                        <div className="absolute bottom-10 animate-bounce">
-                            <button onClick={() => scrollTo('features')} className="text-gray-500 hover:text-white">
-                                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
-                            </button>
-                        </div>
                     </section>
-
-                    {/* FEATURES SECTIONS */}
-                    <div id="features">
-                        <section className="min-h-screen flex flex-col md:flex-row items-center justify-center p-8 md:p-24 gap-16 border-t border-white/5">
-                            <div className="md:w-1/2 space-y-8">
-                                <span className="text-brand-purple font-black uppercase tracking-[0.3em] text-xs block">Cinematic Canvas</span>
-                                <h3 className="text-5xl md:text-7xl font-black tracking-tighter text-white">20 High-Res Cloud Collections.</h3>
-                                <p className="text-xl text-gray-400 leading-relaxed">Upload up to 20 images or videos to your private gallery. Every frame is optimized for high-performance rendering on any screen size.</p>
-                            </div>
-                            <div className="md:w-1/2 bg-gray-800/20 aspect-video rounded-[3rem] border border-white/5 flex items-center justify-center p-8">
-                                <div className="grid grid-cols-4 gap-4 w-full h-full opacity-40">
-                                    {[1,2,3,4,5,6,7,8].map(i => <div key={i} className="aspect-square bg-gray-700/50 rounded-2xl animate-pulse"></div>)}
-                                </div>
-                            </div>
-                        </section>
-
-                        <section className="min-h-screen flex flex-col md:flex-row-reverse items-center justify-center p-8 md:p-24 gap-16 bg-white/[0.02]">
-                            <div className="md:w-1/2 space-y-8">
-                                <span className="text-apple-red font-black uppercase tracking-[0.3em] text-xs block">Perfect Harmony</span>
-                                <h3 className="text-5xl md:text-7xl font-black tracking-tighter text-white">Native Apple Music Sync.</h3>
-                                <p className="text-xl text-gray-400 leading-relaxed">Connect your library and pair your favorite tracks with your visual story. Experience true synchronization between audio and image.</p>
-                            </div>
-                            <div className="md:w-1/2 bg-apple-red/5 aspect-video rounded-[3rem] border border-apple-red/10 flex items-center justify-center p-12">
-                                <div className="text-[10rem] text-apple-red opacity-20"></div>
-                            </div>
-                        </section>
-
-                        <section className="min-h-screen flex flex-col md:flex-row items-center justify-center p-8 md:p-24 gap-16">
-                            <div className="md:w-1/2 space-y-8">
-                                <span className="text-brand-purple font-black uppercase tracking-[0.3em] text-xs block">AI Intelligence</span>
-                                <h3 className="text-5xl md:text-7xl font-black tracking-tighter text-white">Gemini Smart Captions.</h3>
-                                <p className="text-xl text-gray-400 leading-relaxed">Our advanced AI analyzes your photos to craft poetic, evocative captions that enhance the mood and narrative of your slideshow automatically.</p>
-                            </div>
-                            <div className="md:w-1/2 bg-brand-purple/5 aspect-video rounded-[3rem] border border-brand-purple/10 flex items-center justify-center p-12">
-                                <div className="w-full space-y-4 opacity-30">
-                                    <div className="h-4 bg-white/10 rounded-full w-3/4"></div>
-                                    <div className="h-4 bg-white/10 rounded-full w-1/2"></div>
-                                    <div className="h-4 bg-white/10 rounded-full w-2/3"></div>
-                                </div>
-                            </div>
-                        </section>
-                    </div>
-
-                    {/* FOOTER AREA */}
-                    <footer id="support" className="bg-gray-950 border-t border-white/5 py-32 px-8">
-                        <div className="max-w-7xl mx-auto grid md:grid-cols-4 gap-16">
-                            <div className="col-span-1 md:col-span-2 space-y-8">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-8 h-8 bg-brand-purple rounded-lg flex items-center justify-center font-black text-white">M</div>
-                                    <h1 className="text-xl font-bold tracking-tight text-white uppercase"><span className="text-brand-purple">Muziq</span> Slides</h1>
-                                </div>
-                                <p className="text-gray-500 text-lg leading-relaxed max-w-sm">Muziq Slides is the premier destination for cinematic memory storytelling. We bridge the gap between your media and your music library using cutting-edge AI technology.</p>
-                                <p className="text-xs font-black uppercase tracking-widest text-gray-700">© 2025 Muziq Slides. All rights reserved.</p>
-                            </div>
-                            
-                            <div className="space-y-6">
-                                <h4 className="text-[10px] font-black uppercase tracking-widest text-brand-purple">Legal & Ethics</h4>
-                                <ul className="space-y-4">
-                                    <li><button className="text-gray-500 hover:text-white transition-colors text-sm font-bold">Privacy Policy</button></li>
-                                    <li><button className="text-gray-500 hover:text-white transition-colors text-sm font-bold">Terms of Service</button></li>
-                                    <li><button className="text-gray-500 hover:text-white transition-colors text-sm font-bold">Cookie Policy</button></li>
-                                </ul>
-                            </div>
-
-                            <div className="space-y-6">
-                                <h4 className="text-[10px] font-black uppercase tracking-widest text-brand-purple">Support & Contact</h4>
-                                <ul className="space-y-4">
-                                    <li><a href="mailto:support@muziqslides.com" className="text-gray-500 hover:text-white transition-colors text-sm font-bold">support@muziqslides.com</a></li>
-                                    <li><button className="text-gray-500 hover:text-white transition-colors text-sm font-bold">Help Center</button></li>
-                                    <li><button className="text-gray-500 hover:text-white transition-colors text-sm font-bold">API Documentation</button></li>
-                                </ul>
-                            </div>
-                        </div>
-                    </footer>
                 </main>
             ) : (
-                <main className="p-4 max-w-7xl mx-auto grid lg:grid-cols-12 gap-8 py-24 animate-fade-in">
-                    {/* BUILDER INTERFACE */}
-                    <div className="lg:col-span-4 space-y-6">
-                        <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5">
-                            <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Media (Max 20)</h3>
-                            <div className="grid grid-cols-4 gap-2 mb-4">
-                                <div className="aspect-square bg-gray-900/50 rounded-xl border-2 border-dashed border-gray-700 flex items-center justify-center relative hover:border-brand-purple cursor-pointer group">
-                                    <input type="file" multiple accept="image/*,video/*" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
-                                    <span className="text-2xl text-gray-500">＋</span>
-                                </div>
-                                {mediaFiles.map((m, idx) => (
-                                    <div key={m.id} className="aspect-square bg-gray-900 rounded-xl overflow-hidden relative border border-gray-800 group">
-                                        <img src={m.previewUrl} className="w-full h-full object-cover" alt="" />
-                                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-1">
-                                            <div className="flex gap-1">
-                                                <button onClick={() => moveMedia(idx, 'up')} className="bg-white/20 hover:bg-white/40 text-white p-1.5 rounded-lg text-xs">←</button>
-                                                <button onClick={() => moveMedia(idx, 'down')} className="bg-white/20 hover:bg-white/40 text-white p-1.5 rounded-lg text-xs">→</button>
-                                            </div>
-                                            <div className="flex gap-1">
-                                                {m.type === 'video' && (
-                                                    <button onClick={() => toggleMuteMedia(m.id)} className={`p-1.5 rounded-lg text-xs ${m.isMuted ? 'bg-red-500/80' : 'bg-white/20'}`}>
-                                                        {m.isMuted ? '🔇' : '🔊'}
-                                                    </button>
-                                                )}
-                                                <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="bg-red-500 hover:bg-red-600 text-white p-1.5 rounded-lg text-xs">✕</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                            {mediaFiles.length > 0 && (
-                                <button onClick={generateSmartCaptions} disabled={isProcessingCaptions} className="w-full bg-brand-purple/10 text-brand-purple py-3 rounded-2xl text-[10px] font-black uppercase border border-brand-purple/20 hover:bg-brand-purple hover:text-white transition-all">
-                                    {isProcessingCaptions ? 'Polishing...' : '✨ AI Smart Captions'}
-                                </button>
-                            )}
-                        </section>
-
-                        <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5">
-                            <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Soundtrack</h3>
-                            <div className="grid grid-cols-2 gap-2 mb-4">
-                                <div className="relative">
-                                    <button className="w-full bg-gray-800 border border-gray-700 py-3 rounded-xl text-[10px] font-black uppercase text-gray-400">Local Files</button>
-                                    <input type="file" accept="audio/*" onChange={handleAudioUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
-                                </div>
-                                <button onClick={() => setIsMusicBrowserOpen(true)} className="w-full bg-apple-red/10 py-3 rounded-xl text-[10px] font-black uppercase text-apple-red border border-apple-red/30 hover:bg-apple-red hover:text-white">Apple Music</button>
-                            </div>
-                            <div className="space-y-2">
-                                {audioFiles.map(a => (
-                                    <div key={a.id} className="bg-gray-900/40 p-3 rounded-xl text-[10px] flex justify-between items-center border border-gray-800">
-                                        <span className="truncate font-bold text-gray-300">{a.name}</span>
-                                        <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-gray-600 hover:text-red-500">🗑️</button>
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
-
-                        <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5">
-                            <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Transitions</h3>
-                            <div className="grid grid-cols-2 gap-2 mb-4">
-                                {['ken-burns', 'fade-in', 'slide-from-right', 'zoom-in'].map(style => (
-                                    <button key={style} onClick={() => setSettings(s => ({...s, slideStyle: style}))} className={`py-3 rounded-xl text-[10px] font-black uppercase border transition-all ${settings.slideStyle === style ? 'bg-brand-purple text-white shadow-lg' : 'bg-gray-800 border-gray-700 text-gray-500'}`}>
-                                        {style.replace(/-/g, ' ')}
-                                    </button>
-                                ))}
-                            </div>
-                            <div className="mt-6">
-                                <label className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-3 block">Timing: <span className="text-white">{settings.interval}s</span></label>
-                                <input 
-                                    type="range" 
-                                    min="1" 
-                                    max="20" 
-                                    step="1"
-                                    value={settings.interval}
-                                    onChange={(e) => setSettings(s => ({ ...s, interval: parseInt(e.target.value) }))}
-                                    className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple"
-                                />
-                                <div className="flex justify-between text-[9px] font-black text-gray-600 mt-2 uppercase">
-                                    <span>Fast (1s)</span>
-                                    <span>Slow (20s)</span>
-                                </div>
-                            </div>
-                        </section>
+                <main className="p-4 max-w-7xl mx-auto py-24 animate-fade-in">
+                    <div className="flex justify-between items-center mb-12">
+                        <input 
+                            value={slideshowName} 
+                            onChange={(e) => setSlideshowName(e.target.value)} 
+                            placeholder="Untitled Slideshow" 
+                            className="bg-transparent text-5xl md:text-7xl font-black text-white/90 outline-none w-full placeholder:text-white/10 tracking-tighter" 
+                        />
+                        <div className="flex gap-4">
+                            <button onClick={() => setViewMode(v => v === 'easy' ? 'studio' : 'easy')} className={`px-8 py-3 rounded-full text-xs font-bold border transition-all ${viewMode === 'studio' ? 'bg-brand-purple border-brand-purple' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}>Studio Mode</button>
+                            <button onClick={saveSlideshow} className="bg-white/5 hover:bg-white/10 text-white px-8 py-3 rounded-full text-xs font-bold border border-white/10">Save</button>
+                            <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl hover:scale-105 active:scale-95 transition-all">Preview</button>
+                        </div>
                     </div>
 
-                    <div className="lg:col-span-8 space-y-8">
-                        <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5">
-                            <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-                                <input 
-                                    value={slideshowName} 
-                                    onChange={(e) => setSlideshowName(e.target.value)} 
-                                    placeholder="Untitled Slideshow" 
-                                    className="bg-transparent text-4xl font-black text-white outline-none w-full placeholder:text-gray-700 tracking-tighter" 
-                                />
-                                <div className="flex gap-2">
-                                    <button onClick={saveSlideshow} className="bg-white/5 hover:bg-white/10 text-white px-8 py-3 rounded-full text-xs font-bold border border-white/10">Save</button>
-                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl hover:scale-105 active:scale-95 transition-all">Preview</button>
-                                </div>
-                            </div>
-                            
-                            <div className="aspect-video bg-gray-950 rounded-[3rem] relative overflow-hidden border border-white/5 flex items-center justify-center">
-                                {mediaFiles.length > 0 ? (
-                                    <div className="w-full h-full relative">
-                                        <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover opacity-20 blur-sm scale-110" alt="" />
-                                        <div className="absolute inset-0 flex items-center justify-center">
-                                            <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-24 h-24 bg-brand-purple rounded-full flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-transform">
-                                                <svg className="w-10 h-10 text-white ml-2" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    {viewMode === 'studio' ? (
+                        <div className="space-y-8">
+                            <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5">
+                                <h3 className="text-xs font-black uppercase mb-6 text-brand-purple tracking-widest">Multi-Track Editor</h3>
+                                <StudioTimeline />
+                            </section>
+
+                            <div className="grid md:grid-cols-2 gap-8">
+                                <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5">
+                                    <h3 className="text-xs font-black uppercase mb-6 text-brand-purple tracking-widest">Sound Effects Track</h3>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {SFX_OPTIONS.map(sfx => (
+                                            <button key={sfx.name} onClick={() => addSFX(sfx)} className="bg-gray-900/60 p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border border-white/5 hover:border-brand-purple hover:bg-brand-purple/10 transition-all flex items-center justify-between group">
+                                                {sfx.name}
+                                                <span className="opacity-0 group-hover:opacity-100">+</span>
                                             </button>
-                                        </div>
+                                        ))}
                                     </div>
-                                ) : (
-                                    <div className="text-center p-12 opacity-20">
-                                        <div className="w-20 h-20 bg-gray-900 border border-gray-800 rounded-[2rem] flex items-center justify-center mx-auto mb-6 text-3xl">🎬</div>
-                                        <p className="text-xs font-black uppercase tracking-widest">Workspace Empty</p>
-                                    </div>
-                                )}
-                            </div>
-                        </section>
-
-                        <section className="space-y-6">
-                            <div className="flex justify-between items-center">
-                                <h3 className="text-xs font-black uppercase text-gray-500 tracking-widest">My Collections</h3>
-                                <div className="h-px bg-white/5 flex-1 mx-6"></div>
-                            </div>
-                            <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-6">
-                                {ownedSlideshows.map(ss => (
-                                    <div key={ss.id} className="bg-gray-800/20 p-6 rounded-[2.5rem] flex flex-col group border border-white/5 hover:border-brand-purple/40 transition-all">
-                                        <div className="aspect-square bg-gray-900 rounded-[2rem] mb-5 overflow-hidden relative border border-white/10">
-                                            {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform" alt="" />}
-                                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
-                                                <button onClick={() => loadProject(ss)} className="bg-white text-brand-dark px-6 py-2.5 rounded-full font-bold text-xs">Edit Project</button>
+                                </section>
+                                <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5">
+                                    <h3 className="text-xs font-black uppercase mb-6 text-brand-purple tracking-widest">Video Audio Control</h3>
+                                    <div className="space-y-4">
+                                        {mediaFiles.filter(m => m.type === 'video').map(m => (
+                                            <div key={m.id} className="flex items-center gap-4 bg-gray-900/60 p-4 rounded-2xl border border-white/5">
+                                                <img src={m.previewUrl} className="w-12 h-12 rounded-lg object-cover" />
+                                                <div className="flex-1">
+                                                    <div className="flex justify-between text-[10px] font-black uppercase text-gray-500 mb-2">
+                                                        <span>Volume</span>
+                                                        <span>{m.isMuted ? 'Muted' : `${Math.round((m.videoVolume ?? 1) * 100)}%`}</span>
+                                                    </div>
+                                                    <input type="range" min="0" max="1" step="0.01" value={m.isMuted ? 0 : (m.videoVolume ?? 1)} onChange={(e) => setMediaFiles(p => p.map(x => x.id === m.id ? {...x, videoVolume: parseFloat(e.target.value), isMuted: parseFloat(e.target.value) === 0} : x))} className="w-full accent-brand-purple h-1 bg-gray-700 rounded-full" />
+                                                </div>
                                             </div>
-                                        </div>
-                                        <h4 className="font-bold truncate text-sm mb-1 text-gray-200">{ss.name}</h4>
-                                        <p className="text-[10px] text-gray-600 mb-5 font-bold uppercase tracking-widest">{ss.media.length} Slides • {ss.sharedWith?.length || 0} Shared</p>
-                                        <div className="flex gap-2">
-                                            <button onClick={() => loadProject(ss)} className="flex-1 bg-brand-purple/10 text-brand-purple py-2.5 rounded-2xl text-[10px] font-black uppercase hover:bg-brand-purple transition-colors">Load</button>
-                                            <button onClick={() => shareProject(ss.id)} className="flex-1 bg-white/5 text-gray-400 py-2.5 rounded-2xl text-[10px] font-black uppercase hover:bg-white/10 transition-colors">Share</button>
-                                            <button onClick={() => deleteSlideshow(ss.id)} className="px-4 bg-red-500/10 text-red-500 py-2.5 rounded-2xl text-[10px] font-black hover:bg-red-500 hover:text-white transition-colors">🗑️</button>
-                                        </div>
+                                        ))}
+                                        {mediaFiles.filter(m => m.type === 'video').length === 0 && <p className="text-xs text-gray-600 italic">No videos in timeline.</p>}
                                     </div>
-                                ))}
+                                </section>
                             </div>
-                        </section>
-
-                        <section className="space-y-6">
-                            <div className="flex justify-between items-center">
-                                <h3 className="text-xs font-black uppercase text-gray-500 tracking-widest">Shared With Me</h3>
-                                <div className="h-px bg-white/5 flex-1 mx-6"></div>
-                            </div>
-                            <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-6">
-                                {sharedSlideshows.map(ss => (
-                                    <div key={ss.id} className="bg-gray-800/20 p-6 rounded-[2.5rem] flex flex-col group border border-white/5 hover:border-brand-purple/40 transition-all">
-                                        <div className="aspect-square bg-gray-900 rounded-[2rem] mb-5 overflow-hidden relative border border-white/10">
-                                            {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform" alt="" />}
-                                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
-                                                <button onClick={() => loadProject(ss)} className="bg-white text-brand-dark px-6 py-2.5 rounded-full font-bold text-xs">View Project</button>
+                        </div>
+                    ) : (
+                        <div className="grid lg:col-span-12 gap-8">
+                             <div className="grid md:grid-cols-12 gap-8">
+                                <div className="md:col-span-4 space-y-6">
+                                    <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5">
+                                        <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Media (Max 20)</h3>
+                                        <div className="grid grid-cols-4 gap-2 mb-4">
+                                            <div className="aspect-square bg-gray-900/50 rounded-xl border-2 border-dashed border-gray-700 flex items-center justify-center relative hover:border-brand-purple cursor-pointer group">
+                                                <input type="file" multiple accept="image/*,video/*" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
+                                                <span className="text-2xl text-gray-500">＋</span>
                                             </div>
+                                            {mediaFiles.map((m, idx) => (
+                                                <div key={m.id} className="aspect-square bg-gray-900 rounded-xl overflow-hidden relative border border-gray-800 group">
+                                                    <img src={m.previewUrl} className="w-full h-full object-cover" alt="" />
+                                                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2 p-1">
+                                                        <div className="flex gap-1">
+                                                            <button onClick={() => moveMedia(idx, 'up')} className="bg-white/20 hover:bg-white/40 text-white p-1.5 rounded-lg text-xs">←</button>
+                                                            <button onClick={() => moveMedia(idx, 'down')} className="bg-white/20 hover:bg-white/40 text-white p-1.5 rounded-lg text-xs">→</button>
+                                                        </div>
+                                                        <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="bg-red-500 hover:bg-red-600 text-white p-1.5 rounded-lg text-xs">✕</button>
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
-                                        <h4 className="font-bold truncate text-sm mb-1 text-gray-200">{ss.name}</h4>
-                                        <p className="text-[10px] text-gray-600 mb-5 font-bold uppercase tracking-widest">Received via Share</p>
-                                        <button onClick={() => loadProject(ss)} className="w-full bg-brand-purple text-white py-2.5 rounded-2xl text-[10px] font-black uppercase shadow-lg">Play Shared Show</button>
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
-                    </div>
+                                        {mediaFiles.length > 0 && (
+                                            <button onClick={generateSmartCaptions} disabled={isProcessingCaptions} className="w-full bg-brand-purple/10 text-brand-purple py-3 rounded-2xl text-[10px] font-black uppercase border border-brand-purple/20 hover:bg-brand-purple hover:text-white transition-all">
+                                                {isProcessingCaptions ? 'Polishing...' : '✨ AI Smart Captions'}
+                                            </button>
+                                        )}
+                                    </section>
+
+                                    <section className="bg-gray-800/30 p-6 rounded-3xl border border-white/5">
+                                        <h3 className="text-xs font-black uppercase mb-4 text-brand-purple tracking-widest">Quick Transitions</h3>
+                                        <div className="mt-6">
+                                            <label className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-3 block">Timing: <span className="text-white">{settings.interval}s</span></label>
+                                            <input 
+                                                type="range" 
+                                                min="1" 
+                                                max="20" 
+                                                step="1"
+                                                value={settings.interval}
+                                                onChange={(e) => setSettings(s => ({ ...s, interval: parseInt(e.target.value) }))}
+                                                className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-brand-purple"
+                                            />
+                                        </div>
+                                    </section>
+                                </div>
+
+                                <div className="md:col-span-8">
+                                    <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5">
+                                        <div className="aspect-video bg-gray-950 rounded-[3rem] relative overflow-hidden border border-white/5 flex items-center justify-center">
+                                            {mediaFiles.length > 0 ? (
+                                                <div className="w-full h-full relative">
+                                                    <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover opacity-20 blur-sm scale-110" alt="" />
+                                                    <div className="absolute inset-0 flex items-center justify-center">
+                                                        <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-24 h-24 bg-brand-purple rounded-full flex items-center justify-center shadow-2xl hover:scale-110 active:scale-95 transition-transform">
+                                                            <svg className="w-10 h-10 text-white ml-2" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="text-center p-12 opacity-20">
+                                                    <div className="w-20 h-20 bg-gray-900 border border-gray-800 rounded-[2rem] flex items-center justify-center mx-auto mb-6 text-3xl">🎬</div>
+                                                    <p className="text-xs font-black uppercase tracking-widest">Workspace Empty</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </section>
+                                </div>
+                             </div>
+                        </div>
+                    )}
                 </main>
             )}
 
-            {/* MODALS & OVERLAYS */}
             {isMusicBrowserOpen && (
                 <div className="fixed inset-0 bg-black/95 z-[500] flex items-center justify-center p-6 backdrop-blur-2xl animate-fade-in">
                     <div className="bg-gray-950 w-full max-w-2xl h-[80vh] rounded-[4rem] border border-white/10 p-12 flex flex-col shadow-2xl">
@@ -743,7 +781,7 @@ const App: React.FC = () => {
                             ) : (
                                 <div className="grid gap-4">
                                     {MOCK_TRACKS.map(track => (
-                                        <div key={track.id} className="bg-gray-900/60 p-5 rounded-[2rem] border border-white/5 flex justify-between items-center hover:border-brand-purple group cursor-pointer transition-all hover:bg-gray-900" onClick={() => { setAudioFiles(p => [...p, { ...track, startTime: 0, previewUrl: '' }]); setIsMusicBrowserOpen(false); }}>
+                                        <div key={track.id} className="bg-gray-900/60 p-5 rounded-[2rem] border border-white/5 flex justify-between items-center hover:border-brand-purple group cursor-pointer transition-all hover:bg-gray-900" onClick={() => { setAudioFiles(p => [...p, { ...track, startTime: elapsedTime }]); setIsMusicBrowserOpen(false); }}>
                                             <div className="flex items-center gap-4">
                                                 <div className="w-12 h-12 bg-gray-800 rounded-2xl flex items-center justify-center text-xl">🎵</div>
                                                 <div className="flex flex-col">
@@ -762,7 +800,7 @@ const App: React.FC = () => {
             )}
 
             {isPlaying && (
-                <div className="fixed inset-0 bg-black z-[600] flex flex-col items-center justify-center cursor-none animate-fade-in">
+                <div className="fixed inset-0 bg-black z-[600] flex flex-col items-center justify-center animate-fade-in">
                     <button onClick={() => setIsPlaying(false)} className="absolute top-10 right-10 text-white/30 hover:text-white p-5 z-[610] text-3xl transition-all cursor-pointer">✕</button>
                     <div className="w-full h-full relative overflow-hidden flex items-center justify-center">
                         {mediaWithTimestamps.map((m, idx) => (
