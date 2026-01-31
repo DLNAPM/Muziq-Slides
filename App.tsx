@@ -425,6 +425,32 @@ const App: React.FC = () => {
 
     const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
 
+    const LandingFeature: React.FC<{
+        id: string;
+        title: string;
+        desc: string;
+        icon: string;
+        reverse?: boolean;
+    }> = ({ id, title, desc, icon, reverse }) => (
+        <section id={id} className={`py-24 px-8 border-t border-white/5 ${reverse ? 'bg-white/[0.02]' : ''}`}>
+            <div className={`max-w-7xl mx-auto flex flex-col md:flex-row items-center gap-16 ${reverse ? 'md:flex-row-reverse' : ''}`}>
+                <div className="md:w-1/2 space-y-8">
+                    <div className="w-16 h-16 bg-brand-purple/20 rounded-2xl flex items-center justify-center text-3xl shadow-xl">{icon}</div>
+                    <h3 className="text-4xl md:text-6xl font-black tracking-tighter text-white">{title}</h3>
+                    <p className="text-xl text-gray-400 leading-relaxed">{desc}</p>
+                </div>
+                <div className="md:w-1/2 bg-gray-900/50 aspect-video rounded-[3rem] border border-white/5 flex items-center justify-center relative overflow-hidden group shadow-2xl">
+                    <div className="absolute inset-0 bg-brand-purple/5 group-hover:bg-brand-purple/10 transition-colors"></div>
+                    <div className="p-12 w-full h-full flex flex-col items-center justify-center text-center space-y-4 opacity-40">
+                        <div className="text-8xl">{icon}</div>
+                        <div className="w-full h-1 bg-white/10 rounded-full"></div>
+                        <div className="w-3/4 h-1 bg-white/10 rounded-full"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
+
     if (isLoading) return <div className="min-h-screen bg-brand-dark flex items-center justify-center"><div className="w-10 h-10 border-4 border-brand-purple border-t-transparent rounded-full animate-spin"></div></div>;
 
     return (
@@ -434,61 +460,122 @@ const App: React.FC = () => {
                     <div className="w-8 h-8 bg-brand-purple rounded-lg flex items-center justify-center font-black text-white shadow-lg shadow-brand-purple/20">M</div>
                     <h1 className="text-xl font-bold tracking-tight text-white uppercase"><span className="text-brand-purple">Muziq</span> Slides</h1>
                 </div>
-                {user && (
-                    <nav className="hidden md:flex items-center gap-8">
-                        <button onClick={() => setViewMode('easy')} className={`text-xs font-black uppercase tracking-widest ${viewMode === 'easy' ? 'text-brand-purple' : 'text-gray-400 hover:text-white'}`}>Builder</button>
-                        <button onClick={() => setViewMode('studio')} className={`text-xs font-black uppercase tracking-widest ${viewMode === 'studio' ? 'text-brand-purple' : 'text-gray-400 hover:text-white'}`}>Studio</button>
-                    </nav>
-                )}
+                <nav className="hidden md:flex items-center gap-8">
+                    <button onClick={() => scrollTo('features')} className="text-xs font-black uppercase tracking-widest text-gray-400 hover:text-white transition-colors">Features</button>
+                    <button onClick={() => { if(!user) handleGoogleLogin(); else setViewMode('studio'); scrollTo('top'); }} className={`text-xs font-black uppercase tracking-widest transition-colors ${user && viewMode === 'studio' ? 'text-brand-purple' : 'text-gray-400 hover:text-white'}`}>Studio</button>
+                    <button onClick={() => scrollTo('support')} className="text-xs font-black uppercase tracking-widest text-gray-400 hover:text-white transition-colors">Support</button>
+                </nav>
                 <div className="flex items-center gap-4">
                     {user ? <button onClick={() => signOut(auth)} className="text-xs bg-white/10 px-4 py-2 rounded-lg font-bold border border-white/5 transition-colors">Logout</button> : <button onClick={handleGoogleLogin} className="text-xs bg-brand-purple px-6 py-2.5 rounded-full font-black uppercase text-white shadow-2xl">Sign In</button>}
                 </div>
             </header>
 
             {!user ? (
-                <main className="animate-fade-in pt-20">
-                    <section className="min-h-screen flex flex-col items-center justify-center text-center px-4 bg-gradient-to-b from-brand-dark to-gray-950">
-                        <div className="space-y-4 mb-12">
+                <main className="animate-fade-in pt-20" id="top">
+                    {/* HERO SECTION */}
+                    <section className="min-h-[90vh] flex flex-col items-center justify-center text-center px-4 bg-gradient-to-b from-brand-dark to-gray-950">
+                        <div className="space-y-6 mb-8">
                             <h2 className="text-7xl md:text-[9rem] font-black tracking-tighter text-white leading-none">Muziq Slides</h2>
-                            <p className="text-xl md:text-2xl font-bold text-brand-purple tracking-widest uppercase opacity-80">Cinematic Memory Collections</p>
+                            <p className="text-2xl md:text-4xl font-black text-brand-purple tracking-widest uppercase opacity-80">Powered by Gemini</p>
                         </div>
-                        <button onClick={handleGoogleLogin} className="bg-white text-brand-dark px-12 py-5 rounded-full font-black uppercase tracking-widest text-sm shadow-2xl hover:scale-105 transition-transform">Get Started Free</button>
+                        <div className="space-y-8 max-w-xl mx-auto mb-16">
+                            <p className="text-gray-400 text-lg leading-relaxed">The premier destination for cinematic memory storytelling. Securely sign in with your Google account below.</p>
+                            <button onClick={handleGoogleLogin} className="w-full bg-white text-brand-dark px-12 py-5 rounded-full font-black uppercase tracking-widest text-sm shadow-2xl hover:scale-105 transition-transform flex items-center justify-center gap-3">
+                                <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                                Continue with Google
+                            </button>
+                        </div>
                     </section>
                     
-                    <section id="features" className="py-32 px-8 max-w-7xl mx-auto grid md:grid-cols-2 gap-16 items-center border-t border-white/5">
-                        <div className="space-y-8">
-                            <span className="text-brand-purple font-black uppercase tracking-[0.3em] text-xs">Features</span>
-                            <h3 className="text-5xl md:text-7xl font-black tracking-tighter text-white">The Cinematic Canvas.</h3>
-                            <p className="text-xl text-gray-400 leading-relaxed">Upload up to 20 media files. Choose from motion styles like Ken Burns, Slide, and Fade to bring your stories to life.</p>
-                        </div>
-                        <div className="bg-gray-800/20 aspect-video rounded-[3rem] border border-white/5 flex items-center justify-center relative group overflow-hidden">
-                             <div className="absolute inset-0 bg-brand-purple/5 group-hover:bg-brand-purple/10 transition-colors"></div>
-                             <div className="grid grid-cols-4 gap-4 p-12 w-full h-full opacity-30">
-                                {[...Array(12)].map((_, i) => <div key={i} className="bg-gray-700 rounded-xl"></div>)}
-                             </div>
-                        </div>
-                    </section>
+                    {/* FEATURE BLOCKS */}
+                    <div id="features">
+                        <LandingFeature 
+                            id="upload-media"
+                            icon="🎬"
+                            title="Upload Media"
+                            desc="Seamlessly upload up to 20 high-resolution images or videos. Our optimized engine handles cinematic scaling and professional-grade rendering automatically."
+                        />
+                        <LandingFeature 
+                            id="background-music"
+                            icon="🎵"
+                            title="Background Music"
+                            desc="Sync your collection with Apple Music or choose from our curated library of background scores and high-fidelity sound effects (SFX)."
+                            reverse
+                        />
+                        <LandingFeature 
+                            id="audio-ducking"
+                            icon="🦆"
+                            title="Smart Audio Ducking"
+                            desc="Our intelligent audio engine automatically balances levels, ducking background music whenever a video segment contains audio or narration."
+                        />
+                        <LandingFeature 
+                            id="ai-captions"
+                            icon="✨"
+                            title="AI Smart Captions"
+                            desc="Powered by Gemini. Our advanced AI analyzes your photos to generate poetic, nostalgic, and short cinematic captions that evoke emotion."
+                            reverse
+                        />
+                        <LandingFeature 
+                            id="sharing"
+                            icon="🤝"
+                            title="Collaborative Sharing"
+                            desc="Invite others to experience your story. Seamlessly share projects via Google Email and collaborate on collections within the cloud vault."
+                        />
+                        <LandingFeature 
+                            id="transitions"
+                            icon="🎞️"
+                            title="Cinematic Transitions"
+                            desc="Choose from industry-standard effects including Ken Burns, Fade-In, and Zoom-In. Every slide feels like a professional film production."
+                            reverse
+                        />
+                        <LandingFeature 
+                            id="studio-feature"
+                            icon="🎚️"
+                            title="Studio for track editing"
+                            desc="Take full mastery in our multi-track Studio. Adjust timing, manage mutes across Visuals, Music, and SFX layers with a precision timeline."
+                        />
+                    </div>
 
-                    <section className="py-32 bg-white/[0.02] border-y border-white/5 px-8">
-                        <div className="max-w-7xl mx-auto flex flex-col md:flex-row-reverse items-center gap-16">
-                            <div className="md:w-1/2 space-y-8">
-                                <span className="text-apple-red font-black uppercase tracking-[0.3em] text-xs">Harmony</span>
-                                <h3 className="text-5xl md:text-7xl font-black tracking-tighter text-white">Apple Music Sync.</h3>
-                                <p className="text-xl text-gray-400 leading-relaxed">Integration for Apple Music. Pair your collection with the perfect soundtrack from your library or our curated tracks.</p>
+                    {/* DETAILED FOOTER */}
+                    <footer id="support" className="bg-gray-950 border-t border-white/5 py-32 px-8">
+                        <div className="max-w-7xl mx-auto">
+                            <div className="grid md:grid-cols-4 gap-16 mb-24">
+                                <div className="col-span-2 space-y-8">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-10 h-10 bg-brand-purple rounded-xl flex items-center justify-center font-black text-white shadow-xl">M</div>
+                                        <h1 className="text-2xl font-bold tracking-tight text-white uppercase"><span className="text-brand-purple">Muziq</span> Slides</h1>
+                                    </div>
+                                    <p className="text-gray-500 text-lg leading-relaxed max-w-sm">Muziq Slides is a premier memory preservation platform. By blending advanced AI capabilities with high-end audio synchronization, we empower users to tell stories that resonate across generations.</p>
+                                </div>
+                                <div className="space-y-6">
+                                    <h4 className="text-xs font-black uppercase tracking-widest text-brand-purple">Policies</h4>
+                                    <ul className="space-y-4 text-sm text-gray-500 uppercase font-black tracking-tight">
+                                        <li className="hover:text-white cursor-pointer transition-colors">Privacy Policy</li>
+                                        <li className="hover:text-white cursor-pointer transition-colors">TERMS OF SERVICE</li>
+                                    </ul>
+                                </div>
+                                <div className="space-y-6">
+                                    <h4 className="text-xs font-black uppercase tracking-widest text-brand-purple">SUPPORT & CONTACT</h4>
+                                    <ul className="space-y-4 text-sm text-gray-500 font-bold">
+                                        <li className="hover:text-white cursor-pointer transition-colors">contact@muziqslides.com</li>
+                                        <li className="hover:text-white cursor-pointer transition-colors">Help Center</li>
+                                        <li className="hover:text-white cursor-pointer transition-colors">Direct Support</li>
+                                    </ul>
+                                </div>
                             </div>
-                            <div className="md:w-1/2 flex justify-center text-[12rem] text-apple-red opacity-10 drop-shadow-2xl"></div>
-                        </div>
-                    </section>
-
-                    <footer className="py-32 px-8 bg-gray-950 text-center">
-                        <div className="max-w-md mx-auto space-y-8 opacity-40">
-                             <div className="text-2xl font-black uppercase tracking-widest">Muziq Slides</div>
-                             <p className="text-sm">Created for cinematic memory sharing. Powered by Gemini.</p>
+                            <div className="pt-12 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-6 text-[10px] text-gray-600 font-black uppercase tracking-widest">
+                                <span>© 2025 Muziq Slides. All rights reserved.</span>
+                                <div className="flex gap-8">
+                                    <span>Built with React</span>
+                                    <span>Firebase</span>
+                                    <span>Google Gemini</span>
+                                </div>
+                            </div>
                         </div>
                     </footer>
                 </main>
             ) : (
-                <main className="p-4 max-w-7xl mx-auto pt-28 animate-fade-in">
+                <main className="p-4 max-w-7xl mx-auto pt-28 animate-fade-in" id="top">
                     <div className="flex flex-col md:flex-row justify-between items-center mb-12 gap-6">
                         <input value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Untitled Project" className="bg-transparent text-5xl md:text-7xl font-black text-white/90 outline-none w-full placeholder:text-white/10 tracking-tighter" />
                         <div className="flex flex-wrap gap-4">
@@ -510,33 +597,38 @@ const App: React.FC = () => {
                                     </div>
                                 </div>
                                 
-                                <div className="bg-gray-900 rounded-[2rem] border border-white/5 p-8 space-y-4 overflow-x-auto relative">
-                                    {/* TRACKS MUTES & LABELS */}
+                                <div className="bg-gray-900 rounded-[2rem] border border-white/5 p-8 space-y-4 overflow-x-auto relative shadow-inner">
                                     <div className="flex items-center gap-4 min-w-[1000px]">
                                         <div className="w-32 flex flex-col gap-2">
-                                            <div className="flex items-center justify-between">
+                                            <div className="flex items-center justify-between bg-black/40 p-2 rounded-lg border border-white/5">
                                                 <span className="text-[10px] font-black text-gray-500">VISUALS</span>
-                                                <button onClick={() => setTrackMutes(m => ({...m, visuals: !m.visuals}))} className={trackMutes.visuals ? 'text-red-500' : 'text-gray-600'}>M</button>
+                                                <button onClick={() => setTrackMutes(m => ({...m, visuals: !m.visuals}))} className={trackMutes.visuals ? 'text-red-500' : 'text-gray-400'}>
+                                                    {trackMutes.visuals ? '🔇' : '🔊'}
+                                                </button>
                                             </div>
-                                            <div className="flex items-center justify-between">
+                                            <div className="flex items-center justify-between bg-black/40 p-2 rounded-lg border border-white/5">
                                                 <span className="text-[10px] font-black text-gray-500">MUSIC</span>
-                                                <button onClick={() => setTrackMutes(m => ({...m, music: !m.music}))} className={trackMutes.music ? 'text-red-500' : 'text-gray-600'}>M</button>
+                                                <button onClick={() => setTrackMutes(m => ({...m, music: !m.music}))} className={trackMutes.music ? 'text-red-500' : 'text-gray-400'}>
+                                                    {trackMutes.music ? '🔇' : '🔊'}
+                                                </button>
                                             </div>
-                                            <div className="flex items-center justify-between">
+                                            <div className="flex items-center justify-between bg-black/40 p-2 rounded-lg border border-white/5">
                                                 <span className="text-[10px] font-black text-gray-500">SFX</span>
-                                                <button onClick={() => setTrackMutes(m => ({...m, sfx: !m.sfx}))} className={trackMutes.sfx ? 'text-red-500' : 'text-gray-600'}>M</button>
+                                                <button onClick={() => setTrackMutes(m => ({...m, sfx: !m.sfx}))} className={trackMutes.sfx ? 'text-red-500' : 'text-gray-400'}>
+                                                    {trackMutes.sfx ? '🔇' : '🔊'}
+                                                </button>
                                             </div>
                                         </div>
-                                        <div className="flex-1 relative h-24 border border-white/5 rounded-xl bg-black/20">
-                                            <div className="absolute top-0 bottom-0 w-0.5 bg-brand-purple z-10 transition-all" style={{left: `${(elapsedTime / Math.max(totalSlideshowDuration, 60)) * 100}%`}}></div>
-                                            <div className="flex h-1/3">
-                                                {mediaWithTimestamps.map(m => <div key={m.id} className="h-full border-r border-white/10 bg-white/5 flex items-center justify-center text-[8px]" style={{width: `${((m.timelineEnd! - m.timelineStart!) / Math.max(totalSlideshowDuration, 60)) * 100}%`}}>🖼️</div>)}
+                                        <div className="flex-1 relative h-24 border border-white/5 rounded-xl bg-black/40 overflow-hidden">
+                                            <div className="absolute top-0 bottom-0 w-0.5 bg-brand-purple z-10 transition-all shadow-[0_0_10px_rgba(109,40,217,0.5)]" style={{left: `${(elapsedTime / Math.max(totalSlideshowDuration, 60)) * 100}%`}}></div>
+                                            <div className="flex h-1/3 border-b border-white/5">
+                                                {mediaWithTimestamps.map(m => <div key={m.id} className={`h-full border-r border-white/10 flex items-center justify-center text-[8px] transition-opacity ${trackMutes.visuals ? 'opacity-20' : 'bg-white/5'}`} style={{width: `${((m.timelineEnd! - m.timelineStart!) / Math.max(totalSlideshowDuration, 60)) * 100}%`}}>🖼️</div>)}
+                                            </div>
+                                            <div className="flex h-1/3 border-b border-white/5">
+                                                {audioFiles.filter(a => a.source !== 'sfx').map(a => <div key={a.id} className={`h-full border-r border-white/10 text-[8px] flex items-center px-1 truncate transition-opacity ${trackMutes.music ? 'opacity-20' : 'bg-brand-purple/20'}`} style={{marginLeft: `${(a.startTime / Math.max(totalSlideshowDuration, 60)) * 100}%`, width: `${(a.duration / Math.max(totalSlideshowDuration, 60)) * 100}%`}}>🎵 {a.name}</div>)}
                                             </div>
                                             <div className="flex h-1/3">
-                                                {audioFiles.filter(a => a.source !== 'sfx').map(a => <div key={a.id} className="h-full bg-brand-purple/20 border-r border-white/10 text-[8px] flex items-center px-1 truncate" style={{marginLeft: `${(a.startTime / Math.max(totalSlideshowDuration, 60)) * 100}%`, width: `${(a.duration / Math.max(totalSlideshowDuration, 60)) * 100}%`}}>🎵 {a.name}</div>)}
-                                            </div>
-                                            <div className="flex h-1/3">
-                                                {audioFiles.filter(a => a.source === 'sfx').map(a => <div key={a.id} className="h-full bg-apple-red/20 border-r border-white/10 text-[8px] flex items-center px-1 truncate" style={{marginLeft: `${(a.startTime / Math.max(totalSlideshowDuration, 60)) * 100}%`, width: `${(a.duration / Math.max(totalSlideshowDuration, 60)) * 100}%`}}>💥 {a.name}</div>)}
+                                                {audioFiles.filter(a => a.source === 'sfx').map(a => <div key={a.id} className={`h-full border-r border-white/10 text-[8px] flex items-center px-1 truncate transition-opacity ${trackMutes.sfx ? 'opacity-20' : 'bg-apple-red/20'}`} style={{marginLeft: `${(a.startTime / Math.max(totalSlideshowDuration, 60)) * 100}%`, width: `${(a.duration / Math.max(totalSlideshowDuration, 60)) * 100}%`}}>💥 {a.name}</div>)}
                                             </div>
                                         </div>
                                     </div>
@@ -555,21 +647,21 @@ const App: React.FC = () => {
                                     </div>
                                 </section>
                                 <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5">
-                                    <h3 className="text-xs font-black uppercase mb-6 text-brand-purple tracking-widest">Saved Projects</h3>
+                                    <h3 className="text-xs font-black uppercase mb-6 text-brand-purple tracking-widest">Library Vault</h3>
                                     <div className="grid grid-cols-2 gap-4">
                                         {ownedSlideshows.map(ss => (
                                             <div key={ss.id} className="bg-gray-950 p-4 rounded-3xl border border-white/5 flex flex-col gap-2 hover:border-brand-purple transition-all cursor-pointer group" onClick={() => loadProject(ss)}>
-                                                <div className="aspect-square bg-gray-900 rounded-2xl overflow-hidden">
-                                                    {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-50" />}
+                                                <div className="aspect-square bg-gray-900 rounded-2xl overflow-hidden relative">
+                                                    {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-50 group-hover:scale-105 transition-transform" />}
                                                 </div>
                                                 <div className="text-[10px] font-bold truncate">{ss.name}</div>
                                                 <div className="flex gap-2">
-                                                    <button onClick={(e) => { e.stopPropagation(); loadProject(ss); }} className="text-[8px] bg-brand-purple/20 px-2 py-1 rounded-full text-brand-purple">EDIT</button>
-                                                    <button onClick={(e) => { e.stopPropagation(); deleteDoc(doc(db, "slideshows", ss.id)); }} className="text-[8px] text-gray-600">DELETE</button>
+                                                    <button onClick={(e) => { e.stopPropagation(); loadProject(ss); }} className="text-[8px] bg-brand-purple/20 px-2 py-1 rounded-full text-brand-purple font-black">EDIT</button>
+                                                    <button onClick={(e) => { e.stopPropagation(); deleteDoc(doc(db, "slideshows", ss.id)); }} className="text-[8px] text-gray-600 font-black hover:text-red-500">DELETE</button>
                                                 </div>
                                             </div>
                                         ))}
-                                        {ownedSlideshows.length === 0 && <div className="col-span-2 py-12 text-center opacity-20 text-[10px] font-black uppercase">No Collections Found</div>}
+                                        {ownedSlideshows.length === 0 && <div className="col-span-2 py-12 text-center opacity-20 text-[10px] font-black uppercase italic">Empty Vault</div>}
                                     </div>
                                 </section>
                             </div>
@@ -588,9 +680,9 @@ const App: React.FC = () => {
                                             <span className="text-2xl text-gray-600">＋</span>
                                         </div>
                                         {mediaFiles.map((m, idx) => (
-                                            <div key={m.id} className="aspect-square bg-gray-900 rounded-xl overflow-hidden relative border border-white/5 group">
-                                                <img src={m.previewUrl} className="w-full h-full object-cover" alt="" />
-                                                <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="absolute top-1 right-1 bg-black/60 text-white w-5 h-5 rounded-full text-[10px] opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                                            <div key={m.id} className="aspect-square bg-gray-900 rounded-xl overflow-hidden relative border border-white/5 group shadow-lg">
+                                                <img src={m.previewUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform" alt="" />
+                                                <button onClick={() => setMediaFiles(p => p.filter(x => x.id !== m.id))} className="absolute top-1 right-1 bg-black/60 text-white w-5 h-5 rounded-full text-[10px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">✕</button>
                                             </div>
                                         ))}
                                     </div>
@@ -615,7 +707,7 @@ const App: React.FC = () => {
                                         {audioFiles.map(a => (
                                             <div key={a.id} className="bg-black/20 p-3 rounded-xl text-[10px] flex justify-between items-center border border-white/5">
                                                 <span className="truncate max-w-[150px] font-bold text-gray-300">{a.name}</span>
-                                                <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-gray-600">✕</button>
+                                                <button onClick={() => setAudioFiles(p => p.filter(x => x.id !== a.id))} className="text-gray-600 hover:text-red-500">✕</button>
                                             </div>
                                         ))}
                                     </div>
@@ -662,9 +754,9 @@ const App: React.FC = () => {
                                     <h3 className="text-xs font-black uppercase text-gray-500 tracking-widest px-4">Cloud Collection Vault</h3>
                                     <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
                                         {ownedSlideshows.map(ss => (
-                                            <div key={ss.id} className="bg-gray-800/20 p-6 rounded-[2.5rem] border border-white/5 hover:border-brand-purple transition-all group shadow-xl" onClick={() => loadProject(ss)}>
+                                            <div key={ss.id} className="bg-gray-800/20 p-6 rounded-[2.5rem] border border-white/5 hover:border-brand-purple transition-all group shadow-xl cursor-pointer" onClick={() => loadProject(ss)}>
                                                 <div className="aspect-square bg-gray-900 rounded-[2rem] mb-5 overflow-hidden relative border border-white/5">
-                                                    {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-40 group-hover:scale-105 transition-transform" alt="" />}
+                                                    {ss.media[0] && <img src={ss.media[0].previewUrl} className="w-full h-full object-cover opacity-40 group-hover:scale-110 transition-transform" alt="" />}
                                                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/60">
                                                         <span className="bg-white text-brand-dark px-6 py-2.5 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl">Edit Collection</span>
                                                     </div>
@@ -680,6 +772,27 @@ const App: React.FC = () => {
                             </div>
                         </div>
                     )}
+
+                    {/* UPDATED LOGGED IN FOOTER */}
+                    <footer id="support" className="bg-gray-950/40 border-t border-white/5 py-24 px-8 mt-32 rounded-[4rem]">
+                         <div className="max-w-7xl mx-auto grid md:grid-cols-3 gap-16 text-center md:text-left">
+                            <div className="space-y-6">
+                                <h4 className="text-xs font-black uppercase tracking-widest text-brand-purple">Summary</h4>
+                                <p className="text-gray-500 text-sm leading-relaxed font-bold">Muziq Slides helps you archive and share your most precious memories in cinematic form. Archive your collections in our cloud vault and share them with the world.</p>
+                            </div>
+                            <div className="space-y-6">
+                                <h4 className="text-xs font-black uppercase tracking-widest text-brand-purple">Policies</h4>
+                                <ul className="text-sm text-gray-500 space-y-3 font-black uppercase tracking-tight">
+                                    <li className="hover:text-white cursor-pointer transition-colors">Privacy Policy</li>
+                                    <li className="hover:text-white cursor-pointer transition-colors">TERMS OF SERVICE</li>
+                                </ul>
+                            </div>
+                            <div className="space-y-6">
+                                <h4 className="text-xs font-black uppercase tracking-widest text-brand-purple">SUPPORT & CONTACT</h4>
+                                <p className="text-sm text-gray-500 font-bold">Direct Assistance: support@muziqslides.com</p>
+                            </div>
+                         </div>
+                    </footer>
                 </main>
             )}
 
@@ -688,23 +801,23 @@ const App: React.FC = () => {
                     <div className="bg-gray-950 w-full max-w-2xl h-[80vh] rounded-[4rem] border border-white/10 p-12 flex flex-col shadow-2xl">
                         <div className="flex justify-between items-center mb-12">
                             <h2 className="text-3xl font-black uppercase tracking-tighter text-white">Apple Music Browser</h2>
-                            <button onClick={() => setIsMusicBrowserOpen(false)} className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center text-gray-500 hover:text-white border border-white/5">✕</button>
+                            <button onClick={() => setIsMusicBrowserOpen(false)} className="w-12 h-12 bg-white/5 rounded-full flex items-center justify-center text-gray-500 hover:text-white border border-white/5 transition-all">✕</button>
                         </div>
                         <div className="flex-1 overflow-y-auto pr-2 space-y-4">
                             {!isSimulationMode ? (
                                 <div className="text-center py-24 space-y-10">
                                     <div className="text-7xl text-apple-red"></div>
-                                    <button onClick={() => setIsSimulationMode(true)} className="bg-apple-red text-white px-16 py-5 rounded-full font-black text-xs uppercase tracking-[0.2em] shadow-[0_15px_40px_rgba(250,36,60,0.3)]">Browse Simulation</button>
+                                    <button onClick={() => setIsSimulationMode(true)} className="bg-apple-red text-white px-16 py-5 rounded-full font-black text-xs uppercase tracking-[0.2em] shadow-[0_15px_40px_rgba(250,36,60,0.3)] hover:scale-105 transition-all">Browse Simulation</button>
                                 </div>
                             ) : (
                                 <div className="grid gap-4">
                                     {MOCK_TRACKS.map(track => (
-                                        <div key={track.id} className="bg-white/5 p-6 rounded-[2.5rem] border border-white/5 flex justify-between items-center hover:bg-white/10 hover:border-brand-purple cursor-pointer transition-all group" onClick={() => { setAudioFiles(p => [...p, { ...track, startTime: elapsedTime }]); setIsMusicBrowserOpen(false); }}>
+                                        <div key={track.id} className="bg-white/5 p-6 rounded-[2.5rem] border border-white/5 flex justify-between items-center hover:bg-white/10 hover:border-brand-purple cursor-pointer transition-all group shadow-lg" onClick={() => { setAudioFiles(p => [...p, { ...track, startTime: elapsedTime }]); setIsMusicBrowserOpen(false); }}>
                                             <div className="flex items-center gap-5">
-                                                <div className="w-14 h-14 bg-gray-900 rounded-2xl flex items-center justify-center text-xl">🎵</div>
+                                                <div className="w-14 h-14 bg-gray-900 rounded-2xl flex items-center justify-center text-xl shadow-inner group-hover:bg-brand-purple/20 transition-colors">🎵</div>
                                                 <div className="flex flex-col">
                                                     <span className="font-black text-white text-base tracking-tight">{track.name}</span>
-                                                    <span className="text-[10px] text-gray-600 uppercase font-black">{Math.floor(track.duration / 60)}:{(track.duration % 60).toString().padStart(2,'0')}</span>
+                                                    <span className="text-[10px] text-gray-600 uppercase font-black tracking-widest">{Math.floor(track.duration / 60)}:{(track.duration % 60).toString().padStart(2,'0')}</span>
                                                 </div>
                                             </div>
                                             <button className="bg-brand-purple/20 text-brand-purple px-8 py-3 rounded-2xl text-[10px] font-black uppercase group-hover:bg-brand-purple group-hover:text-white transition-all">Add Track</button>
