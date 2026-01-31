@@ -283,24 +283,39 @@ const App: React.FC = () => {
                 if (audio) {
                     const relativeTime = elapsedTime - track.startTime;
                     if (relativeTime >= 0 && relativeTime < track.duration) {
+                        const isGlobalMuted = track.source === 'sfx' ? trackMutes.sfx : trackMutes.music;
+                        let targetVolume = isGlobalMuted ? 0 : (track.volume ?? 0.8);
+                        
+                        // Fading Logic
+                        if (track.fadeIn && relativeTime < 2) targetVolume *= (relativeTime / 2);
+                        if (track.fadeOut && relativeTime > track.duration - 2) targetVolume *= ((track.duration - relativeTime) / 2);
+                        
+                        audio.volume = Math.max(0, Math.min(1, targetVolume));
+                        audio.muted = isGlobalMuted;
+
                         if (audio.paused) {
                             audio.currentTime = relativeTime;
                             audio.play().catch(e => console.warn("Audio play blocked:", e));
+                        } else {
+                            // CRITICAL FIX: Only sync if drift is more than 300ms. 
+                            // Setting currentTime every frame causes silence/stuttering.
+                            if (Math.abs(audio.currentTime - relativeTime) > 0.3) {
+                                audio.currentTime = relativeTime;
+                            }
                         }
-                        const isGlobalMuted = track.source === 'sfx' ? trackMutes.sfx : trackMutes.music;
-                        let targetVolume = isGlobalMuted ? 0 : ((track.volume !== undefined) ? track.volume : 0.8);
-                        if (track.fadeIn && relativeTime < 2) targetVolume *= (relativeTime / 2);
-                        if (track.fadeOut && relativeTime > track.duration - 2) targetVolume *= ((track.duration - relativeTime) / 2);
-                        audio.volume = Math.max(0, Math.min(1, targetVolume));
-                        audio.muted = isGlobalMuted;
-                    } else if (!audio.paused) {
-                        audio.pause();
-                        audio.currentTime = 0;
+                    } else {
+                        if (!audio.paused) {
+                            audio.pause();
+                            audio.currentTime = 0;
+                        }
                     }
                 }
             });
         } else {
-            audioPoolRef.current.forEach(audio => { audio.pause(); audio.currentTime = 0; });
+            audioPoolRef.current.forEach(audio => { 
+                audio.pause(); 
+                audio.currentTime = 0; 
+            });
         }
     }, [isPlaying, elapsedTime, audioFiles, trackMutes]);
 
@@ -421,6 +436,15 @@ const App: React.FC = () => {
     const handleGoogleLogin = async () => {
         const provider = new GoogleAuthProvider();
         try { await signInWithPopup(auth, provider); } catch (e: any) { setError("Login failed: " + e.message); }
+    };
+
+    const triggerPlay = () => {
+        // Unlock audio context on user interaction
+        audioPoolRef.current.forEach(audio => {
+            audio.play().then(() => audio.pause()).catch(() => {});
+        });
+        setElapsedTime(0);
+        setIsPlaying(true);
     };
 
     const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
@@ -580,7 +604,7 @@ const App: React.FC = () => {
                         <input value={slideshowName} onChange={(e) => setSlideshowName(e.target.value)} placeholder="Untitled Project" className="bg-transparent text-5xl md:text-7xl font-black text-white/90 outline-none w-full placeholder:text-white/10 tracking-tighter" />
                         <div className="flex flex-wrap gap-4">
                             <button onClick={saveSlideshow} className="bg-white/5 hover:bg-white/10 px-8 py-3 rounded-full text-xs font-bold border border-white/10 transition-colors">Save</button>
-                            <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl hover:scale-105 transition-transform">Preview Collection</button>
+                            <button onClick={triggerPlay} className="bg-brand-purple text-white px-10 py-3 rounded-full text-xs font-bold shadow-2xl hover:scale-105 transition-transform">Preview Collection</button>
                         </div>
                     </div>
 
@@ -590,7 +614,13 @@ const App: React.FC = () => {
                                 <div className="flex justify-between items-center mb-6">
                                     <h3 className="text-xs font-black uppercase text-brand-purple tracking-widest">Multi-Track Editor</h3>
                                     <div className="flex items-center gap-4">
-                                        <button onClick={() => setIsPlaying(!isPlaying)} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isPlaying ? 'bg-brand-purple text-white' : 'bg-white/10 text-white'}`}>
+                                        <button onClick={() => { 
+                                            if(!isPlaying) {
+                                                // Unlocking gesture
+                                                audioPoolRef.current.forEach(a => a.play().then(() => a.pause()).catch(() => {}));
+                                            }
+                                            setIsPlaying(!isPlaying); 
+                                        }} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isPlaying ? 'bg-brand-purple text-white' : 'bg-white/10 text-white'}`}>
                                             {isPlaying ? <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg> : <svg className="w-4 h-4 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>}
                                         </button>
                                         <span className="text-[10px] font-black text-gray-500">{elapsedTime.toFixed(1)}s / {totalSlideshowDuration.toFixed(1)}s</span>
@@ -736,7 +766,7 @@ const App: React.FC = () => {
                                             <div className="w-full h-full relative">
                                                 <img src={mediaFiles[0].previewUrl} className="w-full h-full object-cover opacity-20 blur-xl scale-110" alt="" />
                                                 <div className="absolute inset-0 flex items-center justify-center">
-                                                    <button onClick={() => { setElapsedTime(0); setIsPlaying(true); }} className="w-24 h-24 bg-brand-purple rounded-full flex items-center justify-center shadow-[0_0_50px_rgba(109,40,217,0.4)] hover:scale-110 transition-transform active:scale-95">
+                                                    <button onClick={triggerPlay} className="w-24 h-24 bg-brand-purple rounded-full flex items-center justify-center shadow-[0_0_50px_rgba(109,40,217,0.4)] hover:scale-110 transition-transform active:scale-95">
                                                         <svg className="w-10 h-10 text-white ml-2" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                                                     </button>
                                                 </div>
@@ -812,7 +842,13 @@ const App: React.FC = () => {
                             ) : (
                                 <div className="grid gap-4">
                                     {MOCK_TRACKS.map(track => (
-                                        <div key={track.id} className="bg-white/5 p-6 rounded-[2.5rem] border border-white/5 flex justify-between items-center hover:bg-white/10 hover:border-brand-purple cursor-pointer transition-all group shadow-lg" onClick={() => { setAudioFiles(p => [...p, { ...track, startTime: elapsedTime }]); setIsMusicBrowserOpen(false); }}>
+                                        <div key={track.id} className="bg-white/5 p-6 rounded-[2.5rem] border border-white/5 flex justify-between items-center hover:bg-white/10 hover:border-brand-purple cursor-pointer transition-all group shadow-lg" onClick={() => { 
+                                            // Pre-unlock this specific track
+                                            const a = new Audio(track.previewUrl);
+                                            a.play().then(() => a.pause()).catch(() => {});
+                                            setAudioFiles(p => [...p, { ...track, startTime: elapsedTime }]); 
+                                            setIsMusicBrowserOpen(false); 
+                                        }}>
                                             <div className="flex items-center gap-5">
                                                 <div className="w-14 h-14 bg-gray-900 rounded-2xl flex items-center justify-center text-xl shadow-inner group-hover:bg-brand-purple/20 transition-colors">🎵</div>
                                                 <div className="flex flex-col">
