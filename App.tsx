@@ -47,7 +47,8 @@ const compressImage = (base64Str: string): Promise<string> => {
         img.src = `data:image/jpeg;base64,${base64Str}`;
         img.onload = () => {
             const canvas = document.createElement('canvas');
-            const MAX_WIDTH = 800; 
+            // Reduced width and quality to fit Firestore 1MB limit for 20 images
+            const MAX_WIDTH = 600; 
             let width = img.width;
             let height = img.height;
             if (width > MAX_WIDTH) {
@@ -58,7 +59,8 @@ const compressImage = (base64Str: string): Promise<string> => {
             canvas.height = height;
             const ctx = canvas.getContext('2d');
             ctx?.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL('image/jpeg', 0.5).split(',')[1]);
+            // Lower quality (0.3) is necessary to stay under 1MB for a 20-image document
+            resolve(canvas.toDataURL('image/jpeg', 0.3).split(',')[1]);
         };
         img.onerror = () => resolve(base64Str);
     });
@@ -413,14 +415,22 @@ const App: React.FC = () => {
 
     const saveSlideshow = async () => {
         if (!user || mediaFiles.length === 0) { setError("Add content first."); return; }
+        
+        // Ensure previewUrl is stripped to keep payload small
+        const cleanedMedia = mediaFiles.map(({ previewUrl, ...rest }) => ({ 
+            ...rest, 
+            previewUrl: '' 
+        }));
+
         const projectData = {
             userId: user.uid,
             name: slideshowName || `Slideshow ${new Date().toLocaleDateString()}`,
-            media: mediaFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), 
+            media: cleanedMedia,
             audio: audioFiles.map(({ previewUrl, ...rest }) => ({ ...rest, previewUrl: '' })), 
             settings: settings,
             timestamp: serverTimestamp()
         };
+
         try {
             if (currentProjectId) { 
                 await updateDoc(doc(db, "slideshows", currentProjectId), projectData); 
@@ -430,7 +440,13 @@ const App: React.FC = () => {
                 setCurrentProjectId(docRef.id); 
                 alert("Slideshow saved to cloud!"); 
             }
-        } catch (e: any) { setError("Save Error: " + e.message); }
+        } catch (e: any) { 
+            if (e.message.includes('maximum allowed size')) {
+                setError("Project too large for cloud storage. Try removing some photos.");
+            } else {
+                setError("Save Error: " + e.message); 
+            }
+        }
     };
 
     const handleGoogleLogin = async () => {
