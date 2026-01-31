@@ -626,6 +626,12 @@ const App: React.FC = () => {
 
                     {viewMode === 'studio' ? (
                         <div className="space-y-8 animate-fade-in">
+                            <div className="flex items-center gap-4 mb-2">
+                                <button onClick={() => setViewMode('easy')} className="bg-white/5 hover:bg-white/10 px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10 transition-all flex items-center gap-2 group">
+                                    <svg className="w-3 h-3 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7"/></svg>
+                                    Exit Studio
+                                </button>
+                            </div>
                             <section className="bg-gray-800/30 p-8 rounded-[3.5rem] border border-white/5 shadow-2xl">
                                 <div className="flex justify-between items-center mb-6">
                                     <h3 className="text-xs font-black uppercase text-brand-purple tracking-widest">Multi-Track Editor</h3>
